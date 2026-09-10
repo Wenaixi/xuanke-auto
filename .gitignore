@@ -1,0 +1,14 @@
+# Go
+backend/xuanke.exe
+backend/*.exe
+backend/data/
+*.db
+
+# Node
+web/node_modules/
+web/dist/
+backend/web/dist/
+
+# 系统与缓存
+__pycache__/
+.omc/

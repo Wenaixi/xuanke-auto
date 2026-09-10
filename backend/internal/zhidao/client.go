@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"sync"
@@ -20,14 +21,15 @@ type VisionConfig struct {
 }
 
 // Client 至道平台 API 客户端。
-// 所有请求在 URL 后附加 idToken 参数；token 失效（code=-1）时用保存的账密自动重登。
+// 所有请求在 URL 后附加 idToken 参数；token 失效（code=-1）时用保存的账密自动重登（最多一次）。
 type Client struct {
 	baseURL   string
 	http      *http.Client
 	account   string // 已保存账密（用于过期自动重登）
 	password  string
-	mu        sync.Mutex // 保护 token 读写
+	mu        sync.Mutex // 保护 token/cookie 读写
 	token     string
+	cookies   map[string]string // 附加 Cookie（access_limit_cookie 等）
 	visionCfg VisionConfig
 }
 
@@ -38,17 +40,29 @@ func New(baseURL string, visionCfg VisionConfig) *Client {
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		cookies:   make(map[string]string),
 		visionCfg: visionCfg,
 	}
 }
 
 // SetCredentials 设置保存的账密与 token（重启恢复时调用）。
+// token 即 zd_edu_cookie 的值，同步维护 cookie。
 func (c *Client) SetCredentials(account, password, token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.account = account
 	c.password = password
 	c.token = token
+	c.cookies["zd_edu_cookie"] = token
+}
+
+// SetCookies 设置附加 Cookie（如 access_limit_cookie），用于复用现有会话。
+func (c *Client) SetCookies(cookies map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, v := range cookies {
+		c.cookies[k] = v
+	}
 }
 
 // Token 返回当前 token。
@@ -70,9 +84,10 @@ type YearTerm struct {
 // 成功后将 token 写入客户端并返回。
 func (c *Client) Login(account, password string) (string, error) {
 	var lastMsg string
+	jar, _ := cookiejar.New(nil)
 	for attempt := 1; attempt <= 10; attempt++ {
 		// 每个 attempt 使用独立会话：登录页 Cookie 与验证码绑定
-		sess := &http.Client{Timeout: 15 * time.Second}
+		sess := &http.Client{Timeout: 15 * time.Second, Jar: jar}
 		ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 
 		// 1. 初始化会话
@@ -157,6 +172,7 @@ func (c *Client) Login(account, password string) (string, error) {
 			c.token = j.Token
 			c.account = account
 			c.password = password
+			c.cookies["zd_edu_cookie"] = j.Token
 			c.mu.Unlock()
 			return j.Token, nil
 		}
@@ -166,57 +182,73 @@ func (c *Client) Login(account, password string) (string, error) {
 	return "", fmt.Errorf("登录失败：验证码识别 10 次均未通过（%s）", lastMsg)
 }
 
-// doRequest 统一请求入口：转发到至道，若响应 code=-1 则自动重登一次后重试。
+// ErrUnauthorized token 失效（code=-1）错误。
+var ErrUnauthorized = fmt.Errorf("未登录，token 已失效")
+
+// doRequest 统一请求入口：转发到至道并附加 idToken 与 Cookie。
+// 不做自动重登：code=-1（token 失效）时返回 ErrUnauthorized，由调用方决定处理。
 func (c *Client) doRequest(method, path string, body []byte, contentType string) ([]byte, error) {
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		c.mu.Lock()
-		tok := c.token
-		c.mu.Unlock()
-		u := c.baseURL + path + "?idToken=" + url.QueryEscape(tok)
-		req, err := http.NewRequest(method, u, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
-		req.Header.Set("X-Requested-With", "XMLHttpRequest")
-		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-		req.Header.Set("Origin", c.baseURL)
-		req.Header.Set("Referer", c.baseURL+"/admin.html")
-
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		var j struct {
-			Code int `json:"code"`
-		}
-		if err := json.Unmarshal(data, &j); err != nil {
-			return nil, fmt.Errorf("响应解析失败: %w", err)
-		}
-		if j.Code != -1 {
-			return data, nil
-		}
-		// code=-1：token 失效，用保存账密自动重登
-		c.mu.Lock()
-		acct, pwd := c.account, c.password
-		c.mu.Unlock()
-		if acct == "" {
-			return data, fmt.Errorf("未登录且无保存账密（%s）", extractMsg(data))
-		}
-		if _, err := c.Login(acct, pwd); err != nil {
-			return nil, fmt.Errorf("自动重登失败: %w", err)
-		}
-		lastErr = fmt.Errorf("token 失效已重登（%s）", extractMsg(data))
+	c.mu.Lock()
+	tok := c.token
+	cookies := make(map[string]string, len(c.cookies))
+	for k, v := range c.cookies {
+		cookies[k] = v
 	}
-	return nil, lastErr
+	c.mu.Unlock()
+	u := c.baseURL + path + "?idToken=" + url.QueryEscape(tok)
+	req, err := http.NewRequest(method, u, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if len(cookies) > 0 {
+		parts := make([]string, 0, len(cookies))
+		for k, v := range cookies {
+			parts = append(parts, k+"="+v)
+		}
+		req.Header.Set("Cookie", strings.Join(parts, "; "))
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Referer", c.baseURL+"/admin.html")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	var j struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal(data, &j); err != nil {
+		return nil, fmt.Errorf("响应解析失败: %w", err)
+	}
+	if j.Code == -1 {
+		return data, fmt.Errorf("%w（%s）", ErrUnauthorized, extractMsg(data))
+	}
+	return data, nil
+}
+
+// ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。
+// 最多重登一次：返回 (是否已重登, 错误)。
+func (c *Client) ReloginIfNeeded() (bool, error) {
+	c.mu.Lock()
+	acct, pwd := c.account, c.password
+	c.mu.Unlock()
+	if acct == "" {
+		return false, fmt.Errorf("未登录且无保存账密")
+	}
+	if _, err := c.Login(acct, pwd); err != nil {
+		return false, fmt.Errorf("自动重登失败: %w", err)
+	}
+	return true, nil
 }
 
 func extractMsg(data []byte) string {

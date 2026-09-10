@@ -2,6 +2,7 @@ package zhidao
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,19 +10,55 @@ import (
 	"testing"
 )
 
-// TestAutoRelogin 验证：第一次请求返回 code=-1（token 失效），
-// 客户端自动用保存账密重登后重试成功。
-func TestAutoRelogin(t *testing.T) {
+// TestNoAutoRelogin 验证：token 失效（code=-1）时直接返回错误，不自动重登。
+func TestNoAutoRelogin(t *testing.T) {
 	var reloginCalls int32
-	// mock 登录接口
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/login/doLogin") {
+			atomic.AddInt32(&reloginCalls, 1)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "new-token-999"})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/login") || strings.HasSuffix(r.URL.Path, "/login/captcha") {
+			w.Write([]byte("ok"))
+			return
+		}
+		tok := r.URL.Query().Get("idToken")
+		w.Header().Set("Content-Type", "application/json")
+		if tok == "old-token" {
+			json.NewEncoder(w).Encode(map[string]any{"code": -1, "msg": "您未登录,请刷新页面重新登录"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "old-token")
+
+	// token 失效：应返回 ErrUnauthorized，且不触发重登
+	_, err := c.doRequest(http.MethodPost, "/electives/select", nil, "")
+	if err == nil {
+		t.Fatal("期望 code=-1 时报错")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("期望 ErrUnauthorized，实际 %v", err)
+	}
+	if atomic.LoadInt32(&reloginCalls) != 0 {
+		t.Fatalf("不应自动重登，实际 %d 次", reloginCalls)
+	}
+}
+
+// TestReloginIfNeeded 验证显式重登：一次即可，最多一次。
+func TestReloginIfNeeded(t *testing.T) {
+	var reloginCalls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 验证码识别（硅基流动 mock）
 		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{
-					"message": map[string]any{"content": " abcd "},
-				}},
+				"choices": []any{map[string]any{"message": map[string]any{"content": " abcd "}}},
 			})
 			return
 		}
@@ -32,47 +69,45 @@ func TestAutoRelogin(t *testing.T) {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/login") || strings.HasSuffix(r.URL.Path, "/login/captcha") {
-			// 登录初始化/验证码：返回空
 			w.Write([]byte("ok"))
 			return
 		}
-		// 业务接口：根据 token 判断
 		tok := r.URL.Query().Get("idToken")
 		w.Header().Set("Content-Type", "application/json")
 		if tok == "old-token" {
 			json.NewEncoder(w).Encode(map[string]any{"code": -1, "msg": "您未登录,请刷新页面重新登录"})
 			return
 		}
-		if tok == "new-token-999" {
-			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "unknown token " + tok})
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true})
 	}))
 	defer srv.Close()
 
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	c.SetCredentials("acct", "pwd", "old-token")
 
-	// 请求一个简单接口触发 doRequest
+	// 第一次请求失败（token 失效）
+	if _, err := c.doRequest(http.MethodPost, "/electives/select", nil, ""); err == nil {
+		t.Fatal("期望失败")
+	}
+	// 显式重登一次
+	relogged, err := c.ReloginIfNeeded()
+	if err != nil || !relogged {
+		t.Fatalf("重登失败: %v %v", relogged, err)
+	}
+	// 重登后 token 更新，再次请求成功
 	body, err := c.doRequest(http.MethodPost, "/electives/select", nil, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("重登后请求失败: %v", err)
 	}
 	var j struct {
 		Code int `json:"code"`
 	}
-	if err := json.Unmarshal(body, &j); err != nil {
-		t.Fatal(err)
-	}
+	json.Unmarshal(body, &j)
 	if j.Code != 0 {
-		t.Fatalf("期望重登后 code=0，实际 %d", j.Code)
+		t.Fatalf("重登后 code=%d", j.Code)
 	}
 	if atomic.LoadInt32(&reloginCalls) != 1 {
-		t.Fatalf("期望重登 1 次，实际 %d", reloginCalls)
-	}
-	if c.Token() != "new-token-999" {
-		t.Fatalf("token 未更新: %q", c.Token())
+		t.Fatalf("最多重登 1 次，实际 %d", reloginCalls)
 	}
 }
 

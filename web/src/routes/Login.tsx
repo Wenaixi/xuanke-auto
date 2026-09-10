@@ -1,33 +1,33 @@
-import { useState } from 'react'
-import { api } from '../api/client'
-import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
+import { useState } from "react"
+import { api } from "../api/client"
+import { Button } from "../components/ui/Button"
+import { Input } from "../components/ui/Input"
 
 interface Props {
   onLogin: (token: string) => void
 }
 
 export default function Login({ onLogin }: Props) {
-  const [account, setAccount] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [account, setAccount] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
   const submit = async () => {
     if (!account || !password) {
-      setError('请输入账号与密码')
+      setError("请输入账号与密码")
       return
     }
     setLoading(true)
-    setError('')
+    setError("")
     try {
-      const data = await api<{ token: string }>('/login', {
-        method: 'POST',
+      const data = await api<{ token: string }>("/login", {
+        method: "POST",
         body: JSON.stringify({ account, password }),
       })
       onLogin(data.token)
     } catch (e: any) {
-      setError(e.message || '登录失败')
+      setError(e.message || "登录失败")
     } finally {
       setLoading(false)
     }
@@ -41,7 +41,10 @@ export default function Login({ onLogin }: Props) {
         submit()
       }}
     >
-      <h1 className="text-2xl tracking-[0.3em] mb-4">至道选课自动化</h1>
+      <h1 className="text-2xl tracking-[0.3em] mb-2">至道选课自动化</h1>
+      <p className="text-xs text-[var(--fg-dim)] mb-4">
+        账密登录后自动识别验证码，token 持久化，重启无需重复登录
+      </p>
       <Input
         placeholder="账号"
         value={account}
@@ -57,7 +60,7 @@ export default function Login({ onLogin }: Props) {
       />
       {error && <p className="text-[var(--danger)] text-sm">{error}</p>}
       <Button type="submit" disabled={loading}>
-        {loading ? '登录中…' : '登录'}
+        {loading ? "登录中（识别验证码可能需要几秒）…" : "登录"}
       </Button>
     </form>
   )

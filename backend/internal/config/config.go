@@ -12,6 +12,9 @@ type Config struct {
 	SFBaseURL string
 	SFAPIKey  string
 	SFModel   string
+	// 复用已有会话：环境变量 XUANKE_TOKEN 与 XUANKE_COOKIE（"k=v; k2=v2" 格式）
+	Token   string
+	Cookies string
 }
 
 // Load 从环境变量与常量组装配置。
@@ -24,6 +27,8 @@ func Load() Config {
 		SFBaseURL: "https://api.siliconflow.cn/v1",
 		SFAPIKey:  os.Getenv("SF_API_KEY"),
 		SFModel:   "Qwen/Qwen3-VL-30B-A3B-Instruct",
+		Token:     os.Getenv("XUANKE_TOKEN"),
+		Cookies:   os.Getenv("XUANKE_COOKIE"),
 	}
 }
 

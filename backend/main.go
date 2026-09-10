@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"xuanke-auto/backend/internal/api"
@@ -32,12 +33,20 @@ func main() {
 		Model:   cfg.SFModel,
 	})
 
-	// 重启恢复：账密/token/目标/已成功课程
-	if acct, pwd, token, err := st.LoadAccount(); err == nil && acct != "" {
-		client.SetCredentials(acct, pwd, token)
-		log.Printf("[main] 已恢复保存的账号 %s（token %s）", acct, tokenShort(token))
-	} else if err != nil {
-		log.Printf("[main] 读取账号失败: %v", err)
+	// 已有会话注入：环境变量 XUANKE_TOKEN 优先（复用现有 token 无需重新登录）
+	if cfg.Token != "" {
+		client.SetCredentials("", "", cfg.Token)
+		client.SetCookies(parseCookies(cfg.Cookies))
+		log.Printf("[main] 已使用环境变量注入会话 token %s", tokenShort(cfg.Token))
+	}
+	// 重启恢复：账密/token/目标/已成功课程（环境变量未注入时）
+	if cfg.Token == "" {
+		if acct, pwd, token, err := st.LoadAccount(); err == nil && acct != "" {
+			client.SetCredentials(acct, pwd, token)
+			log.Printf("[main] 已恢复保存的账号 %s（token %s）", acct, tokenShort(token))
+		} else if err != nil {
+			log.Printf("[main] 读取账号失败: %v", err)
+		}
 	}
 	targets, err := st.LoadTargets()
 	if err != nil {
@@ -68,6 +77,22 @@ func main() {
 	if err := http.ListenAndServe(addr, apiHandler); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}
+}
+
+// parseCookies 解析 "k=v; k2=v2" 格式的 Cookie 字符串。
+func parseCookies(s string) map[string]string {
+	out := map[string]string{}
+	for _, part := range strings.Split(s, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) == 2 {
+			out[kv[0]] = kv[1]
+		}
+	}
+	return out
 }
 
 func tokenShort(t string) string {

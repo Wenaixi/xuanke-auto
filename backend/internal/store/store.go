@@ -27,6 +27,29 @@ func (s *Store) SaveAccount(acct, pwd, token string) error {
 	return err
 }
 
+// SaveTokenOnly 保存纯 token 会话（无账密，环境变量注入路径）。
+// 先清空旧记录再插入，保证唯一一行。
+func (s *Store) SaveTokenOnly(token string) error {
+	if token == "" {
+		return nil
+	}
+	if _, err := s.db.Exec("DELETE FROM account"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec("INSERT INTO account (account, password, id_token) VALUES ('', '', ?)", token)
+	return err
+}
+
+// UpdateToken 更新已保存记录的 token（环境变量注入的会话持久化）。
+// 无已有记录时无操作（不创建空账密记录）。
+func (s *Store) UpdateToken(token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := s.db.Exec("UPDATE account SET id_token = ? WHERE id = (SELECT id FROM account ORDER BY id DESC LIMIT 1)", token)
+	return err
+}
+
 // LoadAccount 读取保存的账密与 token。
 func (s *Store) LoadAccount() (acct, pwd, token string, err error) {
 	err = s.db.QueryRow("SELECT account, password, COALESCE(id_token,'') FROM account ORDER BY id DESC LIMIT 1").

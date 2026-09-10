@@ -40,6 +40,32 @@ func TestAccountRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveTokenOnly(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.SaveTokenOnly("tok-env"); err != nil {
+		t.Fatal(err)
+	}
+	acct, pwd, token, err := s.LoadAccount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "tok-env" {
+		t.Fatalf("token 未保存: %q", token)
+	}
+	// 纯 token 会话：账密为空但 token 存在
+	if acct != "" || pwd != "" {
+		t.Fatalf("纯 token 会话不应有账密: %q %q", acct, pwd)
+	}
+	// 覆盖保存
+	if err := s.SaveTokenOnly("tok-env-2"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, token, _ = s.LoadAccount()
+	if token != "tok-env-2" {
+		t.Fatalf("覆盖保存失败: %q", token)
+	}
+}
+
 func TestTargetsRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	targets := []scheduler.Target{

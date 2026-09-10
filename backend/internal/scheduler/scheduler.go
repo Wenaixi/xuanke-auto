@@ -65,7 +65,7 @@ type Scheduler struct {
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
 func New(client Client, store Store, openTime time.Time, interval time.Duration) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Scheduler{
+	s := &Scheduler{
 		client:   client,
 		store:    store,
 		openTime: openTime,
@@ -75,6 +75,8 @@ func New(client Client, store Store, openTime time.Time, interval time.Duration)
 		ctx:      ctx,
 		cancel:   cancel,
 	}
+	s.state.OpenTime = openTime
+	return s
 }
 
 // SetTargets 替换目标课程并重建状态。

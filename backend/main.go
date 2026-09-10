@@ -37,13 +37,21 @@ func main() {
 	if cfg.Token != "" {
 		client.SetCredentials("", "", cfg.Token)
 		client.SetCookies(parseCookies(cfg.Cookies))
+		if err := st.SaveTokenOnly(cfg.Token); err != nil {
+			log.Printf("[main] 持久化注入 token 失败: %v", err)
+		}
 		log.Printf("[main] 已使用环境变量注入会话 token %s", tokenShort(cfg.Token))
 	}
 	// 重启恢复：账密/token/目标/已成功课程（环境变量未注入时）
 	if cfg.Token == "" {
-		if acct, pwd, token, err := st.LoadAccount(); err == nil && acct != "" {
+		if acct, pwd, token, err := st.LoadAccount(); err == nil && token != "" {
 			client.SetCredentials(acct, pwd, token)
-			log.Printf("[main] 已恢复保存的账号 %s（token %s）", acct, tokenShort(token))
+			// access_limit_cookie 为会话级 Cookie，不敏感，使用固定默认值
+			client.SetCookies(map[string]string{
+				"access_limit_cookie": "***REMOVED***",
+				"zd_edu_cookie":       token,
+			})
+			log.Printf("[main] 已恢复保存的会话 token %s", tokenShort(token))
 		} else if err != nil {
 			log.Printf("[main] 读取账号失败: %v", err)
 		}

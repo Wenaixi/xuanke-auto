@@ -1,0 +1,446 @@
+package zhidao
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+)
+
+// VisionConfig 硅基流动 Vision 验证码识别配置。
+type VisionConfig struct {
+	BaseURL string
+	APIKey  string
+	Model   string
+}
+
+// Client 至道平台 API 客户端。
+// 所有请求在 URL 后附加 idToken 参数；token 失效（code=-1）时用保存的账密自动重登。
+type Client struct {
+	baseURL   string
+	http      *http.Client
+	account   string // 已保存账密（用于过期自动重登）
+	password  string
+	mu        sync.Mutex // 保护 token 读写
+	token     string
+	visionCfg VisionConfig
+}
+
+// New 创建客户端。openTime 仅用于初始化默认窗口。
+func New(baseURL string, visionCfg VisionConfig) *Client {
+	return &Client{
+		baseURL: baseURL,
+		http: &http.Client{
+			Timeout: 15 * time.Second,
+		},
+		visionCfg: visionCfg,
+	}
+}
+
+// SetCredentials 设置保存的账密与 token（重启恢复时调用）。
+func (c *Client) SetCredentials(account, password, token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.account = account
+	c.password = password
+	c.token = token
+}
+
+// Token 返回当前 token。
+func (c *Client) Token() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.token
+}
+
+// YearTerm 学年学期。
+type YearTerm struct {
+	SchoolYear int  `json:"schoolYear"`
+	SchoolTerm int  `json:"schoolTerm"`
+	Selected   bool `json:"selected"`
+}
+
+// Login 完整登录链路：GET /login 初始化会话，GET /login/captcha 取验证码，
+// Vision 识别后 POST /login/doLogin。验证码识别失败自动刷新重试，最多 10 次。
+// 成功后将 token 写入客户端并返回。
+func (c *Client) Login(account, password string) (string, error) {
+	var lastMsg string
+	for attempt := 1; attempt <= 10; attempt++ {
+		// 每个 attempt 使用独立会话：登录页 Cookie 与验证码绑定
+		sess := &http.Client{Timeout: 15 * time.Second}
+		ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+
+		// 1. 初始化会话
+		req, err := http.NewRequest(http.MethodGet, c.baseURL+"/login", nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		resp, err := sess.Do(req)
+		if err != nil {
+			return "", err
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		// 2. 取验证码图片
+		capReq, err := http.NewRequest(http.MethodGet,
+			fmt.Sprintf("%s/login/captcha?v=%d", c.baseURL, time.Now().UnixMilli()), nil)
+		if err != nil {
+			return "", err
+		}
+		capReq.Header.Set("User-Agent", ua)
+		capReq.Header.Set("Referer", c.baseURL+"/login")
+		capResp, err := sess.Do(capReq)
+		if err != nil {
+			return "", err
+		}
+		img, err := io.ReadAll(capResp.Body)
+		capResp.Body.Close()
+		if err != nil {
+			return "", err
+		}
+
+		// 3. Vision 识别
+		captchaText, err := recognizeCaptcha(c.visionCfg, img)
+		if err != nil {
+			lastMsg = fmt.Sprintf("第%d次验证码识别失败: %v", attempt, err)
+			continue
+		}
+
+		// 4. RSA 加密账密
+		identification, err := encryptIdentification(account, password)
+		if err != nil {
+			return "", err
+		}
+
+		// 5. 提交登录
+		form := url.Values{}
+		form.Set("captcha", captchaText)
+		form.Set("identification", identification)
+		form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
+		form.Set("priorityId", "")
+		loginReq, err := http.NewRequest(http.MethodPost, c.baseURL+"/login/doLogin",
+			strings.NewReader(form.Encode()))
+		if err != nil {
+			return "", err
+		}
+		loginReq.Header.Set("User-Agent", ua)
+		loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		loginReq.Header.Set("X-Requested-With", "XMLHttpRequest")
+		loginReq.Header.Set("Referer", c.baseURL+"/login")
+		loginResp, err := sess.Do(loginReq)
+		if err != nil {
+			return "", err
+		}
+		body, _ := io.ReadAll(loginResp.Body)
+		loginResp.Body.Close()
+
+		var j struct {
+			Code  int    `json:"code"`
+			IsOk  bool   `json:"isOk"`
+			Token string `json:"token"`
+			Msg   string `json:"msg"`
+		}
+		if err := json.Unmarshal(body, &j); err != nil {
+			lastMsg = fmt.Sprintf("第%d次登录响应解析失败: %v", attempt, err)
+			continue
+		}
+		if j.IsOk && j.Token != "" {
+			c.mu.Lock()
+			c.token = j.Token
+			c.account = account
+			c.password = password
+			c.mu.Unlock()
+			return j.Token, nil
+		}
+		lastMsg = fmt.Sprintf("第%d次登录失败: %s", attempt, j.Msg)
+		time.Sleep(800 * time.Millisecond)
+	}
+	return "", fmt.Errorf("登录失败：验证码识别 10 次均未通过（%s）", lastMsg)
+}
+
+// doRequest 统一请求入口：转发到至道，若响应 code=-1 则自动重登一次后重试。
+func (c *Client) doRequest(method, path string, body []byte, contentType string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		c.mu.Lock()
+		tok := c.token
+		c.mu.Unlock()
+		u := c.baseURL + path + "?idToken=" + url.QueryEscape(tok)
+		req, err := http.NewRequest(method, u, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+		req.Header.Set("Origin", c.baseURL)
+		req.Header.Set("Referer", c.baseURL+"/admin.html")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var j struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal(data, &j); err != nil {
+			return nil, fmt.Errorf("响应解析失败: %w", err)
+		}
+		if j.Code != -1 {
+			return data, nil
+		}
+		// code=-1：token 失效，用保存账密自动重登
+		c.mu.Lock()
+		acct, pwd := c.account, c.password
+		c.mu.Unlock()
+		if acct == "" {
+			return data, fmt.Errorf("未登录且无保存账密（%s）", extractMsg(data))
+		}
+		if _, err := c.Login(acct, pwd); err != nil {
+			return nil, fmt.Errorf("自动重登失败: %w", err)
+		}
+		lastErr = fmt.Errorf("token 失效已重登（%s）", extractMsg(data))
+	}
+	return nil, lastErr
+}
+
+func extractMsg(data []byte) string {
+	var j struct {
+		Msg string `json:"msg"`
+	}
+	json.Unmarshal(data, &j)
+	return j.Msg
+}
+
+// YearTerms 获取可选学年学期列表。
+func (c *Client) YearTerms() ([]YearTerm, error) {
+	body, err := c.doRequest(http.MethodPost, "/electives/select", nil, "")
+	if err != nil {
+		return nil, err
+	}
+	var j struct {
+		Code              int        `json:"code"`
+		CurrentYearTermList []YearTerm `json:"currentYearTermList"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return nil, err
+	}
+	if j.Code != 0 {
+		return nil, fmt.Errorf("学期列表错误 code=%d", j.Code)
+	}
+	return j.CurrentYearTermList, nil
+}
+
+// Class 课程/选修班。
+type Class struct {
+	ID              int    `json:"id"`
+	PublishID       int    `json:"publish_id"`
+	CourseName      string `json:"course_name"`
+	ClassName       string `json:"class_name"`
+	TeacherNameList string `json:"teacher_name_list"`
+	ClassroomName   string `json:"class_room_name"`
+	LessonsDate     string `json:"lessons_date"`
+	SelectedCount   int    `json:"selected_count"`
+	AuditedCount    int    `json:"audited_count"`
+	MaxCount        int    `json:"max_count"`
+	PlanCount       int    `json:"plan_count"`
+	CanSelect       bool   `json:"can_select"`
+	BtnType         int    `json:"btn_type"`
+	BtnText         string `json:"btn_text"`
+	Title           string `json:"title"`
+	ApplyDate       string `json:"apply_date"`
+}
+
+// Publish 选课发布。
+type Publish struct {
+	PublishID   int     `json:"publish_id"`
+	PublishName string  `json:"publish_name"`
+	BeginDate   string  `json:"begin_date"`
+	InDateRange bool    `json:"in_date_range"`
+	CanSelect   int     `json:"can_select"`
+	HasSelected int     `json:"has_selected"`
+	GroupCount  int     `json:"group_count"`
+	TotalCount  int     `json:"total_count"`
+	Classes     []Class `json:"classes"`
+}
+
+// ElectivesData 课程数据（含开放时间戳）。
+type ElectivesData struct {
+	BeginTimes []int64   `json:"begin_times"`
+	Publishes  []Publish `json:"publishes"`
+}
+
+// FindElectives 查询当前学期课程数据。
+func (c *Client) FindElectives() (*ElectivesData, error) {
+	// 先取学期列表确定当前学年学期
+	terms, err := c.YearTerms()
+	if err != nil {
+		return nil, err
+	}
+	var sy, st int
+	for _, t := range terms {
+		if t.Selected {
+			sy, st = t.SchoolYear, t.SchoolTerm
+			break
+		}
+	}
+	if sy == 0 {
+		return nil, fmt.Errorf("未找到当前学期")
+	}
+	payload, _ := json.Marshal(map[string]int{"schoolYear": sy, "schoolTerm": st})
+	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", payload, "application/json")
+	if err != nil {
+		return nil, err
+	}
+	return parseElectives(body)
+}
+
+// parseElectives 解析 findElectivesData 原始响应。
+func parseElectives(body []byte) (*ElectivesData, error) {
+	var raw struct {
+		BeginTimes          []int64 `json:"beginTimes"`
+		SelectElectivesData []struct {
+			PublishID   int    `json:"publishId"`
+			PublishName string `json:"publishName"`
+			BeginDate   string `json:"beginDate"`
+			InDateRange bool   `json:"inDateRange"`
+			CanSelect   int    `json:"canSelect"`
+			HasSelected int    `json:"hasSelected"`
+			GroupCount  int    `json:"groupCount"`
+			TotalCount  int    `json:"totalCount"`
+			Classes     []Class `json:"electivesClassList"`
+		} `json:"selectElectivesData"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	out := &ElectivesData{BeginTimes: raw.BeginTimes}
+	for _, p := range raw.SelectElectivesData {
+		out.Publishes = append(out.Publishes, Publish{
+			PublishID:   p.PublishID,
+			PublishName: p.PublishName,
+			BeginDate:   p.BeginDate,
+			InDateRange: p.InDateRange,
+			CanSelect:   p.CanSelect,
+			HasSelected: p.HasSelected,
+			GroupCount:  p.GroupCount,
+			TotalCount:  p.TotalCount,
+			Classes:     p.Classes,
+		})
+	}
+	return out, nil
+}
+
+// ClassDetail 课程详情（弹窗内容）。
+type ClassDetail struct {
+	ID             int    `json:"id"`
+	CourseName     string `json:"course_name"`
+	ClassName      string `json:"class_name"`
+	TeacherName    string `json:"teacher_name"`
+	ClassroomName  string `json:"classroom_name"`
+	LessonsDate    string `json:"lessons_date"`
+	SchoolYearTerm string `json:"school_year_term"`
+	CourseTypeName string `json:"course_type_name"`
+	MethodName     string `json:"method_name"`
+	EvaluateType   string `json:"evaluate_type_name"`
+	AuditedCount   int    `json:"audited_count"`
+	PlanCount      int    `json:"plan_count"`
+	ClassStatusStr string `json:"class_status_str"`
+	ShareURL       string `json:"shareUrl"`
+}
+
+// ClassDetail 查询课程详情。
+func (c *Client) ClassDetail(classID int) (*ClassDetail, error) {
+	form := url.Values{}
+	form.Set("id", fmt.Sprintf("%d", classID))
+	body, err := c.doRequest(http.MethodPost, "/electives/classDetail",
+		[]byte(form.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return nil, err
+	}
+	var j struct {
+		Code  int          `json:"code"`
+		Value *ClassDetail `json:"value"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return nil, err
+	}
+	if j.Code != 0 || j.Value == nil {
+		return nil, fmt.Errorf("课程详情错误: %s", extractMsg(body))
+	}
+	return j.Value, nil
+}
+
+// SelectClass 报名。返回平台消息（isOk 时含成功信息）。
+func (c *Client) SelectClass(classID int) (string, error) {
+	form := url.Values{}
+	form.Set("classId", fmt.Sprintf("%d", classID))
+	body, err := c.doRequest(http.MethodPost, "/electives/select/selectElectivesClass",
+		[]byte(form.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return "", err
+	}
+	var j struct {
+		Code int    `json:"code"`
+		IsOk bool   `json:"isOk"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return "", err
+	}
+	if j.Code != 0 || !j.IsOk {
+		return "", fmt.Errorf("报名失败: %s", j.Msg)
+	}
+	return j.Msg, nil
+}
+
+// CountEntry 实时人数（findElectivesStudentCount）。
+type CountEntry struct {
+	ID             int `json:"id"`
+	SelectedCount  int `json:"selectedCount"`
+	AuditedCount   int `json:"auditedCount"`
+}
+
+// StudentCounts 查询课程实时人数。
+func (c *Client) StudentCounts(ids []int) ([]CountEntry, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = fmt.Sprintf("%d", id)
+	}
+	form := url.Values{}
+	form.Set("ids", strings.Join(parts, ","))
+	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesStudentCount",
+		[]byte(form.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return nil, err
+	}
+	var j struct {
+		Code      int           `json:"code"`
+		CountList []CountEntry  `json:"countList"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return nil, err
+	}
+	if j.Code != 0 {
+		return nil, fmt.Errorf("人数查询错误: %s", extractMsg(body))
+	}
+	return j.CountList, nil
+}

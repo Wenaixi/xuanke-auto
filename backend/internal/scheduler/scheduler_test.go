@@ -57,6 +57,10 @@ func (f *fakeClient) SelectClass(classID int) (string, error) {
 	return "报名成功", nil
 }
 
+func (f *fakeClient) ClassDetail(classID int) (*zhidao.ClassDetail, error) {
+	return &zhidao.ClassDetail{ID: classID, CourseName: "健美操"}, nil
+}
+
 func newFakeClient(open bool) *fakeClient {
 	return &fakeClient{
 		data: &zhidao.ElectivesData{

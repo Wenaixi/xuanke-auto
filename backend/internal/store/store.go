@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 
+	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/scheduler"
 )
 
@@ -33,15 +34,15 @@ func (s *Store) SaveCredential(acct, pwdEnc, idToken string) error {
 }
 
 // LoadCredentials 读取全部账号凭据（按账号排序）。
-func (s *Store) LoadCredentials() ([]Credential, error) {
+func (s *Store) LoadCredentials() ([]accounts.Credential, error) {
 	rows, err := s.db.Query("SELECT account, password_enc, id_token FROM credentials ORDER BY account")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Credential
+	var out []accounts.Credential
 	for rows.Next() {
-		var c Credential
+		var c accounts.Credential
 		if err := rows.Scan(&c.Account, &c.PasswordEnc, &c.IDToken); err != nil {
 			return nil, err
 		}

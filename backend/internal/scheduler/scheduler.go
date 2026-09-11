@@ -44,6 +44,7 @@ const snapshotTTL = 40 * time.Second
 type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
+	ClassDetail(classID int) (*zhidao.ClassDetail, error)
 }
 
 // AccountClients 多账号客户端注册表（真实实现 accounts.Manager）。

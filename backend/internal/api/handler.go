@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,17 +12,23 @@ import (
 	"sync"
 	"time"
 
+	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/scheduler"
+	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/zhidao"
 )
 
 // Deps API 层依赖。
 type Deps struct {
-	Store   *store.Store
-	Client  *zhidao.Client
-	Sched   *scheduler.Scheduler
-	OpenTime string // 选课开放时间（与调度器一致）
+	Store    *store.Store
+	Sched    *scheduler.Scheduler
+	Accounts *accounts.Manager
+	Sessions *session.Store
+	OpenTime string
+	// AdminToken 部署访问口令（main 从环境变量注入，启动必填）。
+	AdminToken string
+	// Encrypt 密码加密（secure.Encrypt 绑定主密钥闭包）。
+	Encrypt func(string) (string, error)
 }
 
 // writeJSON 统一 JSON 响应：{"code":0,"data":...,"msg":""}
@@ -29,13 +37,14 @@ func writeJSON(w http.ResponseWriter, code int, data any, msg string) {
 	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
 }
 
-// LoginRequest 登录请求体。
+// LoginRequest 登录请求体（部署口令 + 教务账密）。
 type LoginRequest struct {
-	Account  string `json:"account"`
-	Password string `json:"password"`
+	Account    string `json:"account"`
+	Password   string `json:"password"`
+	AdminToken string `json:"admin_token"`
 }
 
-// handleLogin 账密登录：调用至道登录链路，成功后保存账密与 token。
+// handleLogin 登录：校验部署口令 -> 教务登录 -> 签发会话并返回。
 func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -46,25 +55,30 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "账号与密码不能为空")
 		return
 	}
-	token, err := d.Client.Login(req.Account, req.Password)
-	if err != nil {
-		writeJSON(w, 1, nil, "登录失败: "+err.Error())
+	// 部署口令校验（启动必须配置）
+	if d.AdminToken == "" || subtle.ConstantTimeCompare([]byte(req.AdminToken), []byte(d.AdminToken)) != 1 {
+		writeJSON(w, 403, nil, "部署访问口令错误")
 		return
 	}
-	if err := d.Store.SaveAccount(req.Account, req.Password, token); err != nil {
-		log.Printf("[api] 保存账密失败: %v", err)
+	if _, err := d.Accounts.LoginByPassword(req.Account, req.Password, d.Encrypt); err != nil {
+		writeJSON(w, 1, nil, "登录失败: "+err.Error())
+		return
 	}
 	if err := d.Store.SaveAccountName(req.Account); err != nil {
 		log.Printf("[api] 保存账号名失败: %v", err)
 	}
-	d.Client.SetCredentials(req.Account, req.Password, token)
+	sess := d.Sessions.Create(req.Account)
 	d.Store.AppendLog(0, "login", "账号 "+req.Account+" 登录成功", true)
-	writeJSON(w, 0, map[string]string{"token": token, "account": req.Account}, "登录成功")
+	writeJSON(w, 0, map[string]string{"token": sess, "account": req.Account}, "登录成功")
 }
 
-// handleElectives 课程列表（三个发布）。
+// handleElectives 课程列表：直读调度器内存快照（超高性能），快照过期才触发探测。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
-	data, err := d.Client.FindElectives()
+	if data, ok := d.Sched.ElectivesSnapshot(); ok {
+		writeJSON(w, 0, data, "")
+		return
+	}
+	data, err := d.Sched.ProbeNow()
 	if err != nil {
 		writeJSON(w, 1, nil, "查询课程失败: "+err.Error())
 		return
@@ -80,7 +94,13 @@ func (d *Deps) handleElectivesDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "id 参数无效")
 		return
 	}
-	detail, err := d.Client.ClassDetail(id)
+	acct := sessionAccount(r)
+	client, ok := d.Accounts.ClientFor(acct)
+	if !ok {
+		writeJSON(w, 1, nil, "账号会话未建立，请重新登录")
+		return
+	}
+	detail, err := client.ClassDetail(id)
 	if err != nil {
 		writeJSON(w, 1, nil, "查询详情失败: "+err.Error())
 		return
@@ -88,22 +108,14 @@ func (d *Deps) handleElectivesDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, detail, "")
 }
 
-// TargetsRequest 设置目标请求体。
+// TargetsRequest 设置目标请求体（账号由会话决定，不接收客户端传账号）。
 type TargetsRequest struct {
-	Account string             `json:"account"` // 目标所属账号；空 = 默认账号
 	Targets []scheduler.Target `json:"targets"`
 }
 
-// displayAcct 账号显示名（空账号显示为"默认"）。
-func displayAcct(acct string) string {
-	if acct == "" {
-		return "默认"
-	}
-	return acct
-}
-
-// handleSetTargets 设置目标课程并持久化（按账号隔离）。
+// handleSetTargets 设置目标课程并持久化（账号来自会话绑定）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
+	acct := sessionAccount(r)
 	var req TargetsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -119,47 +131,24 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	acct := req.Account
 	if err := d.Store.SetTargetsForAccount(acct, req.Targets); err != nil {
 		writeJSON(w, 1, nil, "保存目标失败: "+err.Error())
 		return
 	}
 	d.Sched.SetTargetsForAccount(acct, req.Targets)
-	d.Store.AppendLog(0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", displayAcct(acct), len(req.Targets)), true)
+	d.Store.AppendLog(0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true)
 	writeJSON(w, 0, req.Targets, "目标已保存")
 }
 
-// handleState 调度器状态（按账号过滤目标）。
+// handleState 调度器状态（按会话账号过滤目标）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
-	acct := r.URL.Query().Get("account")
-	st := d.Sched.StateForAccount(acct)
+	st := d.Sched.StateForAccount(sessionAccount(r))
 	writeJSON(w, 0, st, "")
 }
 
-// handleAccounts 已登录账号名列表（store 账号表 + 调度器目标账号去重合并）。
+// handleAccounts 当前会话账号视角的账号列表（注册表顺序）。
 func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
-	names, err := d.Store.ListAccounts()
-	if err != nil {
-		writeJSON(w, 1, nil, "读取账号列表失败: "+err.Error())
-		return
-	}
-	seen := map[string]bool{}
-	out := []string{}
-	for _, a := range names {
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		out = append(out, a)
-	}
-	for _, a := range d.Sched.Accounts() {
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		out = append(out, a)
-	}
-	writeJSON(w, 0, out, "")
+	writeJSON(w, 0, d.Accounts.Registered(), "")
 }
 
 // handleLogs 报名日志。
@@ -172,12 +161,44 @@ func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, logs, "")
 }
 
-// handleHealth 健康检查。
+// handleHealth 健康检查（免认证，仅探活）。
 func (d *Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, "ok", "")
 }
 
-// ---- 安全中间件 ----
+// ---- 会话认证中间件 ----
+
+type ctxKey int
+
+const sessionCtxKey ctxKey = 1
+
+// sessionAccount 从请求上下文取会话绑定的账号。
+func sessionAccount(r *http.Request) string {
+	if v, ok := r.Context().Value(sessionCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// requireAuth 会话校验中间件：无/无效令牌返回 401。
+func requireAuth(d *Deps, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tok := ""
+		if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
+			tok = h[7:]
+		} else if xt := r.Header.Get("X-Auth-Token"); xt != "" {
+			tok = xt
+		}
+		acct, ok := d.Sessions.Account(tok)
+		if !ok {
+			writeJSON(w, 401, nil, "会话无效或已过期，请重新登录")
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), sessionCtxKey, acct)))
+	}
+}
+
+// ---- 登录限流 ----
 
 // loginLimiter 登录限流：每 IP 每分钟最多 5 次登录尝试。
 type loginLimiter struct {
@@ -245,6 +266,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
 }

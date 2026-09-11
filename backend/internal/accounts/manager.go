@@ -14,7 +14,7 @@ type Store interface {
 	LoadCredentials() ([]Credential, error)
 }
 
-// Credential 账号凭据（与 store.Credential 同构，避免包循环）。
+// Credential 账号凭据（与 store.Credential 字段一一对应，避免包循环）。
 type Credential struct {
 	Account     string
 	PasswordEnc string

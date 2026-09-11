@@ -1,42 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  /* 现代温润深空调色板 */
-  --bg: #0b0f17;
-  --surface: #131b26;
-  --surface-soft: #1a2332;
-  --surface-muted: #222d40;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-hover: rgba(255, 255, 255, 0.16);
-  --border-strong: rgba(255, 255, 255, 0.28);
-  --border-invert: #fafafa;
+  /* 瑞士国际主义与高级黑白极简艺术调色板 (Monochrome Fine Art) */
+  --bg: #000000;
+  --surface: #0c0c0e;
+  --surface-soft: #141417;
+  --surface-muted: #1c1c20;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(255, 255, 255, 0.24);
+  --border-strong: rgba(255, 255, 255, 0.5);
+  --border-invert: #ffffff;
 
-  --fg: #f8fafc;
-  --fg-muted: #94a3b8;
-  --fg-dim: #64748b;
+  --fg: #ffffff;
+  --fg-muted: #a1a1aa;
+  --fg-dim: #71717a;
 
-  /* 生机语义色彩体系（点缀色） */
-  --emerald: #10b981;
-  --emerald-bg: rgba(16, 185, 129, 0.12);
-  --emerald-border: rgba(16, 185, 129, 0.28);
+  /* 单色语义灰阶映射（纯黑白极简，剔除所有高饱和彩色杂质） */
+  --emerald: #ffffff;
+  --emerald-bg: rgba(255, 255, 255, 0.08);
+  --emerald-border: rgba(255, 255, 255, 0.28);
 
-  --amber: #f59e0b;
-  --amber-bg: rgba(245, 158, 11, 0.12);
-  --amber-border: rgba(245, 158, 11, 0.28);
+  --amber: #e4e4e7;
+  --amber-bg: rgba(255, 255, 255, 0.06);
+  --amber-border: rgba(255, 255, 255, 0.2);
 
   --rose: #f43f5e;
-  --rose-bg: rgba(244, 63, 94, 0.12);
-  --rose-border: rgba(244, 63, 94, 0.28);
+  --rose-bg: rgba(244, 63, 94, 0.08);
+  --rose-border: rgba(244, 63, 94, 0.25);
 
-  --cyan: #0ea5e9;
-  --cyan-bg: rgba(14, 165, 233, 0.12);
-  --cyan-border: rgba(14, 165, 233, 0.28);
+  --cyan: #ffffff;
+  --cyan-bg: rgba(255, 255, 255, 0.08);
+  --cyan-border: rgba(255, 255, 255, 0.3);
 
-  /* 舒适微圆角体系 */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* 严谨纯粹几何圆角体系 (精简利落) */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-full: 9999px;
 }
 

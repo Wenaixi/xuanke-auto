@@ -9,15 +9,15 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  default: "bg-[var(--surface-soft)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-muted)] hover:border-[var(--border-hover)] shadow-sm",
-  primary: "bg-[var(--cyan)] text-white border border-[var(--cyan)] font-medium hover:brightness-110 shadow-sm",
-  success: "bg-[var(--emerald)] text-white border border-[var(--emerald)] font-medium hover:brightness-110 shadow-sm",
-  warning: "bg-[var(--amber)] text-black border border-[var(--amber)] font-medium hover:brightness-110 shadow-sm",
-  destructive: "bg-[var(--rose)] text-white border border-[var(--rose)] font-medium hover:brightness-110 shadow-sm",
-  outline: "bg-transparent text-[var(--fg-muted)] border border-[var(--border)] hover:text-[var(--fg)] hover:border-[var(--border-hover)] hover:bg-[var(--surface)]",
+  default: "bg-[var(--surface-soft)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-muted)] hover:border-[var(--border-hover)]",
+  primary: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 shadow-sm",
+  success: "bg-neutral-100 text-black border border-white font-semibold hover:bg-white shadow-sm",
+  warning: "bg-neutral-800 text-white border border-neutral-700 font-medium hover:bg-neutral-700",
+  destructive: "bg-rose-950/40 text-rose-300 border border-rose-900/60 font-medium hover:bg-rose-900/50",
+  outline: "bg-transparent text-[var(--fg-muted)] border border-[var(--border)] hover:text-[var(--fg)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-soft)]",
   secondary: "bg-[var(--surface)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-soft)] hover:border-[var(--border-hover)]",
   ghost: "bg-transparent text-[var(--fg-muted)] border-transparent hover:bg-[var(--surface-soft)] hover:text-[var(--fg)]",
-  invert: "bg-[var(--fg)] text-[var(--bg)] border border-[var(--fg)] font-medium hover:bg-white/90 shadow-sm",
+  invert: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 shadow-sm",
 }
 
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {

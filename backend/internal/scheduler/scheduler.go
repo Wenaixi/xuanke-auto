@@ -253,6 +253,7 @@ func (s *Scheduler) tick() {
 	data, err := client.FindElectives()
 	if err != nil {
 		s.mu.Lock()
+		s.lastProbe = now // 失败同样计入节流闸门，网络故障时不会每 300ms 疯狂重试
 		s.state.WindowOpened = false
 		s.mu.Unlock()
 		if !errors.Is(err, zhidao.ErrUnauthorized) {

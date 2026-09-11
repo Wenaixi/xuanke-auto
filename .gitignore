@@ -12,3 +12,4 @@ backend/web/dist/
 # 系统与缓存
 __pycache__/
 .omc/
+data/

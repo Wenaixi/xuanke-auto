@@ -121,7 +121,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制，避免服务端报 code=1 鉴权缺失
 - **课程探测 30 秒节流（根因修复"选课大厅突然啥都没了"）**：调度器对 `findElectivesData` 的成功探测加 30 秒最小间隔（`probeInterval` 常量），探测成功或失败均记录时间戳，网络故障时不会 300ms 疯狂重试；窗口未开启时也绝不高频轮询，从根因消除平台"访问过于频繁"1 分钟熔断导致的课程列表拉空。轮询 ticker 仍为 300ms（负责窗口开启后的**立即**探测与提交），但探测动作本身被 30 秒节流闸门挡下
 - **多账号物理隔离 + 会话级账号绑定**：每个账号独立 `zhidao.Client`（账号 A 绝不携带账号 B 的会话），认证后服务端签发随机 Bearer 会话令牌（12h TTL），所有租户接口从会话读取账号（`sessionAccount(r)`）——忽略客户端传入的账号参数，`/state`、`/targets`、`/electives/detail` 均按会话账号隔离。/electives 全校共享（同一平台同一学期数据），但读取快照不需要账号身份
-- **部署访问口令 gate + 移除硬编码密钥**：`XUANKE_ADMIN_TOKEN` 必须来自环境变量（缺失直接 `log.Fatal` 拒绝启动），激活码管理接口用 `crypto/subtle.ConstantTimeCompare` 恒定时间比对；`SF_API_KEY` 也从环境变量注入。登录限流每分钟 5 次（token bucket，每 IP）
+- **部署访问口令 gate + 移除硬编码密钥**：`XUANKE_ADMIN_TOKEN` 必须来自环境变量或 `data/.env`（缺失直接 `log.Fatal` 拒绝启动），激活码管理接口用 `crypto/subtle.ConstantTimeCompare` 恒定时间比对；`SF_API_KEY` 也走同源注入。登录限流每分钟 5 次（token bucket，每 IP）
 - **激活码鉴权（取代登录口令 gate）+ 可开关**：登录不再校验部署口令；教务登录成功 → `IsActivated` 未激活返回 `code=1001`（前端据此弹出激活码输入模态框）→ `POST /api/activate {account, code}` 事务内扣减激活码次数 + 记录 `activations` → 签发会话。激活一次永久免激活。激活码由 `X-Admin-Token` 管理接口生成（`XK-XXXX-XXXX-XXXX`，POST count 1-100 × uses≥1 / GET 列表 / DELETE）。开关：`XUANKE_ACTIVATION=off` 完全禁用（登录直接签发会话、activate/admin 接口拒绝）
 - **多备选课程 + 满员人数对比退避**：每个发布可配置多门备选目标，`targets.priority` 持久化排序；调度器每（账号×发布）一条 goroutine 链（`spawnChain`）按优先级依次尝试，快照满员跳过 → inflight 去重 → `SelectClass` 失败后 `IsClassFull` 实时复核人数（`selected_count >= max_count`），真满才 `markFullLocked` 切下一备选，网络类失败终止本链下一 tick 重试
 - **日志按账号隔离**：`task_log.account` 列 + `AppendLog(acct, ...)` + `LoadLogs(acct, limit)` WHERE 过滤，`/api/logs` 只返回当前会话账号自己的日志，账号间不可互通查看
@@ -134,13 +134,17 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - 数据库 data/xuanke.db（纯 Go SQLite），重启恢复加密凭据/token/目标/已成功课程；`.master_key` 为主密钥文件（需与 db 一起备份）；schema v3：targets.priority / task_log.account / activation_codes / activations 表，缺列拒绝启动
 
 ### 部署（公网）
+配置统一放 **`backend/data/.env`**（随 data/ 一起备份迁移；真实环境变量优先，文件兜底）：
 ```bash
-# 必填：管理口令（激活码管理用，缺失拒绝启动）；可选：验证码识别密钥、主密钥（不设则生成 data/.master_key）
-set XUANKE_ADMIN_TOKEN=你的口令
-set SF_API_KEY=sk-...                  # 可选，教务登录验证码识别
-set XUANKE_ACTIVATION=off              # 可选，设为 off 完全关闭激活码机制（登录直接进入系统）
-set XUANKE_MASTER_KEY=<64位hex>        # 可选，推荐多机迁移时固定
-xuanke.exe
+# data/.env 示例（首次启动自动生成带注释模板）
+XUANKE_ADMIN_TOKEN=你的口令      # 必填：管理口令（激活码管理用，缺失拒绝启动）
+SF_API_KEY=sk-...                # 可选：教务登录验证码识别密钥
+XUANKE_ACTIVATION=on             # 激活码机制开关：on=启用；off=完全关闭（登录直接进入系统）
+# XUANKE_MASTER_KEY=<64位hex>    # 可选：数据加密主密钥，不填自动生成 data/.master_key
+# XUANKE_PORT=3091 / XUANKE_DB=data/xuanke.db   # 可选
+```
+```bash
+xuanke.exe                       # 无任何环境变量直接启动，自动读取同目录 data/.env
 ```
 - 登录只需教务账密；未激活账号返回 code=1001 由前端弹激活码模态框；激活码从控制台「激活码」面板生成/分发（需管理口令）；激活一次永久免激活
 

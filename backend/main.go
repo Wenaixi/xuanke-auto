@@ -22,7 +22,7 @@ func main() {
 
 	// 公网安全：管理口令必填（用于生成激活码），否则拒绝启动
 	if cfg.AdminToken == "" {
-		log.Fatal("未设置管理口令：请设置环境变量 XUANKE_ADMIN_TOKEN 后启动")
+		log.Fatal("未设置管理口令：请在 data/.env 中填写 XUANKE_ADMIN_TOKEN（或设置同名环境变量）后启动")
 	}
 	if cfg.SFAPIKey == "" {
 		log.Println("[main] 警告：未设置 SF_API_KEY，教务登录验证码识别将不可用")

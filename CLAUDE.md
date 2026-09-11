@@ -107,6 +107,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **会话复用**：环境变量 XUANKE_TOKEN + XUANKE_COOKIE 注入已有会话（无需重新登录）；注入的 token 通过 SaveTokenOnly 持久化，重启自动恢复
 - **Cookie 携带**：API 请求需带 access_limit_cookie + zd_edu_cookie（idToken 参数 + Cookie 双通道，仅 idToken 会"未登录"，带 Cookie 才有效）
 - **平台限流**：课程详情/查询高频会被限流 1 分钟（msg="访问过于频繁"），调度器轮询 300ms 已考虑此风险
+- **UI 设计系统规范**：采用瑞士国际主义与黑白极简艺术风格，严格绝对零圆角（Zero-Radius / rounded-none），基于 shadcn/ui 组件哲学与 Radix UI 原语。色盘仅使用 #09090b 纯黑底、#121215 表面底、#27272a 发丝边框与 #fafafa 冷冽纯白文本，通过几何高对比度与等宽数字排版展现顶级工业高级感
 - 数据库 data/xuanke.db（纯 Go SQLite），重启恢复账密/token/目标/已成功课程
 
 ### Go 接口速查（backend/internal/zhidao）

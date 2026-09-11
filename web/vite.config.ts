@@ -14,6 +14,6 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: { '/api': 'http://localhost:8080' }, // 开发时代理到后端
+    proxy: { '/api': 'http://localhost:3091' }, // 开发时代理到后端 3091 端口
   },
 })

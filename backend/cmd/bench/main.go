@@ -9,7 +9,7 @@ import (
 
 // 串行延迟测试：200 次连续请求
 func main() {
-	url := "http://localhost:8080/api/state"
+	url := "http://localhost:3091/api/state"
 	client := &http.Client{Timeout: 5 * time.Second}
 	var total time.Duration
 	var max time.Duration

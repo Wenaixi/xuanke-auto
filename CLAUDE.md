@@ -100,7 +100,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 ### 架构设计（模块化开发 + 单二进制嵌入交付）
 - **开发态（前后端分离极速热重载）**：
   - 前端：React 18 + Vite + TypeScript + Radix UI 原语 + Tailwind CSS，独立在 `web/` 开发，享受秒级 HMR；
-  - 后端：Go 标准库 `net/http`（Go 1.22+ 原生路由）+ `modernc.org/sqlite`（纯 Go 免 CGO），独立在 `backend/` 监听 `:8080` 提供 REST API 与 SSE 实时抢课日志流。
+  - 后端：Go 标准库 `net/http`（Go 1.22+ 原生路由）+ `modernc.org/sqlite`（纯 Go 免 CGO），独立在 `backend/` 监听 `:3091` 提供 REST API 与 SSE 实时抢课日志流。
 - **发布态（前端嵌入二进制，便携单文件交付）**：
   - 前端 `npm run build` 生成的纯静态产物（`web/dist`）通过 Go 原生 `//go:embed dist/*` 嵌入进 `backend/xuanke.exe`；
   - 最终用户无需安装 Node.js 或前端环境，双击单个 `xuanke.exe` 即可在单一端口同时提供后端抢课引擎与前端网页，开箱即用！

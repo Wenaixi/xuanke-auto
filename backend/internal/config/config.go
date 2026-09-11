@@ -20,7 +20,7 @@ type Config struct {
 // Load 从环境变量与常量组装配置。
 func Load() Config {
 	return Config{
-		Port:      envOr("XUANKE_PORT", "8080"),
+		Port:      envOr("XUANKE_PORT", "3091"),
 		DBPath:    envOr("XUANKE_DB", "data/xuanke.db"),
 		OpenTime:  "2026-09-13 09:00:00",
 		BaseURL:   "https://www.zhidao.fj.cn",

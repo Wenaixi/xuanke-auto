@@ -3,6 +3,7 @@ package zhidao
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,6 +109,50 @@ func TestReloginIfNeeded(t *testing.T) {
 	}
 	if atomic.LoadInt32(&reloginCalls) != 1 {
 		t.Fatalf("最多重登 1 次，实际 %d", reloginCalls)
+	}
+}
+
+// TestExitClass 验证退选接口：路径/请求体与真实 HAR 一致（form classId）。
+func TestExitClass(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(r.Body)
+		gotPath = r.URL.Path
+		gotBody = string(body)
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "msg": "退选成功"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	msg, err := c.ExitClass(61115)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "退选成功" {
+		t.Fatalf("期望返回平台消息，实际 %q", msg)
+	}
+	if gotPath != "/electives/select/exitElectivesClass" {
+		t.Fatalf("路径错误: %s", gotPath)
+	}
+	if gotBody != "classId=61115" {
+		t.Fatalf("请求体错误: %s", gotBody)
+	}
+}
+
+// TestExitClassFailsOnCodeNotZero 验证退选业务失败（code!=0）时报错。
+func TestExitClassFailsOnCodeNotZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"code": 1, "isOk": false, "msg": "已过退选时间"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	if _, err := c.ExitClass(61115); err == nil {
+		t.Fatal("期望业务失败时报错")
 	}
 }
 

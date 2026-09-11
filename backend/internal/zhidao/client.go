@@ -467,6 +467,29 @@ func (c *Client) SelectClass(classID int) (string, error) {
 	return j.Msg, nil
 }
 
+// ExitClass 退选。请求体与报名一致（form classId），路径为 exitElectivesClass。
+func (c *Client) ExitClass(classID int) (string, error) {
+	form := url.Values{}
+	form.Set("classId", fmt.Sprintf("%d", classID))
+	body, err := c.doRequest(http.MethodPost, "/electives/select/exitElectivesClass",
+		[]byte(form.Encode()), "application/x-www-form-urlencoded")
+	if err != nil {
+		return "", err
+	}
+	var j struct {
+		Code int    `json:"code"`
+		IsOk bool   `json:"isOk"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return "", err
+	}
+	if j.Code != 0 || !j.IsOk {
+		return "", fmt.Errorf("退选失败: %s", j.Msg)
+	}
+	return j.Msg, nil
+}
+
 // CountEntry 实时人数（findElectivesStudentCount）。
 type CountEntry struct {
 	ID             int `json:"id"`

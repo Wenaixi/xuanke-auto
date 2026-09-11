@@ -177,11 +177,14 @@ func loginAndGetToken(t *testing.T, d *testDeps, acct string) string {
 	return data["token"].(string)
 }
 
-// testActivated 预激活账号（供需要已激活会话的测试使用）。
-func testActivated(t *testing.T, d *testDeps, acct string) {
+// authenticateDirect 不经过激活链路，直接向 accounts 注册账号并建立会话。
+// 用于纯接口/数据测试（仅需一个指定会话账号、不关心登录流程本身的场景）。
+func authenticateDirect(t *testing.T, d *testDeps, acct string) string {
 	t.Helper()
-	tok := loginAndGetToken(t, d, acct)
-	_ = tok
+	if _, err := d.accts.LoginByPassword(acct, "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
+		t.Fatal(err)
+	}
+	return d.sessions.Create(acct)
 }
 
 func TestHealth(t *testing.T) {
@@ -329,7 +332,7 @@ func TestLogsByAccount(t *testing.T) {
 
 func TestLoginOKIssuesSession(t *testing.T) {
 	d := newTestDeps(t)
-	tok := loginAndGetToken(t, d, "acct1")
+	tok := authenticateDirect(t, d, "acct1")
 	if tok == "" {
 		t.Fatal("会话令牌不应为空")
 	}
@@ -355,7 +358,7 @@ func TestLoginOKIssuesSession(t *testing.T) {
 
 func TestSetTargetsAndState(t *testing.T) {
 	d := newTestDeps(t)
-	tok := loginAndGetToken(t, d, "acct1")
+	tok := authenticateDirect(t, d, "acct1")
 	// 按会话账号保存目标（body 无 account 字段）
 	body := `{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`
 	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets", body, tok)
@@ -381,7 +384,7 @@ func TestSetTargetsAndState(t *testing.T) {
 		t.Fatalf("state 应含 1 门课程，实际: %v", data)
 	}
 	// 第二个账号的会话看不到 acct1 的目标
-	tok2 := loginAndGetToken(t, d, "acct2")
+	tok2 := authenticateDirect(t, d, "acct2")
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok2)
 	data2, _ := j["data"].(map[string]any)
 	courses2, _ := data2["courses"].([]any)
@@ -392,7 +395,7 @@ func TestSetTargetsAndState(t *testing.T) {
 
 func TestElectivesSnapshot(t *testing.T) {
 	d := newTestDeps(t)
-	tok := loginAndGetToken(t, d, "acct1")
+	tok := authenticateDirect(t, d, "acct1")
 	code, j := doJSONAuth(t, d.api, "GET", "/api/electives", "", tok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("electives 异常: %d %v", code, j)
@@ -409,7 +412,7 @@ func TestElectivesSnapshot(t *testing.T) {
 
 func TestSetTargetsEmptyAllowed(t *testing.T) {
 	d := newTestDeps(t)
-	tok := loginAndGetToken(t, d, "acct1")
+	tok := authenticateDirect(t, d, "acct1")
 	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets", `{"targets":[]}`, tok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("应允许设置空目标以支持清空: %d %v", code, j)

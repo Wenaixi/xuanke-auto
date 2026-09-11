@@ -22,6 +22,8 @@ func (f *fakeStore) AppendLog(classID int, action, result string, isOK bool) err
 	return nil
 }
 
+func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
+
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
 	mu          sync.Mutex
@@ -69,6 +71,14 @@ func newFakeClient(open bool) *fakeClient {
 	}
 }
 
+// fakeAccts 伪账号注册表：所有账号共享一个 fakeClient（测试用）。
+type fakeAccts struct {
+	c *fakeClient
+}
+
+func (f *fakeAccts) ClientFor(acct string) (Client, bool) { return f.c, true }
+func (f *fakeAccts) AnyClient() (Client, bool)            { return f.c, true }
+
 // setAllOpened 打开所有发布的选课窗口。
 func setAllOpened(fc *fakeClient) {
 	fc.setOpen(true)
@@ -77,7 +87,7 @@ func setAllOpened(fc *fakeClient) {
 // resetProbe 手动复位探测节流计时，跳过 30 秒等待以测试窗口打开后的立即提交。
 func (s *Scheduler) resetProbe() {
 	s.mu.Lock()
-	s.lastSuccessProbe = time.Time{}
+	s.lastProbe = time.Time{}
 	s.mu.Unlock()
 }
 
@@ -87,11 +97,6 @@ func targets() []Target {
 		{PublishID: 2, ClassID: 61205, CourseName: "篮球"},
 		{PublishID: 3, ClassID: 61276, CourseName: "健身瑜伽"},
 	}
-}
-
-func waitStatus(t *testing.T, s *Scheduler, classID int, want string, timeout time.Duration) {
-	t.Helper()
-	waitStatusAcct(t, s, "", classID, want, timeout)
 }
 
 // waitStatusAcct 轮询指定账号的状态直至课程达到期望状态。
@@ -118,28 +123,28 @@ func waitStatusAcct(t *testing.T, s *Scheduler, acct string, classID int, want s
 func TestStateMachine(t *testing.T) {
 	fc := newFakeClient(false)
 	openTime := time.Now().Add(time.Hour)
-	s := New(fc, &fakeStore{}, openTime, 10*time.Millisecond)
-	s.SetTargets(targets())
+	s := New(&fakeAccts{fc}, &fakeStore{}, openTime, 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", targets())
 	s.Start()
 	defer s.Stop()
 
 	// 窗口未开：状态 pending
 	time.Sleep(50 * time.Millisecond)
-	for _, c := range s.State().Courses {
+	for _, c := range s.StateForAccount("acct1").Courses {
 		if c.Status != "pending" {
 			t.Fatalf("窗口未开时课程 %d 状态应为 pending，实际 %q", c.ClassID, c.Status)
 		}
 	}
-	if s.State().WindowOpened {
+	if s.StateForAccount("acct1").WindowOpened {
 		t.Fatal("窗口应未开放")
 	}
 
-	// 窗口开启：应自动提交并 success（探测节流 30s，手动复位 lastSuccessProbe 触发立即探测）
+	// 窗口开启：应自动提交并 success（探测节流 30s，手动复位 lastProbe 触发立即探测）
 	setAllOpened(fc)
 	s.resetProbe()
-	waitStatus(t, s, 61115, "success", 3*time.Second)
-	waitStatus(t, s, 61205, "success", 3*time.Second)
-	waitStatus(t, s, 61276, "success", 3*time.Second)
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+	waitStatusAcct(t, s, "acct1", 61205, "success", 3*time.Second)
+	waitStatusAcct(t, s, "acct1", 61276, "success", 3*time.Second)
 
 	fc.mu.Lock()
 	calls := map[int]int{}
@@ -157,7 +162,7 @@ func TestStateMachine(t *testing.T) {
 func TestTargetsByAccountIsolation(t *testing.T) {
 	fc := newFakeClient(false)
 	openTime := time.Now().Add(time.Hour)
-	s := New(fc, &fakeStore{}, openTime, 10*time.Millisecond)
+	s := New(&fakeAccts{fc}, &fakeStore{}, openTime, 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
 	s.SetTargetsForAccount("acct2", []Target{{PublishID: 2, ClassID: 61205, CourseName: "篮球"}})
 	s.Start()
@@ -171,10 +176,6 @@ func TestTargetsByAccountIsolation(t *testing.T) {
 	if len(st2.Courses) != 1 || st2.Courses[0].ClassID != 61205 {
 		t.Fatalf("acct2 状态异常: %+v", st2)
 	}
-	accts := s.Accounts()
-	if len(accts) != 2 {
-		t.Fatalf("账号列表异常: %v", accts)
-	}
 
 	// 窗口开启后两账号目标都应被提交
 	setAllOpened(fc)
@@ -183,25 +184,47 @@ func TestTargetsByAccountIsolation(t *testing.T) {
 	waitStatusAcct(t, s, "acct2", 61205, "success", 3*time.Second)
 }
 
-func TestSubmitFailureRetries(t *testing.T) {
+func TestSameClassParallelAcrossAccounts(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.selectErr[61115] = errors.New("名额已满")
-	s := New(fc, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
-	s.SetTargets([]Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	// 两账号选中同一门课程——各自独立提交，互不阻塞
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s.SetTargetsForAccount("acct2", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
 	s.Start()
 	defer s.Stop()
 
 	setAllOpened(fc)
 	s.resetProbe()
-	waitStatus(t, s, 61115, "failed", 3*time.Second)
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+	waitStatusAcct(t, s, "acct2", 61115, "success", 3*time.Second)
+
+	fc.mu.Lock()
+	calls := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("同课程两账号应提交 2 次（各自独立），实际 %d", calls)
+	}
+}
+
+func TestSubmitFailureRetries(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.selectErr[61115] = errors.New("名额已满")
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s.Start()
+	defer s.Stop()
+
+	setAllOpened(fc)
+	s.resetProbe()
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
 }
 
 func TestRestoreDoneSkipsResubmit(t *testing.T) {
 	fc := newFakeClient(true)
-	s := New(fc, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
-	// 重启恢复：注入已成功的课程 id
-	s.RestoreDone([]int{61115})
-	s.SetTargets(targets())
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	// 重启恢复：注入 acct1 已成功的课程 id
+	s.RestoreDone(map[string][]int{"acct1": {61115}})
+	s.SetTargetsForAccount("acct1", targets())
 	s.Start()
 	defer s.Stop()
 
@@ -219,7 +242,34 @@ func TestRestoreDoneSkipsResubmit(t *testing.T) {
 		t.Fatal("未完成课程应提交")
 	}
 	// 状态显示 success
-	waitStatus(t, s, 61115, "success", 1*time.Second)
+	waitStatusAcct(t, s, "acct1", 61115, "success", 1*time.Second)
+}
+
+// TestElectivesSnapshot 快照命中与过期后刷新。
+func TestElectivesSnapshot(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+
+	// 未探测：命中失败
+	if _, ok := s.ElectivesSnapshot(); ok {
+		t.Fatal("未探测时快照应不可用")
+	}
+	// ProbeNow 填充快照
+	data, err := s.ProbeNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Publishes) != 3 {
+		t.Fatalf("快照数据异常: %+v", data)
+	}
+	if _, ok := s.ElectivesSnapshot(); !ok {
+		t.Fatal("探测后快照应命中")
+	}
+	// 无账号时应报错（clients 为 nil）
+	s2 := New(nil, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	if _, err := s2.ProbeNow(); err == nil {
+		t.Fatal("无账号时应报错")
+	}
 }
 
 func TestFormatOpenTime(t *testing.T) {

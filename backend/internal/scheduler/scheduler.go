@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -38,60 +37,67 @@ type SchedulerState struct {
 // probeInterval 课程探测最小间隔：30 秒，避免触发平台"访问过于频繁"熔断。
 const probeInterval = 30 * time.Second
 
-// Store 调度器依赖的最小持久化接口（由 store 包实现）。
-type Store interface {
-	AppendLog(classID int, action, result string, isOK bool) error
-}
+// snapshotTTL 课程快照有效期（大于探测间隔，保证 /electives 总能有数据可读）。
+const snapshotTTL = 40 * time.Second
 
-// Client 调度器依赖的至道客户端能力（zhidao.Client 隐式实现，测试可注入 mock）。
+// Client 调度器依赖的至道客户端能力（*zhidao.Client 隐式满足）。
 type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
 }
 
-// Scheduler 定时抢课引擎。多账号目标按账号隔离（acctTargets）。
+// AccountClients 多账号客户端注册表（真实实现 accounts.Manager）。
+type AccountClients interface {
+	ClientFor(acct string) (Client, bool)
+	AnyClient() (Client, bool)
+}
+
+// Store 调度器依赖的最小持久化接口（由 store 包实现）。
+type Store interface {
+	AppendLog(classID int, action, result string, isOK bool) error
+	SaveSuccess(acct string, classID int) error
+}
+
+// Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
 type Scheduler struct {
-	client   Client
+	clients  AccountClients
 	store    Store
 	openTime time.Time
 	interval time.Duration
 
-	mu       sync.Mutex
-	acctTargets map[string][]Target // 按账号隔离的目标课程（key=账号名，""=默认账号）
-	state    SchedulerState
-	inflight map[int]bool // 正在提交的 classID
-	done     map[int]bool // 已成功的 classID（重启恢复注入）
-	lastSuccessProbe time.Time // 上次成功探测课程数据的时间（限速保护）
+	mu          sync.Mutex
+	acctTargets map[string][]Target // 按账号隔离的目标课程
+	state       SchedulerState
+	inflight    map[string]map[int]bool // [账号][classID] 正在提交
+	done        map[string]map[int]bool // [账号][classID] 已成功
+	lastProbe   time.Time
+	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
+	lastDataAt  time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	start  bool // 是否已启动 Start()
+	start  bool
 }
 
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
-func New(client Client, store Store, openTime time.Time, interval time.Duration) *Scheduler {
+func New(clients AccountClients, store Store, openTime time.Time, interval time.Duration) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
-		client:   client,
-		store:    store,
-		openTime: openTime,
-		interval: interval,
+		clients:     clients,
+		store:       store,
+		openTime:    openTime,
+		interval:    interval,
 		acctTargets: make(map[string][]Target),
-		inflight: make(map[int]bool),
-		done:     make(map[int]bool),
-		ctx:      ctx,
-		cancel:   cancel,
+		inflight:    make(map[string]map[int]bool),
+		done:        make(map[string]map[int]bool),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	s.state.OpenTime = openTime
 	return s
 }
 
-// SetTargets 替换目标课程（默认账号，向后兼容）。
-func (s *Scheduler) SetTargets(targets []Target) {
-	s.SetTargetsForAccount("", targets)
-}
-
-// SetTargetsForAccount 为指定账号替换目标并重建状态。
+// SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
 func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,7 +113,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	for _, t := range targets {
 		status := "pending"
 		result := ""
-		if s.done[t.ClassID] {
+		if s.doneHas(acct, t.ClassID) {
 			status = "success"
 			result = "重启恢复：已报名成功"
 		}
@@ -122,23 +128,17 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	}
 }
 
-// Accounts 返回所有已知账号名。
-func (s *Scheduler) Accounts() []string {
+// RestoreDone 注入重启前已成功的 (账号, 课程) 记录。
+func (s *Scheduler) RestoreDone(done map[string][]int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.acctTargets))
-	for a := range s.acctTargets {
-		out = append(out, a)
-	}
-	return out
-}
-
-// RestoreDone 注入重启前已成功的课程 id（来自 store 的持久化状态）。
-func (s *Scheduler) RestoreDone(classIDs []int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, id := range classIDs {
-		s.done[id] = true
+	for acct, ids := range done {
+		if s.done[acct] == nil {
+			s.done[acct] = map[int]bool{}
+		}
+		for _, id := range ids {
+			s.done[acct][id] = true
+		}
 	}
 	s.rebuildCoursesLocked()
 }
@@ -146,9 +146,10 @@ func (s *Scheduler) RestoreDone(classIDs []int) {
 // rebuildCoursesLocked 依据 done 集合重建课程状态（需持有锁）。
 func (s *Scheduler) rebuildCoursesLocked() {
 	for i := range s.state.Courses {
-		if s.done[s.state.Courses[i].ClassID] {
-			s.state.Courses[i].Status = "success"
-			s.state.Courses[i].Result = "重启恢复：已报名成功"
+		c := &s.state.Courses[i]
+		if s.doneHas(c.Account, c.ClassID) {
+			c.Status = "success"
+			c.Result = "重启恢复：已报名成功"
 		}
 	}
 }
@@ -182,11 +183,6 @@ func (s *Scheduler) Stop() {
 	s.cancel()
 }
 
-// State 返回默认账号状态快照（拷贝）。
-func (s *Scheduler) State() SchedulerState {
-	return s.StateForAccount("")
-}
-
 // StateForAccount 返回指定账号的状态快照（Courses 仅含该账号目标；WindowOpened 全校共享）。
 func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
@@ -201,30 +197,72 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	return st
 }
 
-// tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交所有账号目标。
-// 限速保护：距上次成功探测不足 30 秒且非首次时静默跳过，避免触发平台限速。
-func (s *Scheduler) tick() {
+// ElectivesSnapshot 返回内存课程快照（40 秒内有效）。超高性能核心：页面浏览零上游请求。
+func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
 	s.mu.Lock()
-	last := s.lastSuccessProbe
+	defer s.mu.Unlock()
+	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+		return nil, false
+	}
+	return s.lastData, true
+}
+
+// ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
+func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
+	if s.clients == nil {
+		return nil, errors.New("没有任何已登录账号")
+	}
+	client, ok := s.clients.AnyClient()
+	if !ok || client == nil {
+		return nil, errors.New("没有任何已登录账号")
+	}
+	data, err := client.FindElectives()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.lastProbe = time.Now()
+	s.lastData = data
+	s.lastDataAt = time.Now()
 	s.mu.Unlock()
-	// 距上次成功探测不足 30 秒且非首次：静默跳过（限速保护）
-	if !last.IsZero() && time.Since(last) < probeInterval {
+	return data, nil
+}
+
+// tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交所有账号目标。
+func (s *Scheduler) tick() {
+	now := time.Now()
+	s.mu.Lock()
+	last := s.lastProbe
+	s.mu.Unlock()
+
+	// 探测闸门：距上次成功探测不足 30 秒且非首次则跳过
+	probe := last.IsZero() || now.Sub(last) >= probeInterval
+	// 超高性能：窗口到点后的首次 tick 立即探测（不等待 30s 闸门放过）
+	if !probe && now.After(s.openTime) && last.Before(s.openTime.Add(-time.Second)) {
+		probe = true
+	}
+	if !probe {
 		return
 	}
 
-	data, err := s.client.FindElectives()
+	client, ok := s.clients.AnyClient()
+	if !ok {
+		return // 尚无账号登录，安静等待
+	}
+	data, err := client.FindElectives()
 	if err != nil {
 		s.mu.Lock()
 		s.state.WindowOpened = false
 		s.mu.Unlock()
-		// Token 失效：静默跳过，不打日志不刷屏，等主人在网页登录后自动恢复
 		if !errors.Is(err, zhidao.ErrUnauthorized) {
 			log.Printf("[scheduler] 查询课程失败: %v", err)
 		}
 		return
 	}
 	s.mu.Lock()
-	s.lastSuccessProbe = time.Now()
+	s.lastProbe = now
+	s.lastData = data
+	s.lastDataAt = now
 	s.mu.Unlock()
 
 	opened := false
@@ -234,7 +272,6 @@ func (s *Scheduler) tick() {
 			break
 		}
 	}
-
 	s.mu.Lock()
 	s.state.WindowOpened = opened
 	s.mu.Unlock()
@@ -244,28 +281,37 @@ func (s *Scheduler) tick() {
 	s.submitAll()
 }
 
-// submitAll 并发提交所有未完成目标（每课程一个 goroutine）。
+// submitAll 并发提交所有账号的所有未完成目标（每账号每课程独立 goroutine）。
 func (s *Scheduler) submitAll() {
 	s.mu.Lock()
-	var targets []Target
-	for _, ts := range s.acctTargets {
-		targets = append(targets, ts...)
+	type pair struct {
+		acct string
+		t    Target
+	}
+	var pairs []pair
+	for acct, ts := range s.acctTargets {
+		for _, t := range ts {
+			pairs = append(pairs, pair{acct, t})
+		}
 	}
 	s.mu.Unlock()
-	for _, t := range targets {
-		s.submit(t)
+	for _, p := range pairs {
+		s.submit(p.acct, p.t)
 	}
 }
 
-// submit 提交单个课程。已成功（done）或正在提交（inflight）则跳过。
-func (s *Scheduler) submit(t Target) {
+// submit 提交单个课程（用目标账号自己的会话）。已成功（done）或正在提交（inflight）则跳过。
+func (s *Scheduler) submit(acct string, t Target) {
 	s.mu.Lock()
-	if s.done[t.ClassID] || s.inflight[t.ClassID] {
+	if s.doneHas(acct, t.ClassID) || s.inflightHas(acct, t.ClassID) {
 		s.mu.Unlock()
 		return
 	}
-	s.inflight[t.ClassID] = true
-	idx := s.statusIndexLocked(t.PublishID, t.ClassID)
+	if s.inflight[acct] == nil {
+		s.inflight[acct] = map[int]bool{}
+	}
+	s.inflight[acct][t.ClassID] = true
+	idx := s.statusIndexLocked(acct, t.ClassID)
 	if idx >= 0 && s.state.Courses[idx].Status != "success" {
 		s.state.Courses[idx].Status = "submitted"
 	}
@@ -274,38 +320,59 @@ func (s *Scheduler) submit(t Target) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("[scheduler] 提交课程 %d panic: %v", t.ClassID, r)
+				log.Printf("[scheduler] 提交课程 %d（账号 %s）panic: %v", t.ClassID, acct, r)
 				s.mu.Lock()
-				s.inflight[t.ClassID] = false
+				delete(s.inflight[acct], t.ClassID)
 				s.mu.Unlock()
 			}
 		}()
-		msg, err := s.client.SelectClass(t.ClassID)
+		client, ok := s.clients.ClientFor(acct)
+		var msg string
+		var err error
+		if !ok {
+			err = errors.New("账号会话未建立，等待重新登录")
+		} else {
+			msg, err = client.SelectClass(t.ClassID)
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		delete(s.inflight, t.ClassID)
-		idx := s.statusIndexLocked(t.PublishID, t.ClassID)
+		delete(s.inflight[acct], t.ClassID)
+		idx := s.statusIndexLocked(acct, t.ClassID)
 		if err != nil {
 			s.setStateLocked(idx, "failed", err.Error())
 			if s.store != nil {
-				s.store.AppendLog(t.ClassID, "select", err.Error(), false)
+				s.store.AppendLog(t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
 			}
 			return
 		}
-		s.done[t.ClassID] = true
+		if s.done[acct] == nil {
+			s.done[acct] = map[int]bool{}
+		}
+		s.done[acct][t.ClassID] = true
 		s.setStateLocked(idx, "success", msg)
 		if s.store != nil {
 			s.store.AppendLog(t.ClassID, "select", msg, true)
+			_ = s.store.SaveSuccess(acct, t.ClassID)
 		}
-		log.Printf("[scheduler] 课程 %d（%s）报名成功: %s", t.ClassID, t.CourseName, msg)
+		log.Printf("[scheduler] 账号 %s 课程 %d（%s）报名成功: %s", acct, t.ClassID, t.CourseName, msg)
 	}()
 }
 
-// statusIndexLocked 查找课程状态下标（需持有锁）。
-func (s *Scheduler) statusIndexLocked(publishID, classID int) int {
+func (s *Scheduler) doneHas(acct string, classID int) bool {
+	m, ok := s.done[acct]
+	return ok && m[classID]
+}
+
+func (s *Scheduler) inflightHas(acct string, classID int) bool {
+	m, ok := s.inflight[acct]
+	return ok && m[classID]
+}
+
+// statusIndexLocked 按账号 + 课程查找状态下标（需持有锁）。
+func (s *Scheduler) statusIndexLocked(acct string, classID int) int {
 	for i := range s.state.Courses {
 		c := s.state.Courses[i]
-		if c.ClassID == classID {
+		if c.Account == acct && c.ClassID == classID {
 			return i
 		}
 	}
@@ -321,22 +388,11 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 	s.state.Courses[idx].Result = result
 }
 
-// SuccessClassIDs 返回已成功课程 id 列表（持久化用）。
-func (s *Scheduler) SuccessClassIDs() []int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]int, 0, len(s.done))
-	for id := range s.done {
-		out = append(out, id)
-	}
-	return out
-}
-
 // FormatOpenTime 解析开放时间字符串（本地时区）。
 func FormatOpenTime(s string) (time.Time, error) {
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("开放时间格式错误: %w", err)
+		return time.Time{}, errors.New("开放时间格式错误: " + err.Error())
 	}
 	return t, nil
 }

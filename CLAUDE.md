@@ -102,6 +102,17 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - 前端 React 18 + Vite + TS + Radix Primitives，黑白无圆角，构建产物 go:embed 进二进制
 - 单文件部署：backend/xuanke.exe，一个端口 8080 服务 API 与页面
 
+### 状态与前端架构
+- **状态：** 已完成基于瑞士国际主义与黑白极简艺术风格的深度 UI 重构（零圆角、shadcn/ui 哲学与 Radix 原语），单二进制服务架构，测试全量通过。选课窗口 2026-09-13 09:00:00。
+- **UI 设计系统规范：** 严格绝对零圆角（Zero-Radius / rounded-none），基于纯粹单色色阶（#09090b 主黑底、#121215 表面黑底、#18181b 弱化表面、#27272a 发丝边框、#fafafa 冷白文本与反色高亮交互）。倒计时与容量统计全面启用等宽数字（tabular-nums）。
+- **零圆角组件体系（web/src/components/ui/）：**
+  - 原子组件：Button（多变体与黑白反色动画）、Input（发丝边框纯白聚焦）、Badge（微缩等宽大写微标）、Card（六大子容器体系）、Progress（直角几何进度条）
+  - 复合组件：Dialog（基于 Radix 的沉浸式模态弹窗）、Table（瑞士网格数据表）、Tabs（纯矩形反色分段器）
+- **三大核心页面：**
+  - Login：瑞士画廊海报构图、发丝级十字对齐标记与 RSA-1024 会话徽章
+  - Dashboard：Bento Grid 模块化排版、天/时/分/秒巨幕等宽脉搏倒计时看板、3 门目标课程监控卡片与 UNIX 极客黑白日志流
+  - Select：矩阵式课程卡片、实时模糊搜索与剩余名额过滤工具栏、嵌入式几何进度条与画册级详情弹窗
+
 ### 关键决策
 - **禁止自动重登**：doRequest 对 code=-1 直接返回 ErrUnauthorized，不触发重登（平台"访问过于频繁"限流 1 分钟，频繁登录会触发）。重登能力保留为显式 ReloginIfNeeded（最多一次）
 - **会话复用**：环境变量 XUANKE_TOKEN + XUANKE_COOKIE 注入已有会话（无需重新登录）；注入的 token 通过 SaveTokenOnly 持久化，重启自动恢复

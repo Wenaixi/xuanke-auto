@@ -2,13 +2,11 @@ package store
 
 import (
 	"database/sql"
-	"fmt"
-	"strings"
 
 	"xuanke-auto/backend/internal/scheduler"
 )
 
-// Store SQLite 持久化：账密/token/目标/日志。
+// Store SQLite 持久化：凭据（加密）/目标/日志/成功记录。
 type Store struct {
 	db *sql.DB
 }
@@ -18,49 +16,47 @@ func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// SaveAccount 保存账密与 token（单行，先删后插）。
-func (s *Store) SaveAccount(acct, pwd, token string) error {
-	if _, err := s.db.Exec("DELETE FROM account"); err != nil {
-		return err
-	}
-	_, err := s.db.Exec("INSERT INTO account (account, password, id_token) VALUES (?, ?, ?)", acct, pwd, token)
+// Credential 账号凭据（密码列为密文，明文只在内存）。
+type Credential struct {
+	Account     string
+	PasswordEnc string
+	IDToken     string
+}
+
+// SaveCredential upsert 账号凭据（加密密码 + 当前 token）。
+func (s *Store) SaveCredential(acct, pwdEnc, idToken string) error {
+	_, err := s.db.Exec(
+		"INSERT INTO credentials (account, password_enc, id_token) VALUES (?, ?, ?) "+
+			"ON CONFLICT(account) DO UPDATE SET password_enc=excluded.password_enc, id_token=excluded.id_token, updated_at=datetime('now')",
+		acct, pwdEnc, idToken)
 	return err
 }
 
-// SaveTokenOnly 保存纯 token 会话（无账密，环境变量注入路径）。
-// 先清空旧记录再插入，保证唯一一行。
-func (s *Store) SaveTokenOnly(token string) error {
-	if token == "" {
-		return nil
+// LoadCredentials 读取全部账号凭据（按账号排序）。
+func (s *Store) LoadCredentials() ([]Credential, error) {
+	rows, err := s.db.Query("SELECT account, password_enc, id_token FROM credentials ORDER BY account")
+	if err != nil {
+		return nil, err
 	}
-	if _, err := s.db.Exec("DELETE FROM account"); err != nil {
-		return err
+	defer rows.Close()
+	var out []Credential
+	for rows.Next() {
+		var c Credential
+		if err := rows.Scan(&c.Account, &c.PasswordEnc, &c.IDToken); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
-	_, err := s.db.Exec("INSERT INTO account (account, password, id_token) VALUES ('', '', ?)", token)
+	return out, rows.Err()
+}
+
+// UpdateIDToken 仅刷新 token（账密不变时调用）。
+func (s *Store) UpdateIDToken(acct, idToken string) error {
+	_, err := s.db.Exec("UPDATE credentials SET id_token = ?, updated_at = datetime('now') WHERE account = ?", idToken, acct)
 	return err
 }
 
-// UpdateToken 更新已保存记录的 token（环境变量注入的会话持久化）。
-// 无已有记录时无操作（不创建空账密记录）。
-func (s *Store) UpdateToken(token string) error {
-	if token == "" {
-		return nil
-	}
-	_, err := s.db.Exec("UPDATE account SET id_token = ? WHERE id = (SELECT id FROM account ORDER BY id DESC LIMIT 1)", token)
-	return err
-}
-
-// LoadAccount 读取保存的账密与 token。
-func (s *Store) LoadAccount() (acct, pwd, token string, err error) {
-	err = s.db.QueryRow("SELECT account, password, COALESCE(id_token,'') FROM account ORDER BY id DESC LIMIT 1").
-		Scan(&acct, &pwd, &token)
-	if err == sql.ErrNoRows {
-		return "", "", "", nil
-	}
-	return
-}
-
-// SaveAccountName 记录账号名（登录成功调用；账号名即主键，幂等，密码不入库）。
+// SaveAccountName 记录账号名（登录成功调用；账号名即主键，幂等）。
 func (s *Store) SaveAccountName(acct string) error {
 	if acct == "" {
 		return nil
@@ -87,17 +83,7 @@ func (s *Store) ListAccounts() ([]string, error) {
 	return out, rows.Err()
 }
 
-// SetTargets 替换目标课程（默认账号，先删后插保证唯一）。
-func (s *Store) SetTargets(targets []scheduler.Target) error {
-	return s.SetTargetsForAccount("", targets)
-}
-
-// LoadTargets 读取目标课程（默认账号）。
-func (s *Store) LoadTargets() ([]scheduler.Target, error) {
-	return s.LoadTargetsForAccount("")
-}
-
-// SetTargetsForAccount 按账号保存目标课程（先删后插保证唯一；account='' 为默认账号）。
+// SetTargetsForAccount 按账号保存目标课程（先删后插保证唯一；账号必填）。
 func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -131,6 +117,31 @@ func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
 			return nil, err
 		}
 		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// SaveSuccess 记录某账号某课程已报名成功（幂等）。
+func (s *Store) SaveSuccess(acct string, classID int) error {
+	_, err := s.db.Exec("INSERT OR IGNORE INTO success (account, class_id) VALUES (?, ?)", acct, classID)
+	return err
+}
+
+// LoadSuccess 读取全部成功记录（map[账号][]classID）。
+func (s *Store) LoadSuccess() (map[string][]int, error) {
+	rows, err := s.db.Query("SELECT account, class_id FROM success")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]int{}
+	for rows.Next() {
+		var a string
+		var cid int
+		if err := rows.Scan(&a, &cid); err != nil {
+			return nil, err
+		}
+		out[a] = append(out[a], cid)
 	}
 	return out, rows.Err()
 }
@@ -178,46 +189,4 @@ func (s *Store) LoadLogs(limit int) ([]LogEntry, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-// SaveState 保存任务状态快照（窗口开启时间 + 已成功课程）。
-func (s *Store) SaveState(openTime string, windowOpened bool, successClassIDs []int) error {
-	ids := make([]string, len(successClassIDs))
-	for i, id := range successClassIDs {
-		ids[i] = fmt.Sprintf("%d", id)
-	}
-	opened := 0
-	if windowOpened {
-		opened = 1
-	}
-	_, err := s.db.Exec("INSERT INTO task_state (id, open_time, window_opened, success_class_ids) VALUES (1, ?, ?, ?) "+
-		"ON CONFLICT(id) DO UPDATE SET open_time=excluded.open_time, window_opened=excluded.window_opened, "+
-		"success_class_ids=excluded.success_class_ids, updated_at=datetime('now')",
-		openTime, opened, strings.Join(ids, ","))
-	return err
-}
-
-// LoadState 读取任务状态快照。
-func (s *Store) LoadState() (openTime string, windowOpened bool, successClassIDs []int, err error) {
-	var opened int
-	var ids string
-	err = s.db.QueryRow("SELECT open_time, window_opened, success_class_ids FROM task_state WHERE id=1").
-		Scan(&openTime, &opened, &ids)
-	if err == sql.ErrNoRows {
-		return "", false, nil, nil
-	}
-	if err != nil {
-		return "", false, nil, err
-	}
-	windowOpened = opened == 1
-	for _, p := range strings.Split(ids, ",") {
-		if p == "" {
-			continue
-		}
-		var id int
-		if _, err2 := fmt.Sscanf(p, "%d", &id); err2 == nil {
-			successClassIDs = append(successClassIDs, id)
-		}
-	}
-	return openTime, windowOpened, successClassIDs, nil
 }

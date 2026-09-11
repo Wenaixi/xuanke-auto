@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -9,7 +10,7 @@ import (
 )
 
 // Open 打开（必要时创建）SQLite 数据库并确保表结构存在。
-// modernc.org/sqlite 为纯 Go 实现，免 CGO，可交叉编译单二进制。
+// 检测到旧版数据形状（account 表 / 空账号目标）时直接报错拒绝启动——政策：不兼容旧数据。
 func Open(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -23,32 +24,28 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
-	if err := ensureTargetsAccountColumn(d); err != nil {
+	if err := refuseLegacy(d); err != nil {
 		d.Close()
 		return nil, err
 	}
 	return d, nil
 }
 
-// ensureTargetsAccountColumn 老库 targets 表无 account 列时补列，保证按账号隔离目标可用。
-func ensureTargetsAccountColumn(d *sql.DB) error {
-	rows, err := d.Query("PRAGMA table_info(targets)")
-	if err != nil {
+// refuseLegacy 兼容性检查：检测到旧版数据形状直接拒绝启动（政策：不兼容旧数据）。
+func refuseLegacy(d *sql.DB) error {
+	var n int
+	if err := d.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='account'").Scan(&n); err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt any
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "account" {
-			return nil // 已有列，无需迁移
-		}
+	if n > 0 {
+		return errors.New("检测到旧版数据库（account 表），本版本不兼容旧数据。请删除 " + "data/xuanke.db" + " 后重新启动")
 	}
-	_, err = d.Exec("ALTER TABLE targets ADD COLUMN account TEXT NOT NULL DEFAULT ''")
-	return err
+	var empty int
+	if err := d.QueryRow("SELECT count(*) FROM targets WHERE account = ''").Scan(&empty); err != nil {
+		return err
+	}
+	if empty > 0 {
+		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 " + "data/xuanke.db" + " 后重新启动")
+	}
+	return nil
 }

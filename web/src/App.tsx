@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
 import Select from "./routes/Select"
+import { ToastProvider } from "./components/ui/Toast"
 import { UNAUTHORIZED_EVENT } from "./api/client"
 
 const queryClient = new QueryClient({
@@ -31,15 +32,17 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {token ? (
-        page === "dashboard" ? (
-          <Dashboard onLogout={logout} onGoSelect={() => setPage("select")} />
+      <ToastProvider>
+        {token ? (
+          page === "dashboard" ? (
+            <Dashboard onLogout={logout} onGoSelect={() => setPage("select")} />
+          ) : (
+            <Select onDone={() => setPage("dashboard")} />
+          )
         ) : (
-          <Select onDone={() => setPage("dashboard")} />
-        )
-      ) : (
-        <Login onLogin={login} />
-      )}
+          <Login onLogin={login} />
+        )}
+      </ToastProvider>
     </QueryClientProvider>
   )
 }

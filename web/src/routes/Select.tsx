@@ -62,7 +62,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
   })
 
-  const [selected, setSelected] = useState<Record<number, number>>({})
+  const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
   const [saved, setSaved] = useState(false)
@@ -70,14 +70,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [detailClass, setDetailClass] = useState<ClassItem | null>(null)
 
-  // 进入页面时自动回显已保存的目标课程
+  // 进入页面时自动回显已保存的目标课程（含多备选优先级）
   useEffect(() => {
     if (stateData?.courses && stateData.courses.length > 0) {
       setSelected((prev) => {
-        if (Object.keys(prev).length > 0) return prev
-        const initial: Record<number, number> = {}
-        for (const c of stateData.courses) {
-          initial[c.publish_id] = c.class_id
+        if (Object.values(prev).some((arr) => arr.length > 0)) return prev
+        const initial: Record<number, ClassItem[]> = {}
+        const ordered = [...stateData.courses].sort((a, b) => a.priority - b.priority)
+        for (const c of ordered) {
+          const item: ClassItem = { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem
+          ;(initial[c.publish_id] ??= []).push(item)
         }
         return initial
       })
@@ -97,24 +99,26 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     [publishes]
   )
 
-  const pick = (publishId: number, classId: number, courseName: string) => {
+  // 备选目标挑选：同发布下最多选择 maxSlots 门，按点击顺序排优先级
+  const pick = (publishId: number, classItem: ClassItem) => {
     setSelected((prev) => {
-      if (prev[publishId] === classId) {
-        const next = { ...prev }
-        delete next[publishId]
+      const arr = [...(prev[publishId] ?? [])]
+      const idx = arr.findIndex((c) => c.id === classItem.id)
+      if (idx >= 0) {
+        arr.splice(idx, 1)
         toast({
           title: "已取消目标",
-          description: `已移出【${courseName}】`,
+          description: `已移出【${classItem.course_name}】（优先级 ${idx + 1}）`,
           variant: "default",
         })
-        return next
+        return { ...prev, [publishId]: arr }
       }
       toast({
-        title: "已选择目标",
-        description: `已选中【${courseName}】，请记得点击底栏保存`,
+        title: "已选择备选目标",
+        description: `已选中【${classItem.course_name}】(优先顺序 ${arr.length + 1})，可继续添加同发布备选`,
         variant: "default",
       })
-      return { ...prev, [publishId]: classId }
+      return { ...prev, [publishId]: [...arr, classItem] }
     })
     setSaved(false)
   }
@@ -122,11 +126,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const save = async () => {
     const targets: Target[] = []
     for (const p of publishes) {
-      const cid = selected[p.publish_id]
-      if (!cid) continue
-      const cls = p.classes.find((c) => c.id === cid)
-      if (!cls) continue
-      targets.push({ publish_id: p.publish_id, class_id: cid, course_name: cls.course_name })
+      const list = selected[p.publish_id] ?? []
+      list.forEach((cls, i) => {
+        targets.push({
+          publish_id: p.publish_id,
+          class_id: cls.id,
+          course_name: cls.course_name,
+          priority: i,
+        })
+      })
     }
 
     setSaving(true)
@@ -140,7 +148,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       setSaved(true)
       toast({
         title: targets.length > 0 ? "目标保存成功" : "目标已清空",
-        description: targets.length > 0 ? `已锁定 ${targets.length} 门预选课程` : "已清空所有预选目标",
+        description: targets.length > 0 ? `已锁定 ${publishes.length} 个发布的多备选目标` : "已清空所有预选目标",
         variant: "default",
       })
       onDone() // 保存成功直接返回控制台
@@ -156,7 +164,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
   }
 
-  const selectedCount = Object.keys(selected).length
+  const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
   return (
     <div className="min-h-screen bg-black text-white p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">
@@ -246,9 +254,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                       t.open ? "bg-[var(--emerald)]" : "bg-[var(--fg-dim)]"
                     }`}
                   />
-                  {selected[t.publish_id] && (
+                  {(selected[t.publish_id] ?? []).length > 0 && (
                     <Badge variant="primary" className="text-[10px] px-1.5 py-0 ml-1">
-                      已锁定
+                      已锁定 {(selected[t.publish_id] ?? []).length}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -285,7 +293,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   {/* 课程卡片网格阵列 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredClasses.map((c) => {
-                      const isSelected = selected[t.publish_id] === c.id
+                      const selArr = selected[t.publish_id] ?? []
+                      const selIdx = selArr.findIndex((x) => x.id === c.id)
+                      const isSelected = selIdx >= 0
                       const rate = fillRate(c)
                       const isFull = c.selected_count >= c.max_count
                       const remaining = Math.max(0, c.max_count - c.selected_count)
@@ -313,7 +323,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               </span>
                               {isSelected ? (
                                 <Badge variant="primary" className="text-[11px] font-medium">
-                                  已选预选
+                                  备选 {selIdx + 1}
                                 </Badge>
                               ) : isFull ? (
                                 <Badge variant="outline" className="text-[11px] text-neutral-500 border-neutral-800">
@@ -391,13 +401,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               <Button
                                 variant={isSelected ? "outline" : "primary"}
                                 size="sm"
-                                onClick={() => pick(t.publish_id, c.id, c.course_name)}
+                                onClick={() => pick(t.publish_id, c)}
                                 className="flex items-center justify-center gap-1.5 text-xs h-9"
                               >
                                 {isSelected ? (
                                   <>
                                     <Check className="h-3.5 w-3.5 text-white" />
-                                    <span>已选定</span>
+                                    <span>备选 {selIdx + 1}</span>
                                   </>
                                 ) : (
                                   <>
@@ -428,7 +438,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         <footer className="fixed bottom-4 inset-x-4 max-w-6xl mx-auto z-40 p-4 rounded-[var(--radius-lg)] border border-neutral-800 bg-neutral-950/95 backdrop-blur-md shadow-none flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-xs font-mono">
             <span className="text-white font-medium">
-              已选课程: {selectedCount} / {publishes.length} 门
+              已选备选: {selectedCount} 门 · 发布 {Object.keys(selected).length} 个
             </span>
             {saved && (
               <span className="text-white flex items-center gap-1 text-[11px]">

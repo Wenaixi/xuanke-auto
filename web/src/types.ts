@@ -57,6 +57,7 @@ export interface CourseStatus {
   publish_id: number
   class_id: number
   course_name: string
+  priority: number
   status: string // pending|in_range|submitted|success|failed
   result: string
 }
@@ -71,6 +72,7 @@ export interface Target {
   publish_id: number
   class_id: number
   course_name: string
+  priority?: number
 }
 
 export interface LogEntry {

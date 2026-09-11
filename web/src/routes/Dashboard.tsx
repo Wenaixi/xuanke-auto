@@ -328,7 +328,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                 >
                   <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
                     <Badge variant="outline" className="text-[10px] font-mono">
-                      #{c.publish_id}
+                      #{c.publish_id} · 备选 {c.priority + 1}
                     </Badge>
                     <Badge
                       variant={isSuccess ? "primary" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}

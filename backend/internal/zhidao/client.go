@@ -343,12 +343,17 @@ func (c *Client) FindElectives() (*ElectivesData, error) {
 	}
 
 	// 2. 备选重试方案：尝试从学期列表获取当前选中学年学期后携带参数请求
+	// 真实浏览器（select.js）下拉切换学期时由 jQuery $.ajax 将对象编码为
+	// application/x-www-form-urlencoded，这里完全对齐该格式（而非 JSON body）。
 	terms, termErr := c.YearTerms()
 	if termErr == nil {
 		for _, t := range terms {
 			if t.Selected {
-				payload, _ := json.Marshal(map[string]int{"schoolYear": t.SchoolYear, "schoolTerm": t.SchoolTerm})
-				retryBody, rErr := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", payload, "application/json")
+				termForm := url.Values{}
+				termForm.Set("schoolYear", fmt.Sprintf("%d", t.SchoolYear))
+				termForm.Set("schoolTerm", fmt.Sprintf("%d", t.SchoolTerm))
+				retryBody, rErr := c.doRequest(http.MethodPost, "/electives/select/findElectivesData",
+					[]byte(termForm.Encode()), "application/x-www-form-urlencoded")
 				if rErr == nil {
 					return parseElectives(retryBody)
 				}
@@ -467,6 +472,7 @@ type CountEntry struct {
 	ID             int `json:"id"`
 	SelectedCount  int `json:"selectedCount"`
 	AuditedCount   int `json:"auditedCount"`
+	MaxCount       int `json:"maxCount"`
 }
 
 // StudentCounts 查询课程实时人数。
@@ -496,4 +502,19 @@ func (c *Client) StudentCounts(ids []int) ([]CountEntry, error) {
 		return nil, fmt.Errorf("人数查询错误: %s", extractMsg(body))
 	}
 	return j.CountList, nil
+}
+
+// IsClassFull 实时查询该课程是否已满（已报人数 >= 可报人数）。
+// 满员判定不依赖平台错误文案，直接对比人数——用户指定方案。
+func (c *Client) IsClassFull(classID int) (bool, error) {
+	counts, err := c.StudentCounts([]int{classID})
+	if err != nil {
+		return false, err
+	}
+	for _, ce := range counts {
+		if ce.ID == classID {
+			return ce.MaxCount > 0 && ce.SelectedCount >= ce.MaxCount, nil
+		}
+	}
+	return false, fmt.Errorf("课程 %d 无人数数据", classID)
 }

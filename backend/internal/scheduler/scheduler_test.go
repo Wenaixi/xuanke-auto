@@ -15,7 +15,7 @@ type fakeStore struct {
 	log []string
 }
 
-func (f *fakeStore) AppendLog(classID int, action, result string, isOK bool) error {
+func (f *fakeStore) AppendLog(acct string, classID int, action, result string, isOK bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.log = append(f.log, result)
@@ -61,13 +61,32 @@ func (f *fakeClient) ClassDetail(classID int) (*zhidao.ClassDetail, error) {
 	return &zhidao.ClassDetail{ID: classID, CourseName: "健美操"}, nil
 }
 
+func (f *fakeClient) IsClassFull(classID int) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range f.data.Publishes {
+		for _, c := range p.Classes {
+			if c.ID == classID {
+				return c.MaxCount > 0 && c.SelectedCount >= c.MaxCount, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func newFakeClient(open bool) *fakeClient {
 	return &fakeClient{
 		data: &zhidao.ElectivesData{
 			Publishes: []zhidao.Publish{
-				{PublishID: 1, PublishName: "体育", InDateRange: open},
-				{PublishID: 2, PublishName: "校本1", InDateRange: open},
-				{PublishID: 3, PublishName: "校本2", InDateRange: open},
+				{PublishID: 1, PublishName: "高二年体育", InDateRange: open, Classes: []zhidao.Class{
+					{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
+				}},
+				{PublishID: 2, PublishName: "高二年校本1", InDateRange: open, Classes: []zhidao.Class{
+					{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 29},
+				}},
+				{PublishID: 3, PublishName: "高二年校本2", InDateRange: open, Classes: []zhidao.Class{
+					{ID: 61276, CourseName: "健身瑜伽", SelectedCount: 0, MaxCount: 29},
+				}},
 			},
 		},
 		selectErr:   map[int]error{},
@@ -97,9 +116,9 @@ func (s *Scheduler) resetProbe() {
 
 func targets() []Target {
 	return []Target{
-		{PublishID: 1, ClassID: 61115, CourseName: "健美操"},
-		{PublishID: 2, ClassID: 61205, CourseName: "篮球"},
-		{PublishID: 3, ClassID: 61276, CourseName: "健身瑜伽"},
+		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
+		{PublishID: 2, ClassID: 61205, CourseName: "篮球", Priority: 0},
+		{PublishID: 3, ClassID: 61276, CourseName: "健身瑜伽", Priority: 0},
 	}
 }
 
@@ -212,9 +231,9 @@ func TestSameClassParallelAcrossAccounts(t *testing.T) {
 
 func TestSubmitFailureRetries(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.selectErr[61115] = errors.New("名额已满")
+	fc.selectErr[61115] = errors.New("网络中断")
 	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
-	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
 	defer s.Stop()
 
@@ -283,5 +302,54 @@ func TestFormatOpenTime(t *testing.T) {
 	}
 	if tt.Year() != 2026 || tt.Month() != 9 || tt.Day() != 13 || tt.Hour() != 9 {
 		t.Fatalf("解析错误: %v", tt)
+	}
+}
+
+// TestBackupFallbackOnFull 同发布多备选：第一备选人数满员（快照对比 selected>=max）→ 自动退避第二备选并成功。
+func TestBackupFallbackOnFull(t *testing.T) {
+	fc := newFakeClient(false)
+	// 第一备选健美操已满 36/36；第二备选篮球空
+	fc.mu.Lock()
+	fc.data.Publishes[0].Classes = []zhidao.Class{
+		{ID: 61115, CourseName: "健美操", SelectedCount: 36, MaxCount: 36},
+		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36},
+	}
+	fc.mu.Unlock()
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{
+		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
+		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
+	})
+	s.Start()
+	defer s.Stop()
+
+	setAllOpened(fc)
+	s.resetProbe()
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+	waitStatusAcct(t, s, "acct1", 61205, "success", 3*time.Second)
+}
+
+// TestBackupNotAdvancedOnNetworkError 非满员错误（网络中断）不得切换备选——只有人数确认满员才退避。
+func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.selectErr[61115] = errors.New("connection reset")
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{
+		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
+		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
+	})
+	s.Start()
+	defer s.Stop()
+
+	setAllOpened(fc)
+	s.resetProbe()
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+	// 备选不应被提交（未确认满员）
+	time.Sleep(150 * time.Millisecond)
+	fc.mu.Lock()
+	calls := fc.selectCalls[61205]
+	fc.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("未确认满员时不应切备选，备选被提交 %d 次", calls)
 	}
 }

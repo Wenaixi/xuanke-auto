@@ -68,7 +68,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[api] 保存账号名失败: %v", err)
 	}
 	sess := d.Sessions.Create(req.Account)
-	d.Store.AppendLog(0, "login", "账号 "+req.Account+" 登录成功", true)
+	d.Store.AppendLog(req.Account, 0, "login", "账号 "+req.Account+" 登录成功", true)
 	writeJSON(w, 0, map[string]string{"token": sess, "account": req.Account}, "登录成功")
 }
 
@@ -136,7 +136,7 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Sched.SetTargetsForAccount(acct, req.Targets)
-	d.Store.AppendLog(0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true)
+	d.Store.AppendLog(acct, 0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true)
 	writeJSON(w, 0, req.Targets, "目标已保存")
 }
 
@@ -153,7 +153,7 @@ func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
 
 // handleLogs 报名日志。
 func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
-	logs, err := d.Store.LoadLogs(100)
+	logs, err := d.Store.LoadLogs(sessionAccount(r), 100)
 	if err != nil {
 		writeJSON(w, 1, nil, "读取日志失败: "+err.Error())
 		return

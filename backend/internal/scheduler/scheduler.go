@@ -4,17 +4,20 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"xuanke-auto/backend/internal/zhidao"
 )
 
-// Target 目标课程（每个发布 1 门）。
+// Target 目标课程（同发布多门备选，Priority 越小越先提交）。
 type Target struct {
 	PublishID  int    `json:"publish_id"`
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
+	Priority   int    `json:"priority"`
 }
 
 // CourseStatus 单课程任务状态。
@@ -23,6 +26,7 @@ type CourseStatus struct {
 	PublishID  int    `json:"publish_id"`
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
+	Priority   int    `json:"priority"`
 	Status     string `json:"status"` // pending|in_range|submitted|success|failed
 	Result     string `json:"result"`
 }
@@ -45,6 +49,7 @@ type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
 	ClassDetail(classID int) (*zhidao.ClassDetail, error)
+	IsClassFull(classID int) (bool, error)
 }
 
 // AccountClients 多账号客户端注册表（真实实现 accounts.Manager）。
@@ -55,7 +60,7 @@ type AccountClients interface {
 
 // Store 调度器依赖的最小持久化接口（由 store 包实现）。
 type Store interface {
-	AppendLog(classID int, action, result string, isOK bool) error
+	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
 }
 
@@ -71,9 +76,13 @@ type Scheduler struct {
 	state       SchedulerState
 	inflight    map[string]map[int]bool // [账号][classID] 正在提交
 	done        map[string]map[int]bool // [账号][classID] 已成功
+	full        map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	lastProbe   time.Time
 	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt  time.Time
+
+	chainMu sync.Mutex
+	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -91,6 +100,8 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		acctTargets: make(map[string][]Target),
 		inflight:    make(map[string]map[int]bool),
 		done:        make(map[string]map[int]bool),
+		full:        make(map[string]map[int]bool),
+		chains:      make(map[string]bool),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -123,6 +134,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 			PublishID:  t.PublishID,
 			ClassID:    t.ClassID,
 			CourseName: t.CourseName,
+			Priority:   t.Priority,
 			Status:     status,
 			Result:     result,
 		})
@@ -283,81 +295,188 @@ func (s *Scheduler) tick() {
 	s.submitAll()
 }
 
-// submitAll 并发提交所有账号的所有未完成目标（每账号每课程独立 goroutine）。
+// submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。
 func (s *Scheduler) submitAll() {
 	s.mu.Lock()
-	type pair struct {
+	type chain struct {
 		acct string
-		t    Target
+		ts   []Target
 	}
-	var pairs []pair
+	var chains []chain
 	for acct, ts := range s.acctTargets {
+		byPub := map[int][]Target{}
 		for _, t := range ts {
-			pairs = append(pairs, pair{acct, t})
+			byPub[t.PublishID] = append(byPub[t.PublishID], t)
+		}
+		for _, list := range byPub {
+			sort.SliceStable(list, func(i, j int) bool { return list[i].Priority < list[j].Priority })
+			chains = append(chains, chain{acct, list})
 		}
 	}
 	s.mu.Unlock()
-	for _, p := range pairs {
-		s.submit(p.acct, p.t)
+	for _, c := range chains {
+		s.spawnChain(c.acct, c.ts)
 	}
 }
 
-// submit 提交单个课程（用目标账号自己的会话）。已成功（done）或正在提交（inflight）则跳过。
-func (s *Scheduler) submit(acct string, t Target) {
-	s.mu.Lock()
-	if s.doneHas(acct, t.ClassID) || s.inflightHas(acct, t.ClassID) {
-		s.mu.Unlock()
+// spawnChain 逐备选提交：确认满员（快照或实时人数）才切下一备选；成功即终止。
+func (s *Scheduler) spawnChain(acct string, ts []Target) {
+	key := acct + "\x00" + strconv.Itoa(ts[0].PublishID)
+	s.chainMu.Lock()
+	if s.chains[key] {
+		s.chainMu.Unlock()
 		return
 	}
-	if s.inflight[acct] == nil {
-		s.inflight[acct] = map[int]bool{}
-	}
-	s.inflight[acct][t.ClassID] = true
-	idx := s.statusIndexLocked(acct, t.ClassID)
-	if idx >= 0 && s.state.Courses[idx].Status != "success" {
-		s.state.Courses[idx].Status = "submitted"
-	}
-	s.mu.Unlock()
-
+	s.chains[key] = true
+	s.chainMu.Unlock()
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[scheduler] 提交课程 %d（账号 %s）panic: %v", t.ClassID, acct, r)
-				s.mu.Lock()
-				delete(s.inflight[acct], t.ClassID)
-				s.mu.Unlock()
-			}
+			s.chainMu.Lock()
+			delete(s.chains, key)
+			s.chainMu.Unlock()
 		}()
 		client, ok := s.clients.ClientFor(acct)
-		var msg string
-		var err error
-		if !ok {
-			err = errors.New("账号会话未建立，等待重新登录")
-		} else {
-			msg, err = client.SelectClass(t.ClassID)
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		delete(s.inflight[acct], t.ClassID)
-		idx := s.statusIndexLocked(acct, t.ClassID)
-		if err != nil {
-			s.setStateLocked(idx, "failed", err.Error())
-			if s.store != nil {
-				s.store.AppendLog(t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
+		for _, t := range ts {
+			s.mu.Lock()
+			// 已成功：本发布目标完成，终止
+			if s.doneHas(acct, t.ClassID) {
+				s.mu.Unlock()
+				return
 			}
+			s.releaseFullIfFreedLocked(acct, t.ClassID)
+			if s.fullHas(acct, t.ClassID) {
+				s.mu.Unlock()
+				continue
+			}
+			// 快照人数确认满员（selected >= max）→ 记入 full，跳过本备选
+			if s.classFullInSnapshot(t.ClassID) {
+				s.markFullLocked(acct, t)
+				s.mu.Unlock()
+				continue
+			}
+			if s.inflight[acct] == nil {
+				s.inflight[acct] = map[int]bool{}
+			}
+			s.inflight[acct][t.ClassID] = true
+			idx := s.statusIndexLocked(acct, t.ClassID)
+			if idx >= 0 && s.state.Courses[idx].Status != "success" {
+				s.state.Courses[idx].Status = "submitted"
+			}
+			s.mu.Unlock()
+
+			var msg string
+			var err error
+			if !ok {
+				err = errors.New("账号会话未建立，等待重新登录")
+			} else {
+				msg, err = client.SelectClass(t.ClassID)
+			}
+
+			s.mu.Lock()
+			delete(s.inflight[acct], t.ClassID)
+			if err == nil {
+				if s.done[acct] == nil {
+					s.done[acct] = map[int]bool{}
+				}
+				s.done[acct][t.ClassID] = true
+				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "success", msg)
+				if s.store != nil {
+					s.store.AppendLog(acct, t.ClassID, "select", msg, true)
+					_ = s.store.SaveSuccess(acct, t.ClassID)
+				}
+				log.Printf("[scheduler] 账号 %s 课程 %d（%s）报名成功: %s", acct, t.ClassID, t.CourseName, msg)
+				s.mu.Unlock()
+				return
+			}
+			// 非满员失败：改为实时人数复核确认是否真满员
+			// （用户要求：不解析平台"满"字错误文案，直接对比总数与已报数）
+			if !ok {
+				// 账号会话未建立：保留状态，终止本链，下个 tick 重试
+				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
+				if s.store != nil {
+					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
+				}
+				s.mu.Unlock()
+				return
+			}
+			full, cErr := s.classFullRealtime(acct, t.ClassID)
+			if cErr == nil && full {
+				s.markFullLocked(acct, t)
+				s.mu.Unlock()
+				continue
+			}
+			// 实时复核未现满员（网络抖动/人未满但报名被拒）：保留失败状态，终止本链，下个 tick 重试
+			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
+			if s.store != nil {
+				s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
+			}
+			s.mu.Unlock()
 			return
 		}
-		if s.done[acct] == nil {
-			s.done[acct] = map[int]bool{}
-		}
-		s.done[acct][t.ClassID] = true
-		s.setStateLocked(idx, "success", msg)
-		if s.store != nil {
-			s.store.AppendLog(t.ClassID, "select", msg, true)
-			_ = s.store.SaveSuccess(acct, t.ClassID)
-		}
-		log.Printf("[scheduler] 账号 %s 课程 %d（%s）报名成功: %s", acct, t.ClassID, t.CourseName, msg)
 	}()
+}
+
+// classFullInSnapshot 快照人数确认满员（需持锁）。
+func (s *Scheduler) classFullInSnapshot(classID int) bool {
+	if s.lastData == nil {
+		return false
+	}
+	for _, p := range s.lastData.Publishes {
+		for _, c := range p.Classes {
+			if c.ID == classID {
+				return c.MaxCount > 0 && c.SelectedCount >= c.MaxCount
+			}
+		}
+	}
+	return false
+}
+
+// classFullRealtime 实时人数复核（锁外调用，禁止持锁时发起网络请求）。
+func (s *Scheduler) classFullRealtime(acct string, classID int) (bool, error) {
+	client, ok := s.clients.ClientFor(acct)
+	if !ok {
+		return false, errors.New("账号会话未建立")
+	}
+	return client.IsClassFull(classID)
+}
+
+// markFullLocked 确认满员：记入 full 集合并置 failed 状态（每课程只记录一次）。
+func (s *Scheduler) markFullLocked(acct string, t Target) {
+	if s.full[acct] == nil {
+		s.full[acct] = map[int]bool{}
+	}
+	if s.full[acct][t.ClassID] {
+		return
+	}
+	s.full[acct][t.ClassID] = true
+	s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "该课程已满员，退避至下一备选")
+	if s.store != nil {
+		s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false)
+	}
+}
+
+// releaseFullIfFreedLocked 快照（新鲜且显示不满）时解除 full 标记并回 pending（需持锁）。
+func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
+	if !s.fullHas(acct, classID) {
+		return
+	}
+	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+		return // 快照过期，等下一次有效快照再判断
+	}
+	if s.classFullInSnapshot(classID) {
+		return
+	}
+	delete(s.full[acct], classID)
+	idx := s.statusIndexLocked(acct, classID)
+	if idx >= 0 {
+		s.state.Courses[idx].Status = "pending"
+		s.state.Courses[idx].Result = ""
+	}
+}
+
+func (s *Scheduler) fullHas(acct string, classID int) bool {
+	m, ok := s.full[acct]
+	return ok && m[classID]
 }
 
 func (s *Scheduler) doneHas(acct string, classID int) bool {

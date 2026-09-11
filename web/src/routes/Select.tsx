@@ -90,7 +90,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     () =>
       publishes.map((p) => ({
         ...p,
-        label: (p.publish_name.match(/高二年(.+)$/) || [])[1] || `发布 #${p.publish_id}`,
+        label: p.publish_name || `发布 #${p.publish_id}`,
         open: p.in_date_range,
         tip: `可选 ${p.can_select} 门 · 已选 ${p.has_selected} 门 · 共 ${p.total_count} 门班次`,
       })),
@@ -143,6 +143,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         description: targets.length > 0 ? `已锁定 ${targets.length} 门预选课程` : "已清空所有预选目标",
         variant: "default",
       })
+      onDone() // 保存成功直接返回控制台
     } catch (e: any) {
       setErrorMsg(e.message || "目标保存失败，请检查网络通信")
       toast({

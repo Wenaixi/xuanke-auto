@@ -1,0 +1,4 @@
+2026/09/12 00:59:55 [main] 已恢复保存的会话 token 01108017...
+2026/09/12 00:59:55 [scheduler] 已启动，轮询间隔 300ms，窗口开启时间 2026-09-13 09:00:00
+2026/09/12 00:59:55 [main] 至道选课自动化服务启动: http://localhost:3091
+2026/09/12 00:59:55 服务启动失败: listen tcp :3091: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.

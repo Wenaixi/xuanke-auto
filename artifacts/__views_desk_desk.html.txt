@@ -1,0 +1,549 @@
+﻿<!-- 主页内容开始 -->
+<section class="content userDesk" style="margin-top:0;height: 100%;padding: 12px 18px 0 18px;display: none">
+    <style>
+        .notepad-content {
+            overflow: auto;
+            height: 305px;
+        }
+
+        .notepad-content:hover::-webkit-scrollbar-thumb {
+            background-color: rgba(0, 0, 0, 0.20);
+        }
+
+        .notepad-content::-webkit-scrollbar-thumb {
+            background-color: #fff;
+        }
+
+        .notepad-content::-webkit-scrollbar {
+            width: 3px;
+            background-color: #fff;
+        }
+
+        #deskCountDivParent {
+            overflow: auto;
+            height: 320px;
+        }
+
+        #deskCountDivParent:hover::-webkit-scrollbar-thumb {
+            background-color: rgba(0, 0, 0, 0.20);
+        }
+
+        #deskCountDivParent::-webkit-scrollbar-thumb {
+            background-color: #fff;
+        }
+
+        #deskCountDivParent::-webkit-scrollbar {
+            width: 3px;
+            background-color: #fff;
+        }
+
+        .notepad-content .readNotepad:hover {
+            background-color: #edf3fe !important
+        }
+
+        .slider-group {
+            padding: 0 10px;
+        }
+
+        @font-face {
+            font-family: 'layui-icon';
+            src: url('/layui/font/iconfont.eot?v=256');
+            src: url('/layui/font/iconfont.eot?v=256#iefix') format('embedded-opentype'),
+            url('/layui/font/iconfont.woff2?v=256') format('woff2'),
+            url('/layui/font/iconfont.woff?v=256') format('woff'),
+            url('/layui/font/iconfont.ttf?v=256') format('truetype'),
+            url('/layui/font/iconfont.svg?v=256#layui-icon') format('svg');
+        }
+
+        .layui-icon {
+            font-family: "layui-icon" !important;
+            font-size: 16px;
+            font-style: normal;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .layui-laydate-static {
+            height: 100%;
+            width: 100% !important;
+            overflow: auto;
+            border-radius: 5px;
+            border: 0 !important;
+            box-shadow: none !important;
+        }
+
+        .layui-laydate-static > .layui-laydate-main {
+            width: 100% !important;
+        }
+
+        .layui-laydate-static .layui-laydate-header {
+            line-height: 25px !important;
+        }
+
+        .layui-laydate-static .layui-laydate-content > table {
+            width: 100% !important;
+        }
+
+        .layui-laydate-static .layui-laydate-content table > thead,
+        .layui-laydate-static .layui-laydate-content table > tbody,
+        .layui-laydate-static .layui-laydate-content td {
+            border: 0 !important;
+        }
+
+        .layui-laydate-static .layui-laydate-content td {
+            height: 39px !important;
+        }
+
+        .my-data-div {
+            height: 60px;
+            padding: 3px;
+            width: 20%;
+            float: left;
+        }
+
+        .my-data {
+            width: 100%;
+            position: absolute;
+            top: 35px;
+            bottom: 20px;
+            left: 0px;
+            padding: 20px 20px 0px 20px;
+            overflow-x: auto;
+            display: grid;
+            justify-items: center;
+            align-items: center;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            grid-gap: 20px;
+        }
+
+        .my-data > a {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .my-data-item {
+            text-align: center;
+            vertical-align: middle;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            width: 100%;
+            height: calc(100%);
+            min-height: 40px;
+            background-color: #f6f6f6;
+            border-radius: 5px;
+        }
+
+        .my-data-item > div:nth-child(1) {
+            font-size: 23px !important;
+            color: #479ff7 !important;
+        }
+
+        .my-data-item > div:nth-child(2) {
+            font-size: 13px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #noticeListDiv td {
+            padding: 5px;
+        }
+
+        #deskLinkDiv {
+            height: auto !important;
+        }
+
+        #deskLinkDiv .swiper-slide {
+            padding: 4px 0 !important;
+            margin-top: 5px !important;
+            text-align: center;
+            font-size: 18px;
+            background: #fff;
+            width: 118px;
+            display: -webkit-box;
+            display: -ms-flexbox;
+            display: -webkit-flex;
+            display: flex;
+            flex-direction: column;
+            -webkit-box-pack: center;
+            -ms-flex-pack: center;
+            -webkit-justify-content: center;
+            justify-content: space-between;
+            -webkit-box-align: center;
+            -ms-flex-align: center;
+            -webkit-align-items: center;
+            align-items: center;
+        }
+
+        #deskLinkDiv .swiper-slide > a > div {
+            height: 60px;
+        }
+
+        .main-content-title li {
+            line-height: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+        }
+
+        .main-content-title li a {
+            color: #333333;
+            padding-left: 5px;
+            padding-right: 5px;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 14px;
+            margin-left: 6px;
+        }
+
+        .main-content-title a {
+            text-decoration: none;
+        }
+
+        .main-content-title li .date {
+            color: #666666;
+            font-size: 14px;
+        }
+
+        .main-content-title li a:hover {
+            text-decoration: underline;
+        }
+
+        .main-content-title li:hover {
+            background-color: #edf3fe !important
+        }
+
+        .main-content-title a:hover {
+            color: #086CBE !important;
+        }
+
+        .main-content-title .list-mark {
+            height: 5px;
+            width: 5px;
+            background-color: #3285FF;
+            transform: rotate(45deg);
+            flex: 0 0 5px;
+            margin-left: 5px;
+        }
+
+        #notepadListDiv tr:hover {
+            background-color: #edf3fe !important
+        }
+    </style>
+    <div class="row" style="height:calc(100%);min-height: 265px;overflow: auto">
+        <!-- 常用功能模块 -->
+        <div class="col-md-7 padding-left-10" id="deskLinkMdDiv" style="height:381px">
+            <div class="box box-primary" style="margin-bottom:0px;height:100%">
+                <div class="box-header with-border slider-group">
+                    <ul id="deskLinkTabDiv" style="margin-bottom:0">
+                        <li class="group-btn"><span></span></li>
+                    </ul>
+                </div>
+                <div class="box-body padding-all-5 swiper-content flex">
+                    <div class="swiper-container">
+                        <div id="deskLinkDiv" class="swiper-wrapper" style="display: none;">
+                        </div>
+                        <div class="swiper-pagination" style="bottom: 0;"></div>
+                    </div>
+                    <!-- 无数据时取消注释 -->
+                    <div id="noLinkMsg" class="no-data" style="display: none;">
+                        <img src="/public/assets/i/noData.png" style="height: 40%;"/>
+                        <span>当前暂无快捷方式！</span>
+                    </div>
+                </div>
+                <div class="overlay" id="deskLinkRefresh">
+                    <i class="fa fa-spinner fa-spin" style="color: gray;"></i>
+                </div>
+            </div>
+        </div>
+        <!-- 我的数据模块 -->
+        <div class="col-md-5  padding-right-10" style="height:381px; padding-left: 6px;" id="deskCountMdDiv">
+            <div class="box box-primary" style="margin-bottom:0px; height:100%;position: relative">
+                <div class="box-header with-border" style="padding: 12px 0 8px 10px;">
+                    <h3 class="box-title" style="font-size: 17px;">校务提醒</h3>
+                    <h3 class="box-title dateSmsExpirationTip" style="font-size: 12px;color: red;"></h3>
+                    <div class="box-tools pull-right">
+                        <button type="button" class="btn btn-box-tool" id="refreshCountBtn" title="刷新">
+                            <i class="glyphicon glyphicon-refresh"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="box-body" style="overflow-x:auto;max-height: 320px" id="deskCountDivParent">
+                    <div class="col-md-12 column" id="deskCountDiv" style="padding: 0;">
+
+                    </div>
+                </div>
+                <div class="overlay" id="deskCountRefresh" style="display: none">
+                    <i class="fa fa-spinner fa-spin" style="color: gray;"></i>
+                </div>
+            </div>
+        </div>
+        <!-- 公示公告模块 -->
+        <div class="col-md-4 padding-left-10" style="height:381px; padding-right: 9px;">
+            <div class="box box-primary" style="margin-bottom:0px;height:100%">
+                <div class="box-header with-border" style="padding: 12px 0 8px 10px;">
+                    <h3 class="box-title" style="font-size: 17px;">公示公告</h3>
+                    <div class="box-tools pull-right" style="top: 7px;">
+                        <button type="button" class="btn btn-box-tool boxtoolbtn">
+                            <a href="/admin.html#/notice/query">更多</a>
+                        </button>
+                    </div>
+                </div>
+                <div class="box-body notepad-content" style="height: 330px">
+                    <ul id="noticeListDiv" class="main-content-title hasNotice">
+                    </ul>
+                    <div id="noNoticeMsg" class="no-data notHasNotice">
+                        <img src="/public/assets/i/noData.png" style="height: 40%;"/>
+                        <span>当前暂无公示公告内容！</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 日历模块 -->
+        <div class="col-md-4 padding-center-10" style="height:381px;padding-left: 12px;padding-right: 12px;">
+            <div class="box box-primary" style="margin-bottom:0px;height:100%">
+                <div class="box-body padding-all-5" id="scheduleDiv" style="display: none">
+                    <div class="schedule"></div>
+                </div>
+                <div id="articleDiv" style="display: none">
+                    <div class="box-header with-border" style="padding: 12px 0 8px 10px;">
+                        <h3 class="box-title" style="font-size: 17px;">官网发布</h3>
+                        <div class="box-tools pull-right" style="top: 7px;">
+                            <button type="button" class="btn btn-box-tool boxtoolbtn">
+                                <a id="moreArticle" target="_blank">更多</a>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="box-body notepad-content" style="height: 330px">
+                        <ul id="articleListDiv" class="main-content-title hasArticle">
+                        </ul>
+                        <div id="noArticleMsg" class="no-data notHasArticle">
+                            <img src="/public/assets/i/noData.png" style="height: 40%;"/>
+                            <span>当前暂无资讯！</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 备忘记录模块 -->
+        <div class="col-md-4 padding-right-10" style="height:381px; padding-left: 9px;">
+            <div class="box box-primary" style="margin-bottom:0px;height:100%">
+                <div class="box-header with-border" style="padding: 12px 0 8px 10px;">
+                    <h3 class="box-title" style="font-size: 17px;">备忘记录</h3>
+                    <div class="box-tools pull-right" style="top: 7px;">
+                        <button type="button" class="btn btn-box-tool boxtoolbtn">
+                            <a href="javascript:;" id="addNotepadBtn">添加</a>
+                        </button>
+                        <button type="button" class="btn btn-box-tool boxtoolbtn">
+                            <a href="javascript:;" id="viewAllNotepadBtn">更多</a>
+                        </button>
+                    </div>
+                </div>
+                <div class="box-body notepad-content">
+                    <div id="noNotepadMsg" class="no-data">
+                        <img src="/public/assets/i/noData.png" style="height: 40%;"/>
+                        <span>当前暂无备忘记录！</span>
+                    </div>
+                    <table id="notepadListDiv" class="table table-condensed table-hover de***REMOVED***" style="width: 100%;display: none;table-layout:fixed;">
+                    </table>
+                </div>
+                <div class="overlay" id="deskNotepadRefresh">
+                    <i class="fa fa-spinner fa-spin" style="color: gray;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+
+<!-- 主页内容结束 -->
+<section class="content adminDesk" id="deskDiv" style="display: none">
+    <div class="row">
+        <div class="col-md-6" style="padding-right: 10px;">
+            <div class="box box-primary" style="margin-bottom: 20px;">
+                <div class="box-header with-border" style="position: relative;">
+                    <i class="fa fa-pie-chart"></i>
+                    <h3 class="box-title">
+                        <span>系统平台概要</span>
+                        <button id="lookAtSystemTask" class="btn btn-primary btn-xs">查看后台运行任务</button>
+                    </h3>
+                    <h3 class="box-title dateSmsExpirationTip" style="color: red;position: absolute;right:12px;font-size: 15px;"></h3>
+                </div>
+                <div class="box-body">
+                    <div class="chart">
+                        <div class="col-md-4 column setHeight" id="areaInfoContent"></div>
+                        <div class="col-md-4 column setHeight" id="userInfoContent"></div>
+                        <div class="col-md-4 column setHeight" id="loginInfoContent"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="box box-info">
+                <div class="box-header with-border">
+                    <i class="fa fa-tachometer"></i>
+                    <h3 class="box-title">系统硬件使用情况</h3>
+                </div>
+                <div class="box-body">
+                    <div class="chart">
+                        <div class="col-md-6 column setHeight" id="memoryInfoContent"></div>
+                        <div class="col-md-6 column setHeight" id="cpuInfoContent"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6" style="padding-left: 10px;">
+            <div class="box box-danger" style="margin-bottom: 20px;">
+                <div class="box-header with-border">
+                    <i class="fa fa-bar-chart-o"></i>
+                    <h3 class="box-title">系统办公事务数汇总</h3>
+                </div>
+                <div class="box-body">
+                    <div class="chart">
+                        <div id="workContent" class="col-md-12 column setHeight"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="box box-success">
+                <div class="box-header with-border">
+                    <i class="fa fa-object-group"></i>
+                    <h3 class="box-title">系统拓扑图</h3>
+                </div>
+                <div class="box-body">
+                    <div class="chart" id="showBigImage" style="cursor: pointer">
+                        <div id="barChart" class="col-md-12 column setHeight"
+                             style="background:url('/public/beforeimg/beforepic/systemInfo.png');background-size: 100%;background-repeat: no-repeat; background-attachment: scroll;background-position: center;width: 90%"
+                        ></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div id="cozeAgentEntry" style="position: absolute;bottom: 50px;right: 30px; cursor: pointer"></div>
+<!--数据填报内容弹框按日期(月，周，日)-->
+<script type="text/html" id="contentStatusBySchool">
+    <div id="outContent" style="padding: 0 15px" class="search-box">
+        <div id="schoolStatusToolbar">
+            <div class="form-inline">
+                <div class="search-item" style="width: 110px;">
+                    <label class="control-label">对象类型:</label>
+                    <select id="relate_type_condition" class="form-control">
+                    </select>
+                </div>
+                <div class="search-item" style="width: 130px;">
+                    <label class="control-label">对象名称:</label>
+                    <input type="text" id="search_name_school" class="form-control" style="width: 130px" maxlength="15" placeholder="输入对象名称">
+                </div>
+                <div class="search-item" style="width: 110px;">
+                    <label class="control-label">提交状态:</label>
+                    <select id="school_status" class="form-control">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="search-item" id="schoolDaySpan" style="display: none; width: 110px;">
+                    <label class="control-label">按日选择:</label>
+                    <input type="text" id="daySchool" class="form-control" readonly="readonly" placeholder="选择日期">
+                </div>
+                <div class="search-item" id="schoolMonthSpan" style="display: none; width: 110px;">
+                    <label class="control-label">按月选择:</label>
+                    <input type="text" id="monthSchool" class="form-control" readonly="readonly" placeholder="选择月份">
+                </div>
+                <div class="search-item" id="schoolWeekSpan" style="display: none; width: 110px;">
+                    <label class="control-label">按周选择:</label>
+                    <select id="weekSchool" class="form-control" placeholder="选择周期"></select>
+                </div>
+                <div class="search-item" id="schoolTermSpan" style="display: none">
+                    <label class="control-label">选择学期:</label>
+                    <select id="term_search" class="form-control"></select>
+                </div>
+                <div class="search-item" id="schoolYearSpan" style="display: none">
+                    <label class="control-label">选择学年:</label>
+                    <input type="text" id="yearSchool" class="form-control" readonly="readonly" placeholder="选择学年">
+                </div>
+
+                <span id="grade_span">
+                <div class="search-item" style="width: 110px;">
+                    <label class="control-label">选择年级:</label>
+                    <select id="grade_condition" class="form-control">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="search-item" style="width: 110px;">
+                    <label class="control-label">选择班级:</label>
+                    <select id="class_condition" class="form-control">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                </span>
+                <div class="search-btn-item">
+                    <button id="schoolBtn" class="btn btn-primary"><i class="glyphicon glyphicon-search"></i> 查询</button>
+                </div>
+                <div class="search-btn-item">
+                    <button id="batchSendMessage" class="btn btn-warning" disabled><i class="glyphicon glyphicon-envelope"></i> 批量发送通知</button>
+                </div>
+                <div class="search-btn-item">
+                    <button id="batchSendMessageAll" class="btn btn-warning"><i class="glyphicon glyphicon-envelope"></i> 催填未提交</button>
+                </div>
+                <div id="chartBtnDiv" class="search-btn-item">
+                    <button id="chartBtn" class="btn btn-success"><i class="glyphicon glyphicon-stats"></i> 完成度</button>
+                </div>
+                <span class="ml-5" id="completionDiv"></span>
+            </div>
+        </div>
+        <div class="col-sm-12">
+            <table id="schoolContentStatusTable" style="white-space:nowrap; overflow:hidden"></table>
+
+        </div>
+    </div>
+</script>
+
+
+<script type="text/html" id="sendSmsPopup">
+    <form role="form">
+        <div class="box-body form-popup">
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="form-group">
+                        <label class="control-label">短信内容:</label>
+                        <textarea id="editMsg" style="min-height: 75px;" class="form-control" placeholder="短信内容至多100个字" maxlength="100"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</script>
+
+<script type="text/html" id="sendSmsToAllPopup">
+    <form role="form">
+        <div class="box-body form-popup">
+            <div class="row">
+                <div class="col-md-12" id="nameDiv">
+                    <div class="form-group">
+                        <label class="control-label">人员名单<i class="required-sign">*</i></label>
+                        <textarea id="sendObjectNames" style="min-height: 300px;" class="form-control" placeholder="" readonly></textarea>
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <div class="form-group">
+                        <label class="control-label">短信内容<i class="required-sign">*</i><span
+                                style="color: red;font-weight: 500;">（如需在短信内容中添加网页填写链接，请使用 ### 代替链接位置，填写人收到短信可直接点击链接打开单独的页面进行填报）</span></label>
+                        <textarea id="editMsgAll" style="min-height: 130px;" class="form-control" placeholder="短信内容至多500个字" maxlength="500"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</script>
+<script>
+    layui.use([], function () {
+        const path = exportViewPath();
+        layui.use(path, layui.factory(path));
+    });
+</script>

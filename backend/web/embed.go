@@ -4,41 +4,41 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 )
 
 //go:embed all:dist
 var distFS embed.FS
 
-// Handler 返回前端静态文件服务。
-func Handler() http.Handler {
+// SpaHandler 服务前端静态文件；非 /api 且不存在的路径回退到 index.html。
+func SpaHandler() http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic(err)
 	}
-	return http.FileServer(http.FS(sub))
-}
+	fileServer := http.FileServer(http.FS(sub))
 
-// SpaHandler 服务前端静态文件；非 /api 且不存在的路径回退到 index.html。
-func SpaHandler() http.Handler {
-	fileServer := Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
-		if p == "/" {
+		p := path.Clean(r.URL.Path)
+		if p == "/" || p == "." {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		// 尝试打开文件；不存在则回退 index.html（SPA 路由）
-		if _, err := fs.Stat(distFS, "dist"+strings.TrimPrefix(p, "/")); err != nil {
-			b, err := distFS.ReadFile("dist/index.html")
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(b)
+		// 检查静态文件在嵌入式文件系统中是否存在
+		trimmed := strings.TrimPrefix(p, "/")
+		if _, err := fs.Stat(sub, trimmed); err == nil {
+			// 文件存在，由标准 FileServer 负责响应，自动保证正确的 Content-Type 与缓存协商
+			fileServer.ServeHTTP(w, r)
 			return
 		}
-		fileServer.ServeHTTP(w, r)
+		// 文件不存在，SPA 单页应用回退到 index.html
+		indexBytes, err := fs.ReadFile(sub, "index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexBytes)
 	})
 }

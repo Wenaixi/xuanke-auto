@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { ClassItem, ElectivesData, Target } from "../types"
+import type { ClassItem, ElectivesData, Target, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"
@@ -54,6 +54,12 @@ export default function Select({ onDone }: Props) {
     refetchInterval: 10000,
   })
 
+  // 查询当前调度器已保存的目标课程并自动回显
+  const { data: stateData } = useQuery({
+    queryKey: ["state"],
+    queryFn: () => api<SchedulerState>("/state"),
+  })
+
   const [selected, setSelected] = useState<Record<number, number>>({})
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState("")
@@ -61,6 +67,20 @@ export default function Select({ onDone }: Props) {
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [detailClass, setDetailClass] = useState<ClassItem | null>(null)
+
+  // 进入页面时自动回显已保存的目标课程
+  useEffect(() => {
+    if (stateData?.courses && stateData.courses.length > 0) {
+      setSelected((prev) => {
+        if (Object.keys(prev).length > 0) return prev
+        const initial: Record<number, number> = {}
+        for (const c of stateData.courses) {
+          initial[c.publish_id] = c.class_id
+        }
+        return initial
+      })
+    }
+  }, [stateData])
 
   const publishes = data?.publishes ?? []
 
@@ -81,16 +101,16 @@ export default function Select({ onDone }: Props) {
         const next = { ...prev }
         delete next[publishId]
         toast({
-          title: "已取消目标课程",
-          description: `已将【${courseName}】移出预选队列`,
+          title: "已取消目标",
+          description: `已移出【${courseName}】`,
           variant: "default",
         })
         return next
       }
       toast({
-        title: "已锁定预选目标！",
-        description: `已成功选择【${courseName}】，记得点击底栏保存哦喵~`,
-        variant: "success",
+        title: "已选择目标",
+        description: `已选中【${courseName}】，请记得点击底栏保存`,
+        variant: "default",
       })
       return { ...prev, [publishId]: classId }
     })
@@ -106,30 +126,22 @@ export default function Select({ onDone }: Props) {
       if (!cls) continue
       targets.push({ publish_id: p.publish_id, class_id: cid, course_name: cls.course_name })
     }
-    if (targets.length === 0) {
-      setErrorMsg("请至少挑选一门预选目标课程喵~")
-      toast({
-        title: "提示",
-        description: "请至少勾选一门您心仪的课程后再保存",
-        variant: "warning",
-      })
-      return
-    }
+
     setSaving(true)
     setErrorMsg("")
     try {
       await api("/targets", { method: "PUT", body: JSON.stringify({ targets }) })
       setSaved(true)
       toast({
-        title: "🎉 预选目标保存成功！",
-        description: `已锁定 ${targets.length} 门目标，选课窗口开放时系统将以 300ms 极速自动抢报！`,
-        variant: "success",
+        title: targets.length > 0 ? "目标保存成功" : "目标已清空",
+        description: targets.length > 0 ? `已锁定 ${targets.length} 门预选课程` : "已清空所有预选目标",
+        variant: "default",
       })
     } catch (e: any) {
       setErrorMsg(e.message || "目标保存失败，请检查网络通信")
       toast({
-        title: "保存遇到问题",
-        description: e.message || "通信异常，请检查后端运行状态",
+        title: "保存失败",
+        description: e.message || "通信异常",
         variant: "destructive",
       })
     } finally {

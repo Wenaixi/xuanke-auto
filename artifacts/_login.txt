@@ -1,0 +1,608 @@
+﻿<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta name="renderer" content="webkit">
+    <meta charset="UTF-8"/>
+    <title>至道智慧校园ERP系统</title>
+    <meta name="keywords" content="至道智慧校园ERP系统"/>
+    <meta name="description" content="至道智慧校园ERP系统"/>
+    <link rel="stylesheet" href="/lib/AdminLTE/dist/css/font-awesome.min.css" type="text/css"/>
+    <link rel="stylesheet" href="/public/login_20200101/css/css.css?v=4"/>
+    <link rel="stylesheet" href="/lib/lunbo/css/lunbo.css"/>
+</head>
+
+<body>
+<div class="zd-background"
+>
+    <div class="zd-header">
+        <div class="zd-logo">
+            <img src="/public/login_20200101/images/logo.png"/>
+        </div>
+    </div>
+    <div class="zd-main">
+        <div class="zd-main-left">
+            <!-- Swiper 轮播-->
+            <div class="swiper-container">
+                <div class="swiper-wrapper">
+                    <div class="swiper-slide">
+                        <img src="/public/login_20200101/images/lunbo/lunbo1.jpg" alt=""/>
+                    </div>
+                    <div class="swiper-slide">
+                        <img src="/public/login_20200101/images/lunbo/lunbo2.png" alt=""/>
+                    </div>
+                    <div class="swiper-slide">
+                        <img src="/public/login_20200101/images/lunbo/lunbo3.png" alt=""/>
+                    </div>
+
+                </div>
+                <!-- Add Pagination -->
+                <div class="swiper-pagination"></div>
+            </div>
+            <div class="zd-main-bottom">
+                <div>
+                    <div class="icon" id="huawei_icon">
+                        <img id="pc" src="/public/login_20200101/images/huawei.png" alt=""/>
+                        <span>华为安卓</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="icon" id="ohos_icon">
+                        <img id="pc" src="/public/login_20200101/images/huawei.png" alt=""/>
+                        <span>华为鸿蒙</span>
+                    </div>
+                </div>
+                <div id="android_box">
+                    <div class="icon" id="android_icon">
+                        <img id="android" src="/public/login_20200101/images/android_icon.png" alt=""/>
+                        <span>安卓版</span>
+                    </div>
+                    <!--<div class="code">
+                        <img style="width:90px;height:90px" src="/apkQrcode"/>
+                    </div>-->
+                </div>
+                <div id="ios_box">
+                    <div class="icon" id="ios_icon">
+                        <img id="ios" src="/public/login_20200101/images/ios_icon.png" alt=""/>
+                        <span>iPhone版</span>
+                    </div>
+                    <!--<div class="code">
+                        <img style="width:90px;height:90px" src="/public/login_20200101/images/ios_code.png"/>
+                    </div>-->
+                </div>
+                <div id="wx_box">
+                    <div class="icon" id="wx_icon">
+                        <img id="wx" src="/public/login_20200101/images/4.png" alt=""/>
+                        <span>微官网</span>
+                    </div>
+                    <!--<div class="code">
+                        <img style="width:90px;height:90px" src="/wcQrcode"/>
+                    </div>-->
+                </div>
+            </div>
+        </div>
+        <!-- 用户名 -->
+        <div class="zd-main-right">
+            <div class="right-text">
+                <img src="/public/login_20200101/images/text.png" alt=""/>
+            </div>
+            <!-- 登录方式切换标签 -->
+            <div class="login-from">
+                <div class="login-tabs">
+                    <div class="login-tab active" data-tab="account">密码登录</div>
+                    <div class="login-tab" data-tab="qrcode">扫码登录</div>
+                </div>
+
+                <!-- 账号密码登录面板（默认显示） -->
+                <div class="login-panel active" id="account-panel">
+                    <div class="am-input-group input-btns">
+                        <input id="userName" name="userName" type="text" class="am-form-field" placeholder="请输入账号" autocomplete="off"/>
+                        <span class="clear-text clearText"><i class="fa fa-remove"></i></span>
+                    </div>
+                    <div class="am-input-group input-btns">
+                        <input id="password" name="password" type="password" class="am-form-field" placeholder="请输入密码" autocomplete="off"/>
+                        <span id="viewPassword" class="pwd-icon"><i class="fa fa-eye-slash"></i></span>
+                        <span class="clear-text clearText"><i class="fa fa-remove"></i></span>
+                    </div>
+                    <div class="am-input-group">
+                        <!-- 验证码 -->
+                        <input id="captcha" type="text" class="am-form-field" placeholder="请输入验证码" autocomplete="off" style="border-radius: 18px 0 0 18px;"/>
+                        <div class="check-code" title="换一个？">
+                            <img src="/login/captcha" alt="" onclick="updateCaptcha();" class="zd-captcha">
+                        </div>
+                    </div>
+                    <div class="submit-box">
+                        <button id="btnLoginId" type="button">登录</button>
+                    </div>
+                    <!-- 底部链接 - 保留原图样式，优化为切换入口 -->
+                    <div class="am-input-group" style="padding-bottom: 0;height: 28px !important;">
+                        <a href="/admin.html#/login/forgetPassword" class="zd-forget-pwd">忘记密码?</a>
+                    </div>
+                </div>
+
+                <!-- 手机验证码登录面板 -->
+                <div class="login-panel" id="sms-panel">
+                    <div class="am-input-group input-btns">
+                        <input id="userMobile" name="userMobile" type="text" class="am-form-field" placeholder="请输入手机号" maxlength="11" autocomplete="off"/>
+                        <span class="clear-text clearText"><i class="fa fa-remove"></i></span>
+                    </div>
+                    <div class="am-input-group input-btns">
+                        <input type="text" class="am-form-field send-code-input" id="userMobileCode" placeholder="请输入验证码" maxlength="6" autocomplete="off">
+                        <button class="send-code-btn" id="sendCodeBtn">获取验证码</button>
+                    </div>
+                    <div class="submit-box">
+                        <button id="btnSmsLoginId" type="button">登录</button>
+                    </div>
+                </div>
+
+                <!-- APP扫码登录面板 -->
+                <div class="login-panel" id="qrcode-panel">
+                    <div class="qrcode-area">
+                        <div class="qrcode-img">
+                            <!-- 实际项目中替换为真实二维码 -->
+                            <img id="loginQrCode" src="" alt="APP扫码登录" style="width: 100%; height: 100%;">
+                        </div>
+                        <p class="qrcode-tips">请使用APP扫码登录</p>
+                        <a id="refreshQrCode" style="font-size: 12px; color: #409eff; cursor: pointer">刷新二维码</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="zd-foot" style="z-index: -2">
+        <div class="zd-nav">
+            <em>服务热线：400-080-0526</em>
+
+            <em><a href="https://beian.miit.gov.cn/#/Integrated/index" target="_blank" style="color: blue">闽ICP备19006529号</a></em>
+            <p>
+                为了更好的操作体验，建议使用：谷歌浏览器、360浏览器极速模式、IE9.0或以上版本浏览器
+            </p>
+        </div>
+    </div>
+
+    <div id="agentUrl" style="position: fixed;bottom: 10%;right: 20px;cursor: pointer;z-index: -1">
+        <img title="至道客服" src="/public/images/custom_service.png" style="height: 80px;">
+    </div>
+</div>
+
+<script src="/lib/lunbo/js/luobo.js"></script>
+<script src="/lib/lunbo/js/swiper-luobo.js"></script>
+<script src="/lib/jQuery/jquery.min.js"></script>
+
+<script src="/lib/jquery_form/jquery.form.min.js"></script>
+<script src="/layui/modules/layer.js"></script>
+<script src="/lib/jsencrypt/jsencrypt.min.js"></script>
+<script src="/lib/jquery.enplaceholder.js"></script>
+<script src="/public/js/common.js?v=2.0.18"></script>
+
+<script>
+    var swiper = new Swiper('.swiper-container', {
+        pagination: '.swiper-pagination',
+        paginationClickable: true,
+        spaceBetween: 1,
+        centeredSlides: true,
+        autoplay: 5000,
+        autoplayDisableOnInteraction: false
+    });
+
+    $(function () {
+        $('input:text:first').focus(); //把焦点放在第一个文本框
+        var $userName = $("#userName");
+        var $password = $("#password");
+        var $captcha = $("#captcha");
+        var interval;
+
+        setTimeout(function () {
+            $userName.val("");
+            $password.val("");
+        }, 50);
+
+        // 切换登录标签
+        function switchTab(tabName) {
+            layer.closeAll();
+
+            // 切换标签样式
+            document.querySelectorAll('.login-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.dataset.tab === tabName) {
+                    tab.classList.add('active');
+                }
+            });
+            // 切换面板显示
+            document.querySelectorAll('.login-panel').forEach(panel => {
+                panel.classList.remove('active');
+            });
+            document.getElementById(`${tabName}-panel`).classList.add('active');
+
+            //扫码登录事件
+            if (tabName === "qrcode") {
+                var uniqueId = getUniqueDeviceId()
+
+                updateQrCode();
+
+                $("#refreshQrCode").off("click").on("click", function () {
+                    updateQrCode();
+                });
+
+                function updateQrCode() {
+                    clearInterval(interval);
+
+                    ajaxReq("/login/getQrCodeKey", {}, function (ret) {
+                        $("#loginQrCode").attr("src", "/login/getLoginQr?id=" + ret.id);
+
+                        interval = setInterval(function () {
+                            $.ajax("/login/checkQrLogin", {
+                                type: "POST",
+                                cache: false,
+                                dataType: "json",
+                                data: {uuid: ret.id, uniqueId: uniqueId},
+                                success: function (rs) {
+                                    if (rs.isOk) {
+                                        clearInterval(interval);
+
+                                        if (rs.status == 1) {
+                                            showRespOK("登录成功！");
+                                            go_url(rs.url);
+                                        }
+                                    }
+                                },
+                                error: function (rs) {
+                                    clearInterval(interval);
+                                    showRespFail("扫码登录失败，请刷新重试！");
+                                }
+                            });
+                        }, 2500);
+                    });
+                }
+            } else {
+                if (interval != null) {
+                    clearInterval(interval);
+                }
+            }
+        }
+
+        // 绑定标签点击事件
+        document.querySelectorAll('.login-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                switchTab(tab.dataset.tab);
+            });
+        });
+
+        var encrypt = new JSEncrypt();
+        encrypt.setPublicKey("MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCWuhgriWbHIbPCQyHmablwQSyItcLyKlQU/0ydXkvU4KJtEExNmuXS0xdoVLBRGxNO5f2u2MkNGzJrFhSpVL68Qc0knhWofzs+BdtpSF4nMi7BteOvOKi0OkvhhCBcHL71Vk8UXOsaKDZkZ3lCBVQHpSA4+s6pi9xIeF93jz6pGwIDAQAB");
+        var $btnLoginId = $("#btnLoginId").off("click").on("click", function () {
+            layer.closeAll();
+
+            if (!$userName.val()) {
+                showTip("请输入账号", "userName");
+                $userName.focus();
+                return;
+            }
+
+            if (!$password.val()) {
+                showTip("请输入密码", "password");
+                $password.focus();
+                return;
+            }
+
+            if (!$captcha.val()) {
+                showTip("请输入验证码", 'captcha');
+                $captcha.focus();
+                return;
+            }
+            var uniqueId = getUniqueDeviceId()
+            var identification = encrypt.encrypt(JSON.stringify({userName: $userName.val(), password: $password.val()}));
+            var para = {
+                captcha: $captcha.val(),
+                identification: identification,
+                uniqueId: uniqueId,
+                priorityId: localStorage["priorityId"]
+            };
+
+            postReq("/login/doLogin", para, function (ret) {
+                sessionStorage["zd_edu_token"] = ret.token;
+                if (ret.inSelectCourse) {
+                    location.href = ret.returnUrl;
+                } else {
+                    var search = location.search;
+                    var keyword = "returnUrl=";
+                    var indexOf = search.indexOf(keyword);
+                    if (indexOf > 0) {
+                        var nextEqualIndexOf = search.indexOf("&", indexOf + keyword.length);
+                        var returnUrl = nextEqualIndexOf > 0 ? search.substring(indexOf + keyword.length, nextEqualIndexOf) : search.substring(indexOf + keyword.length);
+                        search = nextEqualIndexOf > 0 ? (search.substring(0, indexOf) + search.substring(nextEqualIndexOf + 1)) : search.substring(0, indexOf);
+                        if ((returnUrl.indexOf("http://") === 0 || returnUrl.indexOf("https://") === 0) && returnUrl.indexOf(window.location.origin) !== 0) {
+                            location.href = "/admin.html#/desk";
+                        } else {
+                            location.href = returnUrl + (search === '?' ? '' : search);
+                        }
+                    } else {
+                        location.href = "/admin.html" + (location.search || "") + (location.hash || "#/desk");
+                    }
+                }
+            }, function (ret) {
+                showRespFail(ret.msg);
+                updateCaptcha();
+
+                if (ret.captchaMsg) {
+                    showTip(ret.captchaMsg, 'captcha');
+                }
+            });
+        });
+
+
+        var $inp = $('input'); //所有的input元素
+        $inp.keypress(function (e) { //这里给function一个事件参数命名为e，叫event也行，随意的，e就是IE窗口发生的事件。
+            var key = e.which; //e.which是按键的值
+            if (key == 13) {
+                let listOf = $('.login-tab.active');
+                let tabName = listOf.data("tab");
+                if (tabName === "sms") {
+                    $("#btnSmsLoginId").trigger("click");
+                } else if (tabName === "account") {
+                    $btnLoginId.trigger("click");
+                }
+            }
+        });
+
+        $inp.placeholderForIE();
+
+        showMouseTipCodeTop('huawei_icon', '<img style="width:150px;height:150px;margin-top: 5px;" src="/huaweiQrcode"/>');
+        showMouseTipCodeTop('ohos_icon', '<img style="width:150px;height:150px;margin-top: 5px;" src="/ohosQrcode"/>');
+        showMouseTipCodeTop('android_icon', '<img style="width:150px;height:150px;margin-top: 5px;" src="/apkQrcode"/>');
+        showMouseTipCodeTop("ios_icon", '<img style="width:150px;height:150px;margin-top: 5px;" src="/iosQrcode"/>');
+        showMouseTipCodeTop("wx_icon", '<img style="width:150px;height:150px;margin-top: 5px;" src="/wcQrcode"/>');
+
+        $("#viewPassword").on("mousedown", function () {
+            $password.attr("type", "text");
+            $(this).find("i").addClass("fa-eye").removeClass("fa-eye-slash");
+        }).on("mouseup", function () {
+            $password.attr("type", "password");
+            $(this).find("i").removeClass("fa-eye").addClass("fa-eye-slash");
+        });
+
+        const $clearText = $(".clearText");
+        $clearText.on("click", function () {
+            let $find = $(this).parent().find("input");
+            $find.val("");
+            $find.focus();
+        });
+
+        $("#agentUrl").on("click", function () {
+            var $element = null;
+            var isMobile = $(window).width() < 800;
+            layer.open({
+                type: 2,
+                maxmin: true,
+                area: isMobile ? ['100%', '100%'] : ['800px', '90%'],
+                title: '<b style="font-size: 20px;">至道客服</b>',
+                content: ["https://www.zhidao.fj.cn/cozeChat.html?areaId=0", 'no'], //no是不想让iframe出现滚动条
+                success: function (layero, index) {
+                    $element = layero;
+                    calcHeight();
+                    window.addEventListener('resize', calcHeight);
+                },
+                resizing: function (layero) {
+                    calcHeight();
+                },
+                full: function () {
+                    calcHeight();
+                },
+                restore: function () {
+                    calcHeight();
+                },
+                end: function () {
+                    window.removeEventListener('resize', calcHeight);
+                }
+            });
+
+            function calcHeight() {
+                $element.find("iframe").height($element.height() - 50);
+            }
+        });
+
+        let countdown = 60;
+        const sendCodeBtn = document.getElementById('sendCodeBtn');
+        sendCodeBtn.addEventListener('click', () => {
+            const phoneInput = document.querySelector('#sms-panel #userMobile');
+            if (!/^1[3-9]\d{9}$/.test(phoneInput.value)) {
+                showTip('请输入正确的手机号', "userMobile");
+                return;
+            }
+            postReq("/login/getLoginSmsCodeByMobile", {mobile: phoneInput.value}, function (ret) {
+                showRespOK(ret.msg);
+                // 开始倒计时
+                sendCodeBtn.disabled = true;
+                sendCodeBtn.textContent = `${countdown}s后重新获取`;
+                const timer = setInterval(() => {
+                    countdown--;
+                    sendCodeBtn.textContent = `${countdown}s后重新获取`;
+                    if (countdown <= 0) {
+                        clearInterval(timer);
+                        sendCodeBtn.disabled = false;
+                        sendCodeBtn.textContent = '获取验证码';
+                        countdown = 60;
+                    }
+                }, 1000);
+            });
+        });
+
+        $("#btnSmsLoginId").on("click", function () {
+            layer.closeAll();
+            let $userMobile = $("#userMobile");
+            let $userMobileCode = $("#userMobileCode");
+
+            if (!hasText($userMobile.val())) {
+                showTip("请输入手机号", "userMobile");
+                $userName.focus();
+                return;
+            }
+            if (!hasText($userMobileCode.val())) {
+                showTip("请输入验证码", "userMobileCode");
+                $password.focus();
+                return;
+            }
+            var uniqueId = getUniqueDeviceId()
+            var identification = encrypt.encrypt(JSON.stringify({mobile: $.trim($userMobile.val()), smsCode: $.trim($userMobileCode.val())}));
+            var para = {
+                identification: identification,
+                uniqueId: uniqueId,
+                priorityId: localStorage["priorityId"]
+            };
+
+            postReq("/login/doSmsLogin", para, function (ret) {
+                if (ret["selAccount"]) {
+                    var content = '<div style="padding: 20px;">';
+                    content += '<div class="form-group">';
+                    content += '<div class="radio">';
+                    $.each(ret.list, function (i, item) {
+                        var checked = (i === 0) ? "checked" : "";
+                        content += '<div><label style="margin-left: 10px;"><input type="radio" name="selUserAccount" value="' + item.value + '" ' + checked + '>' + item.text + '</label></div><br>';
+                    });
+                    content += '</div>';
+                    content += '</div>';
+                    content += '</div>';
+
+                    layer.open({
+                        type: 1,
+                        title: "该手机号关联多个账号，请选择账号登录",
+                        btn: ["确定"],
+                        area: ['auto', 'auto'],
+                        content: content,
+                        yes: function (index) {
+                            var account = $('input:radio[name="selUserAccount"]:checked').val();
+                            var identification2 = encrypt.encrypt(JSON.stringify({mobile: $.trim($userMobile.val()), smsCode: $.trim($userMobileCode.val()), account: account}));
+                            var para2 = {
+                                identification: identification2,
+                                uniqueId: uniqueId,
+                                priorityId: localStorage["priorityId"]
+                            };
+                            postReq("/login/afterSmsLogin", para2, function (ret2) {
+                                sessionStorage["zd_edu_token"] = ret2.token;
+                                var search = location.search;
+                                var keyword = "returnUrl=";
+                                var indexOf = search.indexOf(keyword);
+                                if (indexOf > 0) {
+                                    var nextEqualIndexOf = search.indexOf("&", indexOf + keyword.length);
+                                    var returnUrl = nextEqualIndexOf > 0 ? search.substring(indexOf + keyword.length, nextEqualIndexOf) : search.substring(indexOf + keyword.length);
+                                    search = nextEqualIndexOf > 0 ? (search.substring(0, indexOf) + search.substring(nextEqualIndexOf + 1)) : search.substring(0, indexOf);
+                                    if ((returnUrl.indexOf("http://") === 0 || returnUrl.indexOf("https://") === 0) && returnUrl.indexOf(window.location.origin) !== 0) {
+                                        location.href = "/admin.html#/desk";
+                                    } else {
+                                        location.href = returnUrl + (search === '?' ? '' : search);
+                                    }
+                                } else {
+                                    location.href = "/admin.html" + (location.search || "") + (location.hash || "#/desk");
+                                }
+                            });
+                            layer.close(index);
+                        }
+                    });
+                } else {
+                    sessionStorage["zd_edu_token"] = ret.token;
+                    var search = location.search;
+                    var keyword = "returnUrl=";
+                    var indexOf = search.indexOf(keyword);
+                    if (indexOf > 0) {
+                        var nextEqualIndexOf = search.indexOf("&", indexOf + keyword.length);
+                        var returnUrl = nextEqualIndexOf > 0 ? search.substring(indexOf + keyword.length, nextEqualIndexOf) : search.substring(indexOf + keyword.length);
+                        search = nextEqualIndexOf > 0 ? (search.substring(0, indexOf) + search.substring(nextEqualIndexOf + 1)) : search.substring(0, indexOf);
+                        if ((returnUrl.indexOf("http://") === 0 || returnUrl.indexOf("https://") === 0) && returnUrl.indexOf(window.location.origin) !== 0) {
+                            location.href = "/admin.html#/desk";
+                        } else {
+                            location.href = returnUrl + (search === '?' ? '' : search);
+                        }
+                    } else {
+                        location.href = "/admin.html" + (location.search || "") + (location.hash || "#/desk");
+                    }
+                }
+            }, function (ret) {
+                showRespFail(ret.msg);
+            });
+        });
+    });
+
+    function showMouseTipCodeTop(objText, message) {
+        var showIndex = null;
+        var $showActHelp = $("#" + objText);
+        $showActHelp.unbind();
+        $showActHelp.mouseenter(function () {
+            showIndex = layer.tips(message, '#' + objText, {
+                tips: [1, '#eee'],
+                time: 200000,
+                maxWidth: 600
+            });
+        });
+        $showActHelp.mouseleave(function () {
+            layer.close(showIndex);
+        });
+    }
+
+    function updateCaptcha() {
+        var $captcha = $("#captcha");
+        $(".check-code").find("img").attr("src", "/login/captcha?v=" + Math.random());
+        $captcha.val("").focus();
+    }
+
+    function openQrLogin() {
+        var content = "<div style='padding: 20px;'>";
+        content += "<div style='text-align: center;margin-bottom: 10px;'><span style='font-size: 28px;'><b>APP扫码登录</b></span></div>";
+        content += "<div style='text-align: center;margin-bottom: 10px;'><img id='loginQrCode'></div>";
+        content += "<div style='text-align: center;margin-bottom: 10px;'><a style='cursor: pointer;' id='refreshQrCode'>刷新</a></div>";
+        content += "</div>";
+
+        var interval;
+        layer.open({
+            type: 1,
+            title: false,
+            area: ['300px', '420px'],
+            content: content,
+            shadeClose: true,
+            success: function () {
+                var uniqueId = getUniqueDeviceId()
+
+                updateQrCode();
+
+                $("#refreshQrCode").off("click").on("click", function () {
+                    updateQrCode();
+                });
+
+                function updateQrCode() {
+                    clearInterval(interval);
+
+                    ajaxReq("/login/getQrCodeKey", {}, function (ret) {
+                        $("#loginQrCode").attr("src", "/login/getLoginQr?id=" + ret.id);
+
+                        interval = setInterval(function () {
+                            $.ajax("/login/checkQrLogin", {
+                                type: "POST",
+                                cache: false,
+                                dataType: "json",
+                                data: {uuid: ret.id, uniqueId: uniqueId},
+                                success: function (rs) {
+                                    if (rs.isOk) {
+                                        clearInterval(interval);
+
+                                        if (rs.status == 1) {
+                                            showRespOK("登录成功！");
+                                            go_url(rs.url);
+                                        }
+                                    }
+                                },
+                                error: function (rs) {
+                                    clearInterval(interval);
+                                    showRespFail("扫码登录失败，请刷新重试！");
+                                }
+                            });
+                        }, 2500);
+                    });
+                }
+            },
+            cancel: function () {
+                clearInterval(interval);
+            }
+        });
+    }
+</script>
+</body>
+</html>

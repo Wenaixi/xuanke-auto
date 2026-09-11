@@ -1,0 +1,32 @@
+﻿<section class="content-header">
+    <ol class="breadcrumb">
+        <li><a href="javascript:;"><i class="breadcrumb_icon"></i>学业管理</a></li>
+        <li class="active">选修课报名</li>
+    </ol>
+</section>
+<section class="content" style="margin-left:15px;margin-right:15px;">
+    <div class="row">
+        <div class="col-sm-12 box box-primary search-box-div-one">
+            <div class="form-inline">
+                <label class="control-label">学年学期:</label>
+                <select id="school_year_term" class="form-control">
+                    <option value="">全部</option>
+                </select>
+                <a id="searchBtn" class="btn btn-primary">
+                    <i class="glyphicon glyphicon-search"></i> 刷新
+                </a>
+                <span class="form-control" id="tip" style="color: red;"></span>
+            </div>
+        </div>
+        <div class="col-sm-12 box box-primary">
+            <div id="publishTableDiv" style="overflow: auto">
+            </div>
+        </div>
+    </div>
+</section>
+<script>
+    layui.use([], function () {
+        const path = exportViewPath();
+        layui.use(path, layui.factory(path));
+    });
+</script>

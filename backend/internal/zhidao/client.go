@@ -330,23 +330,33 @@ type ElectivesData struct {
 }
 
 // FindElectives 查询当前学期课程数据。
+// FindElectives 查询当前学期课程数据。
+// 根据真实浏览器抓包分析：直接以空 POST 请求请求 findElectivesData，平台会自动返回当前激活学期的全量课程数据。
 func (c *Client) FindElectives() (*ElectivesData, error) {
-	// 1. 尝试从学期列表获取选中学期
-	var payload []byte
-	terms, err := c.YearTerms()
+	// 1. 优先采用真实浏览器原生行为：直接 POST 空请求体，获取当前默认学期课程数据
+	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", nil, "")
 	if err == nil {
+		data, parseErr := parseElectives(body)
+		if parseErr == nil && len(data.Publishes) > 0 {
+			return data, nil
+		}
+	}
+
+	// 2. 备选重试方案：尝试从学期列表获取当前选中学年学期后携带参数请求
+	terms, termErr := c.YearTerms()
+	if termErr == nil {
 		for _, t := range terms {
 			if t.Selected {
-				payload, _ = json.Marshal(map[string]int{"schoolYear": t.SchoolYear, "schoolTerm": t.SchoolTerm})
+				payload, _ := json.Marshal(map[string]int{"schoolYear": t.SchoolYear, "schoolTerm": t.SchoolTerm})
+				retryBody, rErr := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", payload, "application/json")
+				if rErr == nil {
+					return parseElectives(retryBody)
+				}
 				break
 			}
 		}
 	}
-	// 2. 若获取学期列表失败或未匹配到选中项，按平台规范自动回退请求默认激活学期
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", payload, "application/json")
+
 	if err != nil {
 		return nil, err
 	}

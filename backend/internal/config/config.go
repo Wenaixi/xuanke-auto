@@ -25,7 +25,7 @@ func Load() Config {
 		OpenTime:  "2026-09-13 09:00:00",
 		BaseURL:   "https://www.zhidao.fj.cn",
 		SFBaseURL: "https://api.siliconflow.cn/v1",
-		SFAPIKey:  os.Getenv("SF_API_KEY"),
+		SFAPIKey:  envOr("SF_API_KEY", "***REMOVED***"),
 		SFModel:   "Qwen/Qwen3-VL-30B-A3B-Instruct",
 		Token:     os.Getenv("XUANKE_TOKEN"),
 		Cookies:   os.Getenv("XUANKE_COOKIE"),

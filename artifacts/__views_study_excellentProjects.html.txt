@@ -1,0 +1,53 @@
+﻿<section class="content-header">
+    <ol class="breadcrumb">
+        &nbsp;
+    </ol>
+</section>
+
+<section class="content" style="margin-left:15px; margin-right:15px;">
+    <div class="row">
+        <div class="col-sm-12 box box-primary search-box">
+            <div class="form-inline">
+                <div class="search-item">
+                    <label class="control-label">年级：</label>
+                    <select id="gradeId" class="form-control">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="search-item" style="width: 190px">
+                    <label class="control-label">学年学期：</label>
+                    <select id="yearTermId" class="form-control">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="search-item">
+                    <label class="control-label">课题名称：</label>
+                    <input type="text" id="studyTitle" maxlength="50" class="form-control" placeholder="课题名称">
+                </div>
+                <div class="search-item">
+                    <label class="control-label">学生姓名：</label>
+                    <input type="text" id="studyStuName" maxlength="50" class="form-control" placeholder="学生姓名">
+                </div>
+                <div class="search-item">
+                    <label class="control-label">指导老师：</label>
+                    <input type="text" id="studyTeacherName" maxlength="50" class="form-control" placeholder="指导老师姓名">
+                </div>
+                <div class="search-btn-item">
+                    <a id="btn_search_study" class="btn btn-primary">
+                        <i class="glyphicon glyphicon-search"></i> 查询
+                    </a>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-12 box box-primary">
+            <table id="studyProjectsTable" style="white-space:nowrap; overflow:hidden"></table>
+        </div>
+    </div>
+</section>
+
+<script>
+    layui.use([], function () {
+        const path = exportViewPath();
+        layui.use(path, layui.factory(path));
+    });
+</script>

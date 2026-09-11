@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -56,6 +57,7 @@ type Scheduler struct {
 	state    SchedulerState
 	inflight map[int]bool // 正在提交的 classID
 	done     map[int]bool // 已成功的 classID（重启恢复注入）
+	lastSuccessProbe time.Time // 上次成功探测课程数据的时间（限速保护）
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -162,15 +164,26 @@ func (s *Scheduler) State() SchedulerState {
 }
 
 // tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交未完成目标。
+// 智能降速保护：Token 未登录或窗口未开时，只每 2 秒探测一次，避免触发平台限速。
 func (s *Scheduler) tick() {
+	// 距上次成功探测不到 2 秒：静默跳过（限速保护）
+	if time.Since(s.lastSuccessProbe) < 2*time.Second {
+		return
+	}
+
 	data, err := s.client.FindElectives()
 	if err != nil {
 		s.mu.Lock()
 		s.state.WindowOpened = false
 		s.mu.Unlock()
-		log.Printf("[scheduler] 查询课程失败: %v", err)
+		// Token 失效：静默跳过，不打日志不刷屏，等主人在网页登录后自动恢复
+		if !errors.Is(err, zhidao.ErrUnauthorized) {
+			log.Printf("[scheduler] 查询课程失败: %v", err)
+		}
 		return
 	}
+	s.lastSuccessProbe = time.Now()
+
 	opened := false
 	for _, p := range data.Publishes {
 		if p.InDateRange {

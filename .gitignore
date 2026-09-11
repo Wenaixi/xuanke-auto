@@ -13,3 +13,5 @@ backend/web/dist/
 __pycache__/
 .omc/
 data/
+backend/server-dev.out.log
+backend/server-dev.err.log

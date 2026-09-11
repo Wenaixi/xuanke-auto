@@ -3,7 +3,7 @@ import { cn } from "../../lib/utils"
 
 export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto border border-[var(--border)]">
+    <div className="relative w-full overflow-auto rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
       <table
         ref={ref}
         className={cn("w-full caption-bottom text-sm border-collapse", className)}
@@ -51,7 +51,7 @@ export const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttribut
     <tr
       ref={ref}
       className={cn(
-        "border-b border-[var(--border)] transition-colors duration-100 hover:bg-[var(--surface-soft)]/70",
+        "border-b border-[var(--border)] transition-colors duration-150 hover:bg-[var(--surface-soft)]/60",
         className
       )}
       {...props}
@@ -67,7 +67,7 @@ export const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-9 px-3 text-left align-middle font-mono text-[11px] uppercase tracking-widest text-[var(--fg-dim)] select-none",
+      "h-10 px-3 sm:px-4 text-left align-middle font-medium text-xs uppercase tracking-wider text-[var(--fg-muted)] select-none",
       className
     )}
     {...props}
@@ -81,7 +81,7 @@ export const TableCell = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <td
     ref={ref}
-    className={cn("p-3 align-middle text-[var(--fg)] tabular-nums", className)}
+    className={cn("p-3 sm:p-4 align-middle text-[var(--fg)] tabular-nums", className)}
     {...props}
   />
 ))
@@ -93,7 +93,7 @@ export const TableCaption = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <caption
     ref={ref}
-    className={cn("mt-4 text-xs text-[var(--fg-dim)] font-mono tracking-wider", className)}
+    className={cn("mt-4 text-xs text-[var(--fg-dim)] tracking-wide", className)}
     {...props}
   />
 ))

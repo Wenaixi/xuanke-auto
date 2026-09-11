@@ -95,23 +95,27 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - 待办：xuanke.py 遇到 code=-1（token 过期）时尚未自动重新登录，只在 monitor 打印提示
 ## Go + React 重构版（backend/ + web/）
 
-**状态：** 已完成单二进制服务，Python 版保持不动。选课窗口 2026-09-13 09:00:00。
+**状态：** 前后端解耦独立工程架构，Python 版保持不动。选课窗口 2026-09-13 09:00:00。
 
-### 架构
-- 后端 Go 标准库 net/http（1.22+ 路由）+ modernc.org/sqlite（纯 Go 免 CGO），零框架
-- 前端 React 18 + Vite + TS + Radix Primitives，黑白无圆角，构建产物 go:embed 进二进制
-- 单文件部署：backend/xuanke.exe，一个端口 8080 服务 API 与页面
+### 架构设计（前后端解耦）
+- **后端（backend/）**：Go 标准库 net/http（1.22+ 原生路由）+ modernc.org/sqlite（纯 Go 免 CGO），零框架。独立运行于 `:8080`，提供高性能 REST API 与 SSE 实时抢课日志流。
+- **前端（web/）**：React 18 + Vite + TypeScript + Radix UI 原语 + Tailwind CSS。独立运行于 `:5173`，通过 Vite Proxy 代理与后端无缝联调。前后端彻底解耦，不采用单文件/单二进制捆绑打包，保证极速 HMR 与现代化 Web 开发体验。
 
-### 状态与前端架构
-- **状态：** 已完成基于瑞士国际主义与黑白极简艺术风格的深度 UI 重构（零圆角、shadcn/ui 哲学与 Radix 原语），单二进制服务架构，测试全量通过。选课窗口 2026-09-13 09:00:00。
-- **UI 设计系统规范：** 严格绝对零圆角（Zero-Radius / rounded-none），基于纯粹单色色阶（#09090b 主黑底、#121215 表面黑底、#18181b 弱化表面、#27272a 发丝边框、#fafafa 冷白文本与反色高亮交互）。倒计时与容量统计全面启用等宽数字（tabular-nums）。
-- **零圆角组件体系（web/src/components/ui/）：**
-  - 原子组件：Button（多变体与黑白反色动画）、Input（发丝边框纯白聚焦）、Badge（微缩等宽大写微标）、Card（六大子容器体系）、Progress（直角几何进度条）
-  - 复合组件：Dialog（基于 Radix 的沉浸式模态弹窗）、Table（瑞士网格数据表）、Tabs（纯矩形反色分段器）
-- **三大核心页面：**
-  - Login：瑞士画廊海报构图、发丝级十字对齐标记与 RSA-1024 会话徽章
-  - Dashboard：Bento Grid 模块化排版、天/时/分/秒巨幕等宽脉搏倒计时看板、3 门目标课程监控卡片与 UNIX 极客黑白日志流
-  - Select：矩阵式课程卡片、实时模糊搜索与剩余名额过滤工具栏、嵌入式几何进度条与画册级详情弹窗
+### UI 设计系统规范（精制微圆角现代暗黑风格）
+- **设计哲学**：精制微圆角（Refined Micro-Radius），告别粗暴锋利的绝对零直角（Zero-Radius），注入柔和克制的人性化现代科技美学。
+- **圆角梯度体系**：
+  - `sm (4px / 0.25rem)`：Badge 微标标签、微型状态指示器
+  - `md (6px / 0.375rem)`：Button 按钮、Input 输入框、Tabs 触发项
+  - `lg (8px / 0.5rem)`：Card 卡片容器、Table 数据网格包裹层、Progress 进度条轨道
+  - `xl (12px / 0.75rem)`：Dialog 沉浸式模态弹窗、下拉菜单与浮层容器
+- **调色与质感**：纯黑背景 `#09090b`、卡片表面 `#121215`、微凸表面 `#18181b`、温润发丝边框 `#27272a`（悬浮提亮至 `#3f3f46`），冷白文字 `#fafafa`。倒计时与席位容量统计全面继承等宽数字（`tabular-nums`）。
+- **组件体系（web/src/components/ui/）**：
+  - 原子组件：Button（6px 微圆角，黑白反色/柔和微光变体）、Input（6px 微圆角发丝框）、Badge（4px 紧凑圆角）、Card（8px 层次容器体系）、Progress（8px 轨道带柔和内角）
+  - 复合组件：Dialog（12px 柔和微圆角浮层）、Table（8px 容器与首尾行圆角平滑过渡）、Tabs（6px 切换滑块与容器）
+- **三大核心页面**：
+  - Login：极简微圆角卡片、RSA-1024 状态指示、温润呼吸光感
+  - Dashboard：Bento Grid 模块化微圆角排版、巨幕等宽脉搏倒计时看板、3 门目标监控微圆角卡片、UNIX 极客暗黑日志流
+  - Select：矩阵式 8px 微圆角课程卡片、实时搜索/名额过滤、12px 画册级微圆角详情弹窗
 
 ### 关键决策
 - **禁止自动重登**：doRequest 对 code=-1 直接返回 ErrUnauthorized，不触发重登（平台"访问过于频繁"限流 1 分钟，频繁登录会触发）。重登能力保留为显式 ReloginIfNeeded（最多一次）

@@ -14,8 +14,6 @@ import {
   Layers,
   LogOut,
   RefreshCw,
-  Sparkles,
-  Zap,
   XCircle,
   HelpCircle,
 } from "lucide-react"
@@ -84,22 +82,21 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
   const cd = parseCountdown(openTimeStr)
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
+    <div className="min-h-screen bg-black text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
-        {/* 顶部现代控制台顶栏 */}
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border)] pb-5">
+        {/* 顶部纯黑白极简控制台顶栏 */}
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
-              <Sparkles className="h-5 w-5 text-[var(--cyan)]" />
-              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[var(--fg)]">
-                至道选课自动化中心
+              <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
+                选课自动化控制中心
               </h1>
-              <Badge variant="primary" className="text-[10px]">
-                并发调度引擎
+              <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider">
+                CORE
               </Badge>
             </div>
-            <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
-              毫秒级定时并发抢报 · 零值守会话保护 · 双端自适应
+            <p className="text-xs text-neutral-400">
+              实时监听教务选课开放时间节点与席位状态
             </p>
           </div>
 
@@ -108,32 +105,32 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
               variant="primary"
               size="sm"
               onClick={onGoSelect}
-              className="flex items-center gap-1.5 text-xs font-semibold shadow-md"
+              className="flex items-center gap-1.5 text-xs"
             >
-              <BookOpen className="h-4 w-4" />
-              <span>进入选课大厅</span>
-              <ArrowUpRight className="h-3.5 w-3.5" />
+              <BookOpen className="h-3.5 w-3.5 text-black" />
+              <span>选课大厅</span>
+              <ArrowUpRight className="h-3.5 w-3.5 text-black" />
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={onLogout}
-              className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)] hover:text-white"
+              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
             >
               <LogOut className="h-3.5 w-3.5" />
-              <span>退出登录</span>
+              <span>退出</span>
             </Button>
           </div>
         </header>
 
         {/* 错误提示条 */}
         {!stateLoading && stateErr && (
-          <div className="rounded-[var(--radius-md)] border border-[var(--rose-border)] bg-[var(--rose-bg)] p-4 text-xs flex items-center justify-between text-[var(--rose)] animate-in fade-in-50">
+          <div className="rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 p-4 text-xs flex items-center justify-between text-neutral-300">
             <div className="flex items-center gap-2">
-              <XCircle className="h-4 w-4 shrink-0" />
-              <span>调度器状态同步遇到问题：当前登录凭据可能已失效</span>
+              <XCircle className="h-4 w-4 shrink-0 text-white" />
+              <span>当前登录凭据已失效，请重新进行账户认证</span>
             </div>
-            <Button variant="destructive" size="sm" onClick={onLogout}>
+            <Button variant="outline" size="sm" onClick={onLogout}>
               重新登录
             </Button>
           </div>
@@ -142,80 +139,80 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
         {/* 核心 Bento Grid 双翼展板 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
           {/* 左侧两大跨度：等宽秒级跳动巨幕倒计时 */}
-          <Card className="lg:col-span-2 rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--surface)] flex flex-col justify-between shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <Card className="lg:col-span-2 rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] flex flex-col justify-between shadow-none">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 border-b border-neutral-900">
               <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-[var(--cyan)]" />
-                <CardTitle className="text-sm font-semibold tracking-wide text-[var(--fg)]">
-                  选课时间窗口监控
+                <Clock className="h-4 w-4 text-neutral-400" />
+                <CardTitle className="text-sm font-medium tracking-wide text-white">
+                  选课时间窗口
                 </CardTitle>
               </div>
-              <Badge variant={state?.window_opened ? "success" : "warning"}>
-                {state?.window_opened ? "🟢 选课窗口已开放" : "⏳ 待命等待开启"}
+              <Badge variant={state?.window_opened ? "primary" : "outline"}>
+                {state?.window_opened ? "窗口已开放" : "待命中"}
               </Badge>
             </CardHeader>
 
             <CardContent className="py-4">
               {state?.window_opened ? (
-                <div className="py-6 flex flex-col items-center justify-center gap-3 rounded-[var(--radius-lg)] border border-[var(--emerald-border)] bg-[var(--emerald-bg)] p-6 text-center">
-                  <div className="flex items-center gap-2.5 text-[var(--emerald)] font-bold text-lg sm:text-xl">
-                    <span className="inline-block w-3 h-3 rounded-full bg-[var(--emerald)] animate-ping" />
-                    <span>选课窗口现已全面开放！</span>
+                <div className="py-6 flex flex-col items-center justify-center gap-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 p-6 text-center">
+                  <div className="flex items-center gap-2.5 text-white font-medium text-lg">
+                    <span className="inline-block w-2 h-2 rounded-full bg-white animate-ping" />
+                    <span>选课窗口现已开放</span>
                   </div>
-                  <p className="text-xs text-[var(--fg-muted)] max-w-md">
-                    系统已进入全力并发抢报模式，正在毫秒级高频检测并提交您的预选目标，请留意下方动态喵~
+                  <p className="text-xs text-neutral-400 max-w-md">
+                    系统已进入自动报名阶段，正在持续同步您的预选目标课程。
                   </p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {/* 四格等宽大字数字矩阵 */}
+                  {/* 四格等宽大字数字矩阵：纯黑白极简雕刻质感 */}
                   <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
-                    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-soft)] p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-bold tabular-nums tracking-tight text-[var(--fg)]">
+                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.days}
                       </span>
-                      <span className="text-[11px] text-[var(--fg-muted)] font-medium mt-1">
+                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
                         天
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-soft)] p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-bold tabular-nums tracking-tight text-[var(--fg)]">
+                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.hours}
                       </span>
-                      <span className="text-[11px] text-[var(--fg-muted)] font-medium mt-1">
+                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
                         时
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-soft)] p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-bold tabular-nums tracking-tight text-[var(--fg)]">
+                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.minutes}
                       </span>
-                      <span className="text-[11px] text-[var(--fg-muted)] font-medium mt-1">
+                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
                         分
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-lg)] border border-[var(--cyan-border)] bg-[var(--surface-soft)] p-3 sm:p-5 flex flex-col items-center shadow-[0_0_15px_rgba(14,165,233,0.1)]">
-                      <span className="text-2xl sm:text-4xl font-bold tabular-nums tracking-tight text-[var(--cyan)]">
+                    <div className="rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-900 p-3 sm:p-5 flex flex-col items-center">
+                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.seconds}
                       </span>
-                      <span className="text-[11px] text-[var(--cyan)] font-medium mt-1">
+                      <span className="text-[11px] text-neutral-400 font-mono uppercase mt-1">
                         秒
                       </span>
                     </div>
                   </div>
 
-                  {/* 人性化温馨小贴士 */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-[var(--fg-muted)] pt-3 border-t border-[var(--border)] gap-2">
+                  {/* 极简纯粹时间提示 */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-neutral-400 pt-3 border-t border-neutral-900 gap-2 font-mono">
                     <span className="flex items-center gap-1.5">
                       <span>预计开放时间：</span>
-                      <span className="text-[var(--fg)] font-medium">
+                      <span className="text-white">
                         {openTimeStr
                           ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
                           : "正在同步教务平台时间配置..."}
                       </span>
                     </span>
-                    <span className="text-[11px] text-[var(--cyan)] bg-[var(--cyan-bg)] px-2 py-0.5 rounded-full">
-                      极速 300ms 自动并发冲刺
+                    <span className="text-neutral-500">
+                      300ms 周期监听
                     </span>
                   </div>
                 </div>
@@ -223,46 +220,46 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
             </CardContent>
           </Card>
 
-          {/* 右侧跨度：引擎健康指标卡片 */}
-          <Card className="rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--surface)] flex flex-col justify-between shadow-md">
-            <CardHeader className="pb-2">
+          {/* 右侧跨度：运行状态指标卡片 */}
+          <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] flex flex-col justify-between shadow-none">
+            <CardHeader className="pb-2 border-b border-neutral-900">
               <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-[var(--emerald)]" />
-                <CardTitle className="text-sm font-semibold tracking-wide text-[var(--fg)]">
-                  调度器运行状态
+                <Activity className="h-4 w-4 text-neutral-400" />
+                <CardTitle className="text-sm font-medium tracking-wide text-white">
+                  运行指标
                 </CardTitle>
               </div>
-              <CardDescription className="text-xs text-[var(--fg-dim)]">
-                后台监控心跳与防封保护参数
+              <CardDescription className="text-xs text-neutral-500">
+                后台调度心跳与通信机制
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3 text-xs">
-              <div className="divide-y divide-[var(--border)]">
+            <CardContent className="space-y-3 text-xs pt-3">
+              <div className="divide-y divide-neutral-900">
                 <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-[var(--fg-muted)]">心跳轮询周期</span>
-                  <span className="text-[var(--fg)] font-medium tabular-nums">300 毫秒 (智能防频控)</span>
+                  <span className="text-neutral-400">心跳轮询周期</span>
+                  <span className="text-white font-mono tabular-nums">300 毫秒</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-[var(--fg-muted)]">已锁定目标课程</span>
-                  <span className="text-[var(--cyan)] font-semibold tabular-nums">{courses.length} / 3 门</span>
+                  <span className="text-neutral-400">预选目标课程</span>
+                  <span className="text-white font-mono tabular-nums">{courses.length} / 3 门</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-[var(--fg-muted)]">认证通信链路</span>
-                  <span className="text-[var(--emerald)] font-medium">双通道安全握手</span>
+                  <span className="text-neutral-400">认证通信链路</span>
+                  <span className="text-white">双通道会话</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-[var(--fg-muted)]">限流保护机制</span>
-                  <span className="text-[var(--fg)]">单次熔断冷却开启</span>
+                  <span className="text-neutral-400">频控保护策略</span>
+                  <span className="text-white">单次熔断冷却</span>
                 </div>
               </div>
 
-              <div className="p-3 rounded-[var(--radius-md)] bg-[var(--surface-soft)] border border-[var(--border)] flex items-center justify-between text-xs">
+              <div className="p-3 rounded-[var(--radius-sm)] bg-neutral-950 border border-neutral-900 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="inline-block w-2 h-2 rounded-full bg-[var(--emerald)] animate-pulse" />
-                  <span className="text-[var(--fg)] font-medium">后台静默待命中</span>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
+                  <span className="text-white font-medium">后台就绪</span>
                 </div>
-                <Zap className="h-3.5 w-3.5 text-[var(--amber)]" />
+                <span className="text-[11px] text-neutral-500 font-mono">STANDBY</span>
               </div>
             </CardContent>
           </Card>
@@ -272,13 +269,13 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Layers className="h-4 w-4 text-[var(--cyan)]" />
-              <h2 className="text-sm font-semibold text-[var(--fg)]">
-                重点看护目标课程
+              <Layers className="h-4 w-4 text-neutral-400" />
+              <h2 className="text-sm font-medium text-white">
+                预选目标课程
               </h2>
             </div>
-            <span className="text-xs text-[var(--fg-dim)]">
-              最多支持 3 门必抢目标
+            <span className="text-xs text-neutral-500 font-mono">
+              3 COURSES MAX
             </span>
           </div>
 
@@ -291,63 +288,63 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
               return (
                 <Card
                   key={c.class_id}
-                  className={`rounded-[var(--radius-lg)] border transition-all duration-200 shadow-sm ${
+                  className={`rounded-[var(--radius-lg)] border transition-all duration-200 shadow-none ${
                     isSuccess
-                      ? "border-[var(--emerald-border)] bg-[var(--surface)] shadow-[0_0_20px_rgba(16,185,129,0.1)]"
-                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-hover)]"
+                      ? "border-white bg-[#111114]"
+                      : "border-neutral-900 bg-[#09090b] hover:border-neutral-800"
                   }`}
                 >
-                  <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-                    <Badge variant="outline" className="text-[10px]">
-                      发布 #{c.publish_id}
+                  <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      #{c.publish_id}
                     </Badge>
                     <Badge
-                      variant={isSuccess ? "success" : isFailed ? "destructive" : isInRange ? "primary" : "warning"}
+                      variant={isSuccess ? "primary" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
                       className="text-[11px]"
                     >
                       {isSuccess
-                        ? "🎉 报名已确认"
+                        ? "已确认选课"
                         : isFailed
-                        ? "❌ 报名异常"
+                        ? "报名异常"
                         : isInRange
-                        ? "⚡ 冲刺抢报中"
-                        : "⏳ 待命中"}
+                        ? "提交中"
+                        : "待命"}
                     </Badge>
                   </CardHeader>
 
-                  <CardContent className="p-4 pt-1 space-y-3">
+                  <CardContent className="p-4 pt-3 space-y-3">
                     <div>
-                      <div className="text-[11px] text-[var(--fg-dim)] font-mono">
-                        课程 ID: {c.class_id}
+                      <div className="text-[11px] text-neutral-500 font-mono">
+                        ID: {c.class_id}
                       </div>
-                      <h3 className="font-semibold text-sm sm:text-base text-[var(--fg)] tracking-tight line-clamp-1 mt-0.5">
+                      <h3 className="font-medium text-sm text-white tracking-tight line-clamp-1 mt-0.5">
                         {c.course_name || `选修课程 ${c.class_id}`}
                       </h3>
                     </div>
 
                     {/* 状态与进度提示 */}
-                    <div className="text-xs pt-2 border-t border-[var(--border)] flex items-center justify-between">
+                    <div className="text-xs pt-2 border-t border-neutral-900 flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        {isSuccess && <CheckCircle2 className="h-4 w-4 text-[var(--emerald)]" />}
-                        {isFailed && <XCircle className="h-4 w-4 text-[var(--rose)]" />}
-                        {isInRange && <RefreshCw className="h-4 w-4 text-[var(--cyan)] animate-spin" />}
+                        {isSuccess && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                        {isFailed && <XCircle className="h-3.5 w-3.5 text-neutral-400" />}
+                        {isInRange && <RefreshCw className="h-3.5 w-3.5 text-white animate-spin" />}
                         {!isSuccess && !isFailed && !isInRange && (
-                          <span className="inline-block w-2 h-2 rounded-full bg-[var(--amber)]" />
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-600" />
                         )}
-                        <span className="text-[var(--fg-muted)]">
+                        <span className="text-neutral-400">
                           {isSuccess
-                            ? "已成功拿下席位"
+                            ? "席位已确认"
                             : isFailed
-                            ? "存在冲突或名额不足"
+                            ? "提交未通过"
                             : isInRange
-                            ? "正在以 300ms 冲刺"
-                            : "开抢瞬间将自动报名"}
+                            ? "冲刺提交中"
+                            : "开放时自动提交"}
                         </span>
                       </div>
                     </div>
 
                     {c.result && (
-                      <div className="p-2.5 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-soft)] text-xs text-[var(--fg-muted)] break-all leading-relaxed">
+                      <div className="p-2.5 rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 text-xs text-neutral-400 font-mono break-all leading-relaxed">
                         {c.result}
                       </div>
                     )}
@@ -357,67 +354,61 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
             })}
 
             {courses.length === 0 && (
-              <div className="col-span-full rounded-[var(--radius-lg)] border border-[var(--border)] border-dashed bg-[var(--surface)] p-8 text-center flex flex-col items-center justify-center gap-3">
-                <HelpCircle className="h-8 w-8 text-[var(--fg-dim)] opacity-60" />
-                <p className="text-sm text-[var(--fg-muted)]">
-                  您尚未添加任何预选课程 · 调度器目前处于静默待命状态
+              <div className="col-span-full rounded-[var(--radius-lg)] border border-neutral-900 border-dashed bg-[#09090b] p-8 text-center flex flex-col items-center justify-center gap-3">
+                <HelpCircle className="h-7 w-7 text-neutral-600" />
+                <p className="text-xs text-neutral-400">
+                  当前未添加任何预选课程
                 </p>
-                <Button variant="primary" size="sm" onClick={onGoSelect}>
-                  前往选课大厅挑选课程
+                <Button variant="outline" size="sm" onClick={onGoSelect}>
+                  前往挑选课程
                 </Button>
               </div>
             )}
           </div>
         </section>
 
-        {/* 人性化活动动态流 */}
+        {/* 调度活动动态流 */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-[var(--cyan)]" />
-              <h2 className="text-sm font-semibold text-[var(--fg)]">
-                实时调度活动动态
+              <Activity className="h-4 w-4 text-neutral-400" />
+              <h2 className="text-sm font-medium text-white">
+                调度日志
               </h2>
             </div>
-            <div className="flex items-center gap-2 text-xs text-[var(--fg-dim)]">
-              <span className="inline-block w-2 h-2 rounded-full bg-[var(--emerald)] animate-pulse" />
-              <span>自动 3 秒同步</span>
+            <div className="flex items-center gap-2 text-xs text-neutral-500 font-mono">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
+              <span>LIVE</span>
             </div>
           </div>
 
-          <Card className="rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--surface)] overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-[var(--border)] bg-[var(--surface-soft)] text-xs text-[var(--fg-dim)] flex items-center justify-between">
-              <span>时间戳与动作反馈</span>
-              <span>最新 50 条动态记录</span>
+          <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] overflow-hidden shadow-none">
+            <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 flex items-center justify-between font-mono">
+              <span>EVENT STREAM</span>
+              <span>RECENT 50</span>
             </div>
 
-            <div className="p-4 max-h-64 overflow-y-auto text-xs space-y-2.5">
+            <div className="p-4 max-h-64 overflow-y-auto text-xs space-y-2">
               {logs && logs.length > 0 ? (
                 logs.map((l) => (
                   <div
                     key={l.id}
-                    className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 border-b border-[var(--border)]/40 pb-2.5 text-xs"
+                    className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 border-b border-neutral-900/60 pb-2 text-xs font-mono"
                   >
-                    <span className="text-[var(--fg-dim)] text-[11px] shrink-0 tabular-nums font-mono">
-                      {l.created_at}
+                    <span className="text-neutral-500 text-[11px] shrink-0">
+                      {new Date(l.timestamp).toLocaleTimeString("zh-CN", { hour12: false })}
                     </span>
-                    <Badge
-                      variant={l.is_ok ? "success" : "destructive"}
-                      className="text-[10px] px-1.5 py-0 shrink-0 w-14 justify-center"
-                    >
-                      {l.is_ok ? "正常" : "异常"}
-                    </Badge>
-                    <span className="text-[var(--fg)] font-medium shrink-0">
+                    <span className="text-white shrink-0 font-medium">
                       [{l.action}]
                     </span>
-                    <span className="text-[var(--fg-muted)] truncate flex-1" title={l.result}>
-                      {l.result}
+                    <span className="text-neutral-400 break-all">
+                      {l.detail}
                     </span>
                   </div>
                 ))
               ) : (
-                <div className="py-8 text-center text-xs text-[var(--fg-dim)]">
-                  暂无日志，系统正在静默守候抢课时刻...
+                <div className="py-8 text-center text-neutral-600 text-xs font-mono">
+                  NO RECENT LOGS
                 </div>
               )}
             </div>
@@ -425,16 +416,16 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
         </section>
       </div>
 
-      {/* 📱 手机移动端专属底部悬浮快捷操作岛 (Mobile Dock) */}
-      <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 bg-[var(--surface-soft)]/90 backdrop-blur-md border border-[var(--border-hover)] rounded-[var(--radius-xl)] p-3 flex items-center justify-between shadow-2xl">
+      {/* 手机移动端底部悬浮操作栏 (纯黑白极简艺术) */}
+      <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 bg-neutral-950/95 backdrop-blur-md border border-neutral-800 rounded-[var(--radius-lg)] p-3 flex items-center justify-between shadow-none">
         <div className="flex items-center gap-2">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-[var(--emerald)] animate-ping" />
+          <span className="inline-block w-2 h-2 rounded-full bg-white" />
           <div className="flex flex-col">
-            <span className="text-xs font-semibold text-[var(--fg)]">
-              {state?.window_opened ? "选课已开放" : "监控就绪中"}
+            <span className="text-xs font-medium text-white">
+              {state?.window_opened ? "窗口开放中" : "系统待命中"}
             </span>
-            <span className="text-[10px] text-[var(--fg-muted)]">
-              已选 {courses.length} / 3 门
+            <span className="text-[10px] text-neutral-500 font-mono">
+              TARGETS {courses.length}/3
             </span>
           </div>
         </div>
@@ -442,9 +433,9 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
           variant="primary"
           size="sm"
           onClick={onGoSelect}
-          className="h-9 px-4 text-xs font-semibold shadow-md"
+          className="h-8 px-3 text-xs"
         >
-          <BookOpen className="h-3.5 w-3.5 mr-1" />
+          <BookOpen className="h-3.5 w-3.5 mr-1 text-black" />
           <span>选课大厅</span>
         </Button>
       </div>

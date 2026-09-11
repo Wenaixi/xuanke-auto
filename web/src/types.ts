@@ -50,7 +50,8 @@ export interface ClassDetail {
   audited_count: number
   plan_count: number
   class_status_str: string
-  share_url: string
+  // 真实接口 key 为 shareUrl（HAR 实测：https://www.zhidao.fj.cn/electives/detail/elecClass/<hex>）
+  shareUrl: string
 }
 
 export interface CourseStatus {

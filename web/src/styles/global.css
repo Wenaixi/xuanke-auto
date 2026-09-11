@@ -1,24 +1,50 @@
 :root {
-  /* 瑞士国际主义单色调色板 */
-  --bg: #09090b;
-  --surface: #121215;
-  --surface-soft: #18181b;
-  --border: #27272a;
-  --border-strong: #52525b;
+  /* 现代温润深空调色板 */
+  --bg: #0b0f17;
+  --surface: #131b26;
+  --surface-soft: #1a2332;
+  --surface-muted: #222d40;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.28);
   --border-invert: #fafafa;
-  --fg: #fafafa;
-  --fg-muted: #a1a1aa;
-  --fg-dim: #71717a;
+
+  --fg: #f8fafc;
+  --fg-muted: #94a3b8;
+  --fg-dim: #64748b;
+
+  /* 生机语义色彩体系（点缀色） */
+  --emerald: #10b981;
+  --emerald-bg: rgba(16, 185, 129, 0.12);
+  --emerald-border: rgba(16, 185, 129, 0.28);
+
+  --amber: #f59e0b;
+  --amber-bg: rgba(245, 158, 11, 0.12);
+  --amber-border: rgba(245, 158, 11, 0.28);
+
+  --rose: #f43f5e;
+  --rose-bg: rgba(244, 63, 94, 0.12);
+  --rose-border: rgba(244, 63, 94, 0.28);
+
+  --cyan: #0ea5e9;
+  --cyan-bg: rgba(14, 165, 233, 0.12);
+  --cyan-border: rgba(14, 165, 233, 0.28);
+
+  /* 舒适微圆角体系 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
 }
 
-/* 全局强制绝对零圆角与自然盒模型 */
-* {
-  border-radius: 0 !important;
+/* 自然盒模型 */
+*, *::before, *::after {
   box-sizing: border-box;
 }
 
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   margin: 0;
   padding: 0;
   background-color: var(--bg);
@@ -30,6 +56,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
+  overflow-x: hidden;
 }
 
 /* 等宽数字排版：倒计时与容量统计严格纵向对齐 */
@@ -37,7 +64,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* 发丝级细线边框与背景实用类 */
+/* 温润发丝边框与背景实用类 */
 .hairline-border {
   border: 1px solid var(--border);
 }
@@ -50,40 +77,24 @@ body {
   background-color: var(--surface-soft);
 }
 
-/* 基础交互重置：纯粹无圆角直角几何 */
+/* 基础交互重置 */
 button, input, select, textarea {
   font-family: inherit;
   font-size: 14px;
   background: transparent;
   color: inherit;
-  border: 1px solid var(--border);
   outline: none;
-  transition: all 0.15s ease-in-out;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 button {
   cursor: pointer;
-  padding: 8px 16px;
-}
-
-button:hover {
-  background: var(--fg);
-  color: var(--bg);
 }
 
 button:disabled {
-  opacity: 0.35;
+  opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-input {
-  padding: 8px 12px;
-  width: 100%;
-}
-
-input:focus {
-  border-color: var(--border-invert);
 }
 
 a {
@@ -91,7 +102,14 @@ a {
   text-decoration: none;
 }
 
-/* 极客极简暗黑滚动条 */
+/* 移动端触摸高亮消除与平滑轻触感 */
+@media (hover: none) and (pointer: coarse) {
+  button, a, input {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* 现代圆润暗色滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -102,9 +120,10 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+  background: rgba(255, 255, 255, 0.24);
 }

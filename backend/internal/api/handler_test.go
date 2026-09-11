@@ -79,6 +79,9 @@ func newTestDeps(t *testing.T) *testDeps {
 
 	client := zhidao.New(zhi.URL, zhidao.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"})
 	client.SetCredentials("acct", "pwd", "tok")
+	if err := st.SaveAccountName("acct"); err != nil {
+		t.Fatal(err)
+	}
 
 	openTime, err := scheduler.FormatOpenTime("2026-09-13 09:00:00")
 	if err != nil {
@@ -146,20 +149,53 @@ func TestElectivesDetail(t *testing.T) {
 
 func TestSetTargetsAndState(t *testing.T) {
 	d := newTestDeps(t)
-	body := `{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`
+	// 按账号保存目标
+	body := `{"account":"acct1","targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`
 	code, j := doJSON(t, d.api, "PUT", "/api/targets", body)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("set targets 异常: %d %v", code, j)
 	}
 	// 持久化验证
-	targets, err := d.store.LoadTargets()
+	targets, err := d.store.LoadTargetsForAccount("acct1")
 	if err != nil || len(targets) != 1 || targets[0].ClassID != 61115 {
 		t.Fatalf("目标未持久化: %v %v", targets, err)
 	}
-	// state 验证
-	code, j = doJSON(t, d.api, "GET", "/api/state", "")
+	// state 验证：account=acct1 应返回该账号目标
+	code, j = doJSON(t, d.api, "GET", "/api/state?account=acct1", "")
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("state 异常: %d %v", code, j)
+	}
+	data, ok := j["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("state data 缺失: %v", j)
+	}
+	courses, ok := data["courses"].([]any)
+	if !ok || len(courses) != 1 {
+		t.Fatalf("state 应含 1 门课程，实际: %v", data)
+	}
+}
+
+func TestAccounts(t *testing.T) {
+	d := newTestDeps(t)
+	// 先保存一个账号目标，确保 /api/accounts 返回该账号
+	body := `{"account":"acct1","targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`
+	doJSON(t, d.api, "PUT", "/api/targets", body)
+	code, j := doJSON(t, d.api, "GET", "/api/accounts", "")
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("accounts 异常: %d %v", code, j)
+	}
+	list, ok := j["data"].([]any)
+	if !ok {
+		t.Fatalf("accounts data 缺失: %v", j)
+	}
+	found := false
+	for _, a := range list {
+		if a == "acct1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("accounts 应含 acct1: %v", list)
 	}
 }
 

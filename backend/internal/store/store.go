@@ -60,29 +60,66 @@ func (s *Store) LoadAccount() (acct, pwd, token string, err error) {
 	return
 }
 
-// SetTargets 替换目标课程（先删后插保证唯一）。
+// SaveAccountName 记录账号名（登录成功调用；账号名即主键，幂等，密码不入库）。
+func (s *Store) SaveAccountName(acct string) error {
+	if acct == "" {
+		return nil
+	}
+	_, err := s.db.Exec("INSERT OR IGNORE INTO accounts (account) VALUES (?)", acct)
+	return err
+}
+
+// ListAccounts 返回所有账号名（按账号排序）。
+func (s *Store) ListAccounts() ([]string, error) {
+	rows, err := s.db.Query("SELECT account FROM accounts ORDER BY account")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SetTargets 替换目标课程（默认账号，先删后插保证唯一）。
 func (s *Store) SetTargets(targets []scheduler.Target) error {
+	return s.SetTargetsForAccount("", targets)
+}
+
+// LoadTargets 读取目标课程（默认账号）。
+func (s *Store) LoadTargets() ([]scheduler.Target, error) {
+	return s.LoadTargetsForAccount("")
+}
+
+// SetTargetsForAccount 按账号保存目标课程（先删后插保证唯一；account='' 为默认账号）。
+func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM targets"); err != nil {
+	if _, err := tx.Exec("DELETE FROM targets WHERE account = ?", acct); err != nil {
 		return err
 	}
 	for _, t := range targets {
 		if _, err := tx.Exec(
-			"INSERT INTO targets (publish_id, class_id, course_name) VALUES (?, ?, ?)",
-			t.PublishID, t.ClassID, t.CourseName); err != nil {
+			"INSERT INTO targets (account, publish_id, class_id, course_name) VALUES (?, ?, ?, ?)",
+			acct, t.PublishID, t.ClassID, t.CourseName); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// LoadTargets 读取目标课程。
-func (s *Store) LoadTargets() ([]scheduler.Target, error) {
-	rows, err := s.db.Query("SELECT publish_id, class_id, course_name FROM targets ORDER BY id")
+// LoadTargetsForAccount 读取指定账号的目标课程。
+func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
+	rows, err := s.db.Query("SELECT publish_id, class_id, course_name FROM targets WHERE account = ? ORDER BY id", acct)
 	if err != nil {
 		return nil, err
 	}

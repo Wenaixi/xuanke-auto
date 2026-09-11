@@ -25,6 +25,7 @@ func Register(mux *http.ServeMux, st *store.Store, client *zhidao.Client, sched 
 	mux.HandleFunc("GET /api/electives", d.handleElectives)
 	mux.HandleFunc("GET /api/electives/detail", d.handleElectivesDetail)
 	mux.HandleFunc("PUT /api/targets", d.handleSetTargets)
+	mux.HandleFunc("GET /api/accounts", d.handleAccounts)
 	mux.HandleFunc("GET /api/state", d.handleState)
 	mux.HandleFunc("GET /api/logs", d.handleLogs)
 

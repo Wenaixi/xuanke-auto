@@ -69,6 +69,18 @@ func newFakeClient(open bool) *fakeClient {
 	}
 }
 
+// setAllOpened 打开所有发布的选课窗口。
+func setAllOpened(fc *fakeClient) {
+	fc.setOpen(true)
+}
+
+// resetProbe 手动复位探测节流计时，跳过 30 秒等待以测试窗口打开后的立即提交。
+func (s *Scheduler) resetProbe() {
+	s.mu.Lock()
+	s.lastSuccessProbe = time.Time{}
+	s.mu.Unlock()
+}
+
 func targets() []Target {
 	return []Target{
 		{PublishID: 1, ClassID: 61115, CourseName: "健美操"},
@@ -79,22 +91,28 @@ func targets() []Target {
 
 func waitStatus(t *testing.T, s *Scheduler, classID int, want string, timeout time.Duration) {
 	t.Helper()
+	waitStatusAcct(t, s, "", classID, want, timeout)
+}
+
+// waitStatusAcct 轮询指定账号的状态直至课程达到期望状态。
+func waitStatusAcct(t *testing.T, s *Scheduler, acct string, classID int, want string, timeout time.Duration) {
+	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		for _, c := range s.State().Courses {
+		for _, c := range s.StateForAccount(acct).Courses {
 			if c.ClassID == classID && c.Status == want {
 				return
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	st := s.State()
+	st := s.StateForAccount(acct)
 	for _, c := range st.Courses {
 		if c.ClassID == classID {
 			t.Fatalf("课程 %d 状态 %q，期望 %q（结果 %q）", classID, c.Status, want, c.Result)
 		}
 	}
-	t.Fatalf("课程 %d 不在目标中", classID)
+	t.Fatalf("课程 %d 不在账号 %s 目标中", classID, acct)
 }
 
 func TestStateMachine(t *testing.T) {
@@ -116,8 +134,9 @@ func TestStateMachine(t *testing.T) {
 		t.Fatal("窗口应未开放")
 	}
 
-	// 窗口开启：应自动提交并 success
-	fc.setOpen(true)
+	// 窗口开启：应自动提交并 success（探测节流 30s，手动复位 lastSuccessProbe 触发立即探测）
+	setAllOpened(fc)
+	s.resetProbe()
 	waitStatus(t, s, 61115, "success", 3*time.Second)
 	waitStatus(t, s, 61205, "success", 3*time.Second)
 	waitStatus(t, s, 61276, "success", 3*time.Second)
@@ -135,6 +154,35 @@ func TestStateMachine(t *testing.T) {
 	}
 }
 
+func TestTargetsByAccountIsolation(t *testing.T) {
+	fc := newFakeClient(false)
+	openTime := time.Now().Add(time.Hour)
+	s := New(fc, &fakeStore{}, openTime, 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s.SetTargetsForAccount("acct2", []Target{{PublishID: 2, ClassID: 61205, CourseName: "篮球"}})
+	s.Start()
+	defer s.Stop()
+
+	st1 := s.StateForAccount("acct1")
+	st2 := s.StateForAccount("acct2")
+	if len(st1.Courses) != 1 || st1.Courses[0].ClassID != 61115 {
+		t.Fatalf("acct1 状态异常: %+v", st1)
+	}
+	if len(st2.Courses) != 1 || st2.Courses[0].ClassID != 61205 {
+		t.Fatalf("acct2 状态异常: %+v", st2)
+	}
+	accts := s.Accounts()
+	if len(accts) != 2 {
+		t.Fatalf("账号列表异常: %v", accts)
+	}
+
+	// 窗口开启后两账号目标都应被提交
+	setAllOpened(fc)
+	s.resetProbe()
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+	waitStatusAcct(t, s, "acct2", 61205, "success", 3*time.Second)
+}
+
 func TestSubmitFailureRetries(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("名额已满")
@@ -143,7 +191,8 @@ func TestSubmitFailureRetries(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	fc.setOpen(true)
+	setAllOpened(fc)
+	s.resetProbe()
 	waitStatus(t, s, 61115, "failed", 3*time.Second)
 }
 

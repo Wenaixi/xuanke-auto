@@ -81,3 +81,6 @@ export interface LogEntry {
   is_ok: boolean
   created_at: string
 }
+
+// 账号名（多账号下拉列表项）
+export type Account = string

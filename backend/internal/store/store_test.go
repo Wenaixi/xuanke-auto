@@ -92,6 +92,46 @@ func TestTargetsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTargetsByAccount(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.SaveAccountName("acct1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveAccountName("acct2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveAccountName("acct1"); err != nil { // 幂等
+		t.Fatal(err)
+	}
+	got, err := s.ListAccounts()
+	if err != nil || len(got) != 2 || got[0] != "acct1" || got[1] != "acct2" {
+		t.Fatalf("账号列表异常: %v %v", got, err)
+	}
+
+	// 账号隔离目标
+	t1 := []scheduler.Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}}
+	t2 := []scheduler.Target{{PublishID: 2, ClassID: 61205, CourseName: "篮球"}}
+	if err := s.SetTargetsForAccount("acct1", t1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTargetsForAccount("acct2", t2); err != nil {
+		t.Fatal(err)
+	}
+	l1, _ := s.LoadTargetsForAccount("acct1")
+	l2, _ := s.LoadTargetsForAccount("acct2")
+	if len(l1) != 1 || l1[0].ClassID != 61115 || len(l2) != 1 || l2[0].ClassID != 61205 {
+		t.Fatalf("账号目标隔离失败: %+v %+v", l1, l2)
+	}
+	// 旧单账号接口为空账号，行为不变
+	if err := s.SetTargets(t1); err != nil {
+		t.Fatal(err)
+	}
+	legacy, _ := s.LoadTargets()
+	if len(legacy) != 1 || legacy[0].ClassID != 61115 {
+		t.Fatalf("旧单账号接口破坏: %+v", legacy)
+	}
+}
+
 func TestLogs(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.AppendLog(61115, "select", "报名成功", true); err != nil {

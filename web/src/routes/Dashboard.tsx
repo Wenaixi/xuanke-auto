@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { LogEntry, SchedulerState } from "../types"
+import type { Account, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
 import { Badge } from "../components/ui/Badge"
@@ -19,6 +19,9 @@ import {
 } from "lucide-react"
 
 interface Props {
+  account: Account
+  accounts: Account[]
+  onSwitchAccount: (acct: Account) => void
   onLogout: () => void
   onGoSelect: () => void
 }
@@ -56,10 +59,10 @@ function parseCountdown(target: string | null): ParsedCountdown {
   }
 }
 
-export default function Dashboard({ onLogout, onGoSelect }: Props) {
+export default function Dashboard({ account, accounts, onSwitchAccount, onLogout, onGoSelect }: Props) {
   const { data: state, isError: stateErr, isLoading: stateLoading } = useQuery({
-    queryKey: ["state"],
-    queryFn: () => api<SchedulerState>("/state"),
+    queryKey: ["state", account],
+    queryFn: () => api<SchedulerState>("/state", { account }),
     refetchInterval: 3000,
   })
 
@@ -101,6 +104,20 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* 账号切换下拉（纯黑白极简） */}
+            {accounts.length > 0 && (
+              <select
+                value={account}
+                onChange={(e) => onSwitchAccount(e.target.value)}
+                className="h-8 px-2 bg-neutral-950 border border-neutral-800 text-xs text-white rounded-[var(--radius-sm)] focus:border-white transition-colors"
+              >
+                {accounts.map((a) => (
+                  <option key={a} value={a} className="bg-neutral-950 text-white">
+                    {a}
+                  </option>
+                ))}
+              </select>
+            )}
             <Button
               variant="primary"
               size="sm"
@@ -212,7 +229,7 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
                       </span>
                     </span>
                     <span className="text-neutral-500">
-                      300ms 周期监听
+                      30 秒查询节流
                     </span>
                   </div>
                 </div>
@@ -238,7 +255,7 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
               <div className="divide-y divide-neutral-900">
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">心跳轮询周期</span>
-                  <span className="text-white font-mono tabular-nums">300 毫秒</span>
+                  <span className="text-white font-mono tabular-nums">30 秒</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">预选目标课程</span>
@@ -425,7 +442,7 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
               {state?.window_opened ? "窗口开放中" : "系统待命中"}
             </span>
             <span className="text-[10px] text-neutral-500 font-mono">
-              TARGETS {courses.length}/3
+              {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}/3
             </span>
           </div>
         </div>

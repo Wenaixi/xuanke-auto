@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { ClassItem, ElectivesData, Target, SchedulerState } from "../types"
+import type { Account, ClassItem, ElectivesData, Target, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"
@@ -38,6 +38,7 @@ import {
 } from "lucide-react"
 
 interface Props {
+  account: Account
   onDone: () => void
 }
 
@@ -46,7 +47,7 @@ function fillRate(c: ClassItem): number {
   return Math.min(100, Math.round((c.selected_count / c.max_count) * 100))
 }
 
-export default function Select({ onDone }: Props) {
+export default function Select({ account, onDone }: Props) {
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["electives"],
@@ -54,10 +55,10 @@ export default function Select({ onDone }: Props) {
     refetchInterval: 10000,
   })
 
-  // 查询当前调度器已保存的目标课程并自动回显
+  // 查询当前调度器已保存的目标课程并自动回显（按账号）
   const { data: stateData } = useQuery({
-    queryKey: ["state"],
-    queryFn: () => api<SchedulerState>("/state"),
+    queryKey: ["state", account],
+    queryFn: () => api<SchedulerState>("/state", { account }),
   })
 
   const [selected, setSelected] = useState<Record<number, number>>({})
@@ -130,7 +131,10 @@ export default function Select({ onDone }: Props) {
     setSaving(true)
     setErrorMsg("")
     try {
-      await api("/targets", { method: "PUT", body: JSON.stringify({ targets }) })
+      await api("/targets", {
+        method: "PUT",
+        body: JSON.stringify({ account, targets }),
+      })
       setSaved(true)
       toast({
         title: targets.length > 0 ? "目标保存成功" : "目标已清空",
@@ -172,7 +176,7 @@ export default function Select({ onDone }: Props) {
 
           <div className="flex items-center gap-3">
             <Badge variant="outline" className="text-xs py-1 px-3 font-mono">
-              SELECTED {selectedCount}/{publishes.length}
+              {account ? account : "默认"} · SELECTED {selectedCount}/{publishes.length}
             </Badge>
             <Button
               variant="outline"

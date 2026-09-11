@@ -9,9 +9,16 @@ CREATE TABLE IF NOT EXISTS account (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- 目标课程（每个发布 1 门，先删后插保证唯一）
+-- 多账号名表：登录成功即 upsert 账号名（密码不入库），account 唯一
+CREATE TABLE IF NOT EXISTS accounts (
+  account TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 目标课程（按账号隔离：account='' 为默认/旧单账号数据；先删后插保证唯一）
 CREATE TABLE IF NOT EXISTS targets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account TEXT NOT NULL DEFAULT '',
   publish_id INTEGER NOT NULL,
   class_id INTEGER NOT NULL,
   course_name TEXT NOT NULL,

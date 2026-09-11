@@ -54,9 +54,12 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := d.Store.SaveAccount(req.Account, req.Password, token); err != nil {
 		log.Printf("[api] 保存账密失败: %v", err)
 	}
+	if err := d.Store.SaveAccountName(req.Account); err != nil {
+		log.Printf("[api] 保存账号名失败: %v", err)
+	}
 	d.Client.SetCredentials(req.Account, req.Password, token)
-	d.Store.AppendLog(0, "login", "登录成功", true)
-	writeJSON(w, 0, map[string]string{"token": token}, "登录成功")
+	d.Store.AppendLog(0, "login", "账号 "+req.Account+" 登录成功", true)
+	writeJSON(w, 0, map[string]string{"token": token, "account": req.Account}, "登录成功")
 }
 
 // handleElectives 课程列表（三个发布）。
@@ -87,10 +90,19 @@ func (d *Deps) handleElectivesDetail(w http.ResponseWriter, r *http.Request) {
 
 // TargetsRequest 设置目标请求体。
 type TargetsRequest struct {
+	Account string             `json:"account"` // 目标所属账号；空 = 默认账号
 	Targets []scheduler.Target `json:"targets"`
 }
 
-// handleSetTargets 设置目标课程并持久化。
+// displayAcct 账号显示名（空账号显示为"默认"）。
+func displayAcct(acct string) string {
+	if acct == "" {
+		return "默认"
+	}
+	return acct
+}
+
+// handleSetTargets 设置目标课程并持久化（按账号隔离）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	var req TargetsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -107,19 +119,47 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := d.Store.SetTargets(req.Targets); err != nil {
+	acct := req.Account
+	if err := d.Store.SetTargetsForAccount(acct, req.Targets); err != nil {
 		writeJSON(w, 1, nil, "保存目标失败: "+err.Error())
 		return
 	}
-	d.Sched.SetTargets(req.Targets)
-	d.Store.AppendLog(0, "set_targets", fmt.Sprintf("%d 门目标课程", len(req.Targets)), true)
+	d.Sched.SetTargetsForAccount(acct, req.Targets)
+	d.Store.AppendLog(0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", displayAcct(acct), len(req.Targets)), true)
 	writeJSON(w, 0, req.Targets, "目标已保存")
 }
 
-// handleState 调度器状态。
+// handleState 调度器状态（按账号过滤目标）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
-	st := d.Sched.State()
+	acct := r.URL.Query().Get("account")
+	st := d.Sched.StateForAccount(acct)
 	writeJSON(w, 0, st, "")
+}
+
+// handleAccounts 已登录账号名列表（store 账号表 + 调度器目标账号去重合并）。
+func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
+	names, err := d.Store.ListAccounts()
+	if err != nil {
+		writeJSON(w, 1, nil, "读取账号列表失败: "+err.Error())
+		return
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, a := range names {
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		out = append(out, a)
+	}
+	for _, a := range d.Sched.Accounts() {
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		out = append(out, a)
+	}
+	writeJSON(w, 0, out, "")
 }
 
 // handleLogs 报名日志。

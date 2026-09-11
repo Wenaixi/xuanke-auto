@@ -11,11 +11,13 @@ export class ApiError extends Error {
   }
 }
 
-// api 统一请求：非零 code 抛 ApiError
-export async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(BASE + path, {
+// api 统一请求：非零 code 抛 ApiError；account 可选参数会附加到 URL query
+export async function api<T>(path: string, opts?: RequestInit & { account?: string }): Promise<T> {
+  const { account, ...rest } = opts ?? {}
+  const q = account ? `?account=${encodeURIComponent(account)}` : ""
+  const r = await fetch(BASE + path + q, {
     headers: { "Content-Type": "application/json" },
-    ...opts,
+    ...rest,
   })
   let j: { code: number; data: T; msg: string }
   try {

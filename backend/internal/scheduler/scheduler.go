@@ -20,6 +20,7 @@ type Target struct {
 
 // CourseStatus 单课程任务状态。
 type CourseStatus struct {
+	Account    string `json:"account"`
 	PublishID  int    `json:"publish_id"`
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
@@ -34,6 +35,9 @@ type SchedulerState struct {
 	Courses      []CourseStatus `json:"courses"`
 }
 
+// probeInterval 课程探测最小间隔：30 秒，避免触发平台"访问过于频繁"熔断。
+const probeInterval = 30 * time.Second
+
 // Store 调度器依赖的最小持久化接口（由 store 包实现）。
 type Store interface {
 	AppendLog(classID int, action, result string, isOK bool) error
@@ -45,7 +49,7 @@ type Client interface {
 	SelectClass(classID int) (string, error)
 }
 
-// Scheduler 定时抢课引擎。
+// Scheduler 定时抢课引擎。多账号目标按账号隔离（acctTargets）。
 type Scheduler struct {
 	client   Client
 	store    Store
@@ -53,7 +57,7 @@ type Scheduler struct {
 	interval time.Duration
 
 	mu       sync.Mutex
-	targets  []Target
+	acctTargets map[string][]Target // 按账号隔离的目标课程（key=账号名，""=默认账号）
 	state    SchedulerState
 	inflight map[int]bool // 正在提交的 classID
 	done     map[int]bool // 已成功的 classID（重启恢复注入）
@@ -72,6 +76,7 @@ func New(client Client, store Store, openTime time.Time, interval time.Duration)
 		store:    store,
 		openTime: openTime,
 		interval: interval,
+		acctTargets: make(map[string][]Target),
 		inflight: make(map[int]bool),
 		done:     make(map[int]bool),
 		ctx:      ctx,
@@ -81,12 +86,24 @@ func New(client Client, store Store, openTime time.Time, interval time.Duration)
 	return s
 }
 
-// SetTargets 替换目标课程并重建状态。
+// SetTargets 替换目标课程（默认账号，向后兼容）。
 func (s *Scheduler) SetTargets(targets []Target) {
+	s.SetTargetsForAccount("", targets)
+}
+
+// SetTargetsForAccount 为指定账号替换目标并重建状态。
+func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.targets = targets
-	courses := make([]CourseStatus, 0, len(targets))
+	s.acctTargets[acct] = targets
+	// 仅重建该账号对应的课程状态（保留其他账号）
+	keep := s.state.Courses[:0]
+	for _, c := range s.state.Courses {
+		if c.Account != acct {
+			keep = append(keep, c)
+		}
+	}
+	s.state.Courses = keep
 	for _, t := range targets {
 		status := "pending"
 		result := ""
@@ -94,7 +111,8 @@ func (s *Scheduler) SetTargets(targets []Target) {
 			status = "success"
 			result = "重启恢复：已报名成功"
 		}
-		courses = append(courses, CourseStatus{
+		s.state.Courses = append(s.state.Courses, CourseStatus{
+			Account:    acct,
 			PublishID:  t.PublishID,
 			ClassID:    t.ClassID,
 			CourseName: t.CourseName,
@@ -102,7 +120,17 @@ func (s *Scheduler) SetTargets(targets []Target) {
 			Result:     result,
 		})
 	}
-	s.state.Courses = courses
+}
+
+// Accounts 返回所有已知账号名。
+func (s *Scheduler) Accounts() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.acctTargets))
+	for a := range s.acctTargets {
+		out = append(out, a)
+	}
+	return out
 }
 
 // RestoreDone 注入重启前已成功的课程 id（来自 store 的持久化状态）。
@@ -146,7 +174,7 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
-	log.Printf("[scheduler] 已启动，轮询间隔 %v，窗口开启时间 %s", s.interval, s.openTime.Format("2006-01-02 15:04:05"))
+	log.Printf("[scheduler] 已启动，轮询间隔 %v（课程探测节流 30 秒），窗口开启时间 %s", s.interval, s.openTime.Format("2006-01-02 15:04:05"))
 }
 
 // Stop 停止轮询。
@@ -154,20 +182,33 @@ func (s *Scheduler) Stop() {
 	s.cancel()
 }
 
-// State 返回状态快照（拷贝）。
+// State 返回默认账号状态快照（拷贝）。
 func (s *Scheduler) State() SchedulerState {
+	return s.StateForAccount("")
+}
+
+// StateForAccount 返回指定账号的状态快照（Courses 仅含该账号目标；WindowOpened 全校共享）。
+func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	st.Courses = append([]CourseStatus(nil), s.state.Courses...)
+	st.Courses = nil
+	for _, c := range s.state.Courses {
+		if c.Account == acct {
+			st.Courses = append(st.Courses, c)
+		}
+	}
 	return st
 }
 
-// tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交未完成目标。
-// 智能降速保护：Token 未登录或窗口未开时，只每 2 秒探测一次，避免触发平台限速。
+// tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交所有账号目标。
+// 限速保护：距上次成功探测不足 30 秒且非首次时静默跳过，避免触发平台限速。
 func (s *Scheduler) tick() {
-	// 距上次成功探测不到 2 秒：静默跳过（限速保护）
-	if time.Since(s.lastSuccessProbe) < 2*time.Second {
+	s.mu.Lock()
+	last := s.lastSuccessProbe
+	s.mu.Unlock()
+	// 距上次成功探测不足 30 秒且非首次：静默跳过（限速保护）
+	if !last.IsZero() && time.Since(last) < probeInterval {
 		return
 	}
 
@@ -182,7 +223,9 @@ func (s *Scheduler) tick() {
 		}
 		return
 	}
+	s.mu.Lock()
 	s.lastSuccessProbe = time.Now()
+	s.mu.Unlock()
 
 	opened := false
 	for _, p := range data.Publishes {
@@ -204,7 +247,10 @@ func (s *Scheduler) tick() {
 // submitAll 并发提交所有未完成目标（每课程一个 goroutine）。
 func (s *Scheduler) submitAll() {
 	s.mu.Lock()
-	targets := append([]Target(nil), s.targets...)
+	var targets []Target
+	for _, ts := range s.acctTargets {
+		targets = append(targets, ts...)
+	}
 	s.mu.Unlock()
 	for _, t := range targets {
 		s.submit(t)
@@ -259,7 +305,7 @@ func (s *Scheduler) submit(t Target) {
 func (s *Scheduler) statusIndexLocked(publishID, classID int) int {
 	for i := range s.state.Courses {
 		c := s.state.Courses[i]
-		if c.PublishID == publishID && c.ClassID == classID {
+		if c.ClassID == classID {
 			return i
 		}
 	}

@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { ArrowRight, Loader2, User, Lock, Eye, EyeOff } from "lucide-react"
 
 interface Props {
-  onLogin: (token: string) => void
+  onLogin: (token: string, account: string) => void
 }
 
 export default function Login({ onLogin }: Props) {
@@ -24,11 +24,11 @@ export default function Login({ onLogin }: Props) {
     setLoading(true)
     setError("")
     try {
-      const data = await api<{ token: string }>("/login", {
+      const data = await api<{ token: string; account: string }>("/login", {
         method: "POST",
         body: JSON.stringify({ account: account.trim(), password }),
       })
-      onLogin(data.token)
+      onLogin(data.token, data.account)
     } catch (e: any) {
       setError(e.message || "登录认证失败，请检查账号密码是否正确")
     } finally {

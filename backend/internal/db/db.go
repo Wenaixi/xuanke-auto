@@ -23,5 +23,32 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
+	if err := ensureTargetsAccountColumn(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	return d, nil
+}
+
+// ensureTargetsAccountColumn 老库 targets 表无 account 列时补列，保证按账号隔离目标可用。
+func ensureTargetsAccountColumn(d *sql.DB) error {
+	rows, err := d.Query("PRAGMA table_info(targets)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "account" {
+			return nil // 已有列，无需迁移
+		}
+	}
+	_, err = d.Exec("ALTER TABLE targets ADD COLUMN account TEXT NOT NULL DEFAULT ''")
+	return err
 }

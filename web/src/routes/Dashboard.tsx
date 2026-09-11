@@ -396,13 +396,13 @@ export default function Dashboard({ onLogout, onGoSelect }: Props) {
                     className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 border-b border-neutral-900/60 pb-2 text-xs font-mono"
                   >
                     <span className="text-neutral-500 text-[11px] shrink-0">
-                      {new Date(l.timestamp).toLocaleTimeString("zh-CN", { hour12: false })}
+                      {l.created_at}
                     </span>
                     <span className="text-white shrink-0 font-medium">
                       [{l.action}]
                     </span>
                     <span className="text-neutral-400 break-all">
-                      {l.detail}
+                      {l.result}
                     </span>
                   </div>
                 ))

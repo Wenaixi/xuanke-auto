@@ -3,7 +3,6 @@ import { api } from "../api/client"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
-import { Badge } from "../components/ui/Badge"
 import { ArrowRight, Loader2, User, Lock, Eye, EyeOff } from "lucide-react"
 
 interface Props {

@@ -33,10 +33,8 @@ import {
   MapPin,
   Save,
   Search,
-  Sparkles,
   User,
   Users,
-  Flame,
 } from "lucide-react"
 
 interface Props {
@@ -142,50 +140,49 @@ export default function Select({ onDone }: Props) {
   const selectedCount = Object.keys(selected).length
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">
+    <div className="min-h-screen bg-black text-white p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
-        {/* 顶部标题与返回按钮 */}
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border)] pb-5">
+        {/* 顶部纯黑白极简顶栏 */}
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
-              <Sparkles className="h-5 w-5 text-[var(--cyan)]" />
-              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[var(--fg)]">
-                选修课程精选大厅
+              <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
+                选修课程大厅
               </h1>
-              <Badge variant="primary" className="text-[10px]">
-                课程配置
+              <Badge variant="outline" className="text-[10px] font-mono uppercase">
+                COURSES
               </Badge>
             </div>
-            <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
-              每个发布批次锁定 1 门心仪目标 · 保存后开放窗口自动并发秒级抢报
+            <p className="text-xs text-neutral-400">
+              各批次预选课程配置与实时名额
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <Badge variant="success" className="text-xs py-1 px-3">
-              已选定目标：{selectedCount} / {publishes.length} 门
+            <Badge variant="outline" className="text-xs py-1 px-3 font-mono">
+              SELECTED {selectedCount}/{publishes.length}
             </Badge>
             <Button
               variant="outline"
               size="sm"
               onClick={onDone}
-              className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)] hover:text-white"
+              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              <span>返回控制看板</span>
+              <span>返回控制台</span>
             </Button>
           </div>
         </header>
 
-        {/* 搜索与条件过滤工具栏 */}
-        <div className="flex flex-col sm:flex-row items-center gap-3 p-3.5 rounded-[var(--radius-lg)] bg-[var(--surface)] border border-[var(--border)] shadow-sm">
+        {/* 搜索与条件过滤栏 */}
+        <div className="flex flex-col sm:flex-row items-center gap-3 p-3 rounded-[var(--radius-lg)] bg-[#09090b] border border-neutral-900">
           <div className="relative flex-1 w-full">
-            <Search className="absolute left-3.5 top-3 h-4 w-4 text-[var(--fg-dim)]" />
+            <Search className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
             <Input
-              placeholder="快速搜索课程名称、授课教师、上课教室..."
+              placeholder="搜索课程名称、教师或教室"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 text-xs sm:text-sm h-10 bg-[var(--surface-soft)] border-[var(--border)] focus:border-[var(--cyan)]"
+              className="pl-10 text-xs sm:text-sm h-10 bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
             />
           </div>
 
@@ -193,23 +190,23 @@ export default function Select({ onDone }: Props) {
             variant={onlyAvailable ? "primary" : "outline"}
             size="sm"
             onClick={() => setOnlyAvailable(!onlyAvailable)}
-            className="flex items-center gap-1.5 text-xs whitespace-nowrap h-10 px-4 w-full sm:w-auto font-medium"
+            className="flex items-center gap-1.5 text-xs whitespace-nowrap h-10 px-4 w-full sm:w-auto"
           >
             <Filter className="h-3.5 w-3.5" />
-            <span>仅看有余量 ({onlyAvailable ? "已开启" : "全部"})</span>
+            <span>{onlyAvailable ? "仅看有余量" : "显示全部"}</span>
           </Button>
         </div>
 
         {/* 加载中与错误反馈 */}
         {isLoading && (
-          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-16 text-center text-sm text-[var(--fg-muted)] flex flex-col items-center justify-center gap-3">
-            <span className="inline-block w-3 h-3 rounded-full bg-[var(--cyan)] animate-ping" />
-            <span>正在为您同步教务平台最新选修课程与实时名额...</span>
+          <div className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] p-16 text-center text-xs text-neutral-400 flex flex-col items-center justify-center gap-3">
+            <span className="inline-block w-2 h-2 rounded-full bg-white animate-ping" />
+            <span>正在同步最新课程列表与名额...</span>
           </div>
         )}
 
         {isError && (
-          <div className="rounded-[var(--radius-lg)] border border-[var(--rose-border)] bg-[var(--rose-bg)] p-6 text-center text-sm text-[var(--rose)]">
+          <div className="rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 p-4 text-center text-xs text-neutral-300">
             拉取课程数据异常: {(error as Error).message}
           </div>
         )}
@@ -255,14 +252,14 @@ export default function Select({ onDone }: Props) {
 
               return (
                 <TabsContent key={t.publish_id} value={String(t.publish_id)} className="space-y-4">
-                  {/* 分类说明与容量概况 */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-[var(--fg-muted)] p-3.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-soft)] gap-2">
+                  {/* 分类说明与概况 (纯黑白极简) */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-neutral-400 p-3 rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] gap-2 font-mono">
                     <span className="flex items-center gap-2">
-                      <Sparkles className="h-3.5 w-3.5 text-[var(--cyan)]" />
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
                       <span>{t.tip}</span>
                     </span>
-                    <span className="text-[var(--fg-dim)]">
-                      当前显示: {filteredClasses.length} / {t.classes.length} 门班次
+                    <span className="text-neutral-500">
+                      SHOWING {filteredClasses.length}/{t.classes.length}
                     </span>
                   </div>
 
@@ -283,74 +280,73 @@ export default function Select({ onDone }: Props) {
                       return (
                         <Card
                           key={c.id}
-                          className={`relative rounded-[var(--radius-lg)] border transition-all duration-200 flex flex-col justify-between shadow-sm ${
+                          className={`relative rounded-[var(--radius-lg)] border transition-all duration-200 flex flex-col justify-between shadow-none ${
                             isSelected
-                              ? "border-[var(--cyan-border)] bg-[var(--surface)] shadow-[0_0_20px_rgba(14,165,233,0.15)] ring-1 ring-[var(--cyan)]"
-                              : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-hover)]"
+                              ? "border-white bg-[#111114]"
+                              : "border-neutral-900 bg-[#09090b] hover:border-neutral-800"
                           }`}
                         >
                           <CardContent className="p-4 sm:p-5 flex flex-col gap-3">
                             {/* 顶部标签行 */}
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-[var(--fg-dim)] font-mono">
+                              <span className="text-xs text-neutral-500 font-mono">
                                 ID: {c.id}
                               </span>
                               {isSelected ? (
-                                <Badge variant="primary" className="text-[11px] font-semibold">
-                                  ✨ 已设为目标
+                                <Badge variant="primary" className="text-[11px] font-medium">
+                                  已选预选
                                 </Badge>
                               ) : isFull ? (
-                                <Badge variant="destructive" className="text-[11px]">
-                                  🔒 已满额
+                                <Badge variant="outline" className="text-[11px] text-neutral-500 border-neutral-800">
+                                  已满额
                                 </Badge>
                               ) : remaining <= 5 ? (
-                                <Badge variant="warning" className="text-[11px]">
-                                  <Flame className="h-3 w-3 mr-0.5" />
-                                  仅剩 {remaining} 席
+                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-700">
+                                  余 {remaining} 席
                                 </Badge>
                               ) : (
-                                <Badge variant="success" className="text-[11px]">
-                                  🌿 名额充裕
+                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-800">
+                                  名额充足
                                 </Badge>
                               )}
                             </div>
 
                             {/* 课程名称 */}
                             <div>
-                              <h3 className="font-semibold text-base text-[var(--fg)] tracking-tight line-clamp-1">
+                              <h3 className="font-medium text-base text-white tracking-tight line-clamp-1">
                                 {c.course_name}
                               </h3>
                               {c.class_name && c.class_name !== c.course_name && (
-                                <p className="text-xs text-[var(--fg-dim)] truncate mt-0.5">
+                                <p className="text-xs text-neutral-500 truncate mt-0.5 font-mono">
                                   {c.class_name}
                                 </p>
                               )}
                             </div>
 
                             {/* 地点与教师信息 */}
-                            <div className="space-y-1.5 text-xs text-[var(--fg-muted)] pt-2.5 border-t border-[var(--border)]">
+                            <div className="space-y-1.5 text-xs text-neutral-400 pt-2.5 border-t border-neutral-900">
                               <div className="flex items-center gap-2 truncate">
-                                <User className="h-3.5 w-3.5 text-[var(--fg-dim)] shrink-0" />
+                                <User className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
                                 <span className="truncate">
                                   教师：{c.teacher_name_list || "待定"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 truncate">
-                                <MapPin className="h-3.5 w-3.5 text-[var(--fg-dim)] shrink-0" />
+                                <MapPin className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
                                 <span className="truncate">
                                   地点：{c.class_room_name || "待教室分配"}
                                 </span>
                               </div>
                             </div>
 
-                            {/* 容量统计与胶囊进度条 */}
+                            {/* 容量统计 */}
                             <div className="space-y-1.5 pt-2">
                               <div className="flex items-center justify-between text-xs">
-                                <span className="text-[var(--fg-dim)] flex items-center gap-1">
+                                <span className="text-neutral-500 flex items-center gap-1 font-mono">
                                   <Users className="h-3 w-3" />
                                   <span>已报容量</span>
                                 </span>
-                                <span className="text-[var(--fg)] font-medium tabular-nums">
+                                <span className="text-white font-mono tabular-nums">
                                   {c.selected_count} / {c.max_count} 人 ({rate}%)
                                 </span>
                               </div>
@@ -362,31 +358,31 @@ export default function Select({ onDone }: Props) {
                             </div>
 
                             {/* 操作按钮区 */}
-                            <div className="grid grid-cols-2 gap-2 pt-2.5 border-t border-[var(--border)] mt-1">
+                            <div className="grid grid-cols-2 gap-2 pt-2.5 border-t border-neutral-900 mt-1">
                               <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => setDetailClass(c)}
-                                className="flex items-center justify-center gap-1.5 text-xs h-9"
+                                className="flex items-center justify-center gap-1.5 text-xs h-9 text-neutral-400 hover:text-white"
                               >
                                 <Info className="h-3.5 w-3.5" />
                                 <span>详情</span>
                               </Button>
 
                               <Button
-                                variant={isSelected ? "default" : "primary"}
+                                variant={isSelected ? "outline" : "primary"}
                                 size="sm"
                                 onClick={() => pick(t.publish_id, c.id, c.course_name)}
-                                className="flex items-center justify-center gap-1.5 text-xs h-9 font-semibold"
+                                className="flex items-center justify-center gap-1.5 text-xs h-9"
                               >
                                 {isSelected ? (
                                   <>
-                                    <Check className="h-3.5 w-3.5 text-[var(--cyan)]" />
-                                    <span>已锁定</span>
+                                    <Check className="h-3.5 w-3.5 text-white" />
+                                    <span>已选定</span>
                                   </>
                                 ) : (
                                   <>
-                                    <BookMarked className="h-3.5 w-3.5" />
+                                    <BookMarked className="h-3.5 w-3.5 text-black" />
                                     <span>设为目标</span>
                                   </>
                                 )}
@@ -409,30 +405,30 @@ export default function Select({ onDone }: Props) {
           </Tabs>
         )}
 
-        {/* 底部吸底保存工具栏（PC 电脑与手机端自适应悬浮岛） */}
-        <footer className="fixed bottom-4 inset-x-4 max-w-6xl mx-auto z-40 p-4 rounded-[var(--radius-xl)] border border-[var(--border-hover)] bg-[var(--surface-soft)]/95 backdrop-blur-md shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-xs">
-            <span className="text-[var(--fg)] font-semibold">
-              当前目标阵容: {selectedCount} / {publishes.length} 门
+        {/* 底部吸底保存工具栏 (纯黑白极简艺术) */}
+        <footer className="fixed bottom-4 inset-x-4 max-w-6xl mx-auto z-40 p-4 rounded-[var(--radius-lg)] border border-neutral-800 bg-neutral-950/95 backdrop-blur-md shadow-none flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 text-xs font-mono">
+            <span className="text-white font-medium">
+              已选课程: {selectedCount} / {publishes.length} 门
             </span>
             {saved && (
-              <span className="text-[var(--emerald)] flex items-center gap-1 font-medium">
-                <CheckCircle className="h-4 w-4" />
-                <span>目标已保存在调度引擎，开网将极速抢报</span>
+              <span className="text-white flex items-center gap-1 text-[11px]">
+                <CheckCircle className="h-3.5 w-3.5 text-white" />
+                <span>已保存预选</span>
               </span>
             )}
-            {errorMsg && <span className="text-[var(--rose)] font-medium">{errorMsg}</span>}
+            {errorMsg && <span className="text-neutral-400">{errorMsg}</span>}
           </div>
 
           <Button
             variant="primary"
             size="default"
             onClick={save}
-            disabled={saving || selectedCount === 0}
-            className="w-full sm:w-auto h-10 px-6 flex items-center justify-center gap-2 text-xs sm:text-sm font-semibold shadow-lg"
+            disabled={saving}
+            className="w-full sm:w-auto h-10 px-6 flex items-center justify-center gap-2 text-xs font-medium"
           >
-            <Save className="h-4 w-4" />
-            <span>{saving ? "正在同步至抢课引擎..." : "保存预选目标阵容"}</span>
+            <Save className="h-3.5 w-3.5 text-black" />
+            <span>{saving ? "正在保存..." : "保存预选课程"}</span>
           </Button>
         </footer>
 

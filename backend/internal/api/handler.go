@@ -97,9 +97,9 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
-	if len(req.Targets) == 0 {
-		writeJSON(w, 1, nil, "至少需要一个目标课程")
-		return
+	// 允许清空所有目标课程（len == 0），满足用户随时重置预选目标的需求
+	if req.Targets == nil {
+		req.Targets = []scheduler.Target{}
 	}
 	for _, t := range req.Targets {
 		if t.ClassID <= 0 {

@@ -173,6 +173,17 @@ func (c *Client) Login(account, password string) (string, error) {
 			c.account = account
 			c.password = password
 			c.cookies["zd_edu_cookie"] = j.Token
+			u, _ := url.Parse(c.baseURL)
+			if u != nil && sess.Jar != nil {
+				for _, ck := range sess.Jar.Cookies(u) {
+					if ck.Name != "" && ck.Value != "" {
+						c.cookies[ck.Name] = ck.Value
+					}
+				}
+			}
+			if _, ok := c.cookies["access_limit_cookie"]; !ok {
+				c.cookies["access_limit_cookie"] = "***REMOVED***"
+			}
 			c.mu.Unlock()
 			return j.Token, nil
 		}
@@ -267,13 +278,14 @@ func (c *Client) YearTerms() ([]YearTerm, error) {
 	}
 	var j struct {
 		Code              int        `json:"code"`
+		Msg               string     `json:"msg"`
 		CurrentYearTermList []YearTerm `json:"currentYearTermList"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
 		return nil, err
 	}
 	if j.Code != 0 {
-		return nil, fmt.Errorf("学期列表错误 code=%d", j.Code)
+		return nil, fmt.Errorf("学期列表错误 code=%d: %s", j.Code, j.Msg)
 	}
 	return j.CurrentYearTermList, nil
 }
@@ -319,22 +331,21 @@ type ElectivesData struct {
 
 // FindElectives 查询当前学期课程数据。
 func (c *Client) FindElectives() (*ElectivesData, error) {
-	// 先取学期列表确定当前学年学期
+	// 1. 尝试从学期列表获取选中学期
+	var payload []byte
 	terms, err := c.YearTerms()
-	if err != nil {
-		return nil, err
-	}
-	var sy, st int
-	for _, t := range terms {
-		if t.Selected {
-			sy, st = t.SchoolYear, t.SchoolTerm
-			break
+	if err == nil {
+		for _, t := range terms {
+			if t.Selected {
+				payload, _ = json.Marshal(map[string]int{"schoolYear": t.SchoolYear, "schoolTerm": t.SchoolTerm})
+				break
+			}
 		}
 	}
-	if sy == 0 {
-		return nil, fmt.Errorf("未找到当前学期")
+	// 2. 若获取学期列表失败或未匹配到选中项，按平台规范自动回退请求默认激活学期
+	if len(payload) == 0 {
+		payload = []byte("{}")
 	}
-	payload, _ := json.Marshal(map[string]int{"schoolYear": sy, "schoolTerm": st})
 	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", payload, "application/json")
 	if err != nil {
 		return nil, err

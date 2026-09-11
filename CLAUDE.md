@@ -116,12 +116,12 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
   - 倒计时与监控指标采用等宽数字（`tabular-nums`），犹如机械雕刻般严整稳固；
   - 极简几何圆角（4px - 8px），摒弃臃肿膨胀的大圆角与花哨阴影，保留建筑般的硬朗质感。
 
-### 关键决策
+### 关键决策与系统化调试排错记录
 - **禁止自动重登**：doRequest 对 code=-1 直接返回 ErrUnauthorized，不触发重登（平台"访问过于频繁"限流 1 分钟，频繁登录会触发）。重登能力保留为显式 ReloginIfNeeded（最多一次）
-- **会话复用**：环境变量 XUANKE_TOKEN + XUANKE_COOKIE 注入已有会话（无需重新登录）；注入的 token 通过 SaveTokenOnly 持久化，重启自动恢复
-- **Cookie 携带**：API 请求需带 access_limit_cookie + zd_edu_cookie（idToken 参数 + Cookie 双通道，仅 idToken 会"未登录"，带 Cookie 才有效）
-- **平台限流**：课程详情/查询高频会被限流 1 分钟（msg="访问过于频繁"），调度器轮询 300ms 已考虑此风险
-- **UI 设计系统规范**：采用瑞士国际主义与黑白极简艺术风格，严格绝对零圆角（Zero-Radius / rounded-none），基于 shadcn/ui 组件哲学与 Radix UI 原语。色盘仅使用 #09090b 纯黑底、#121215 表面底、#27272a 发丝边框与 #fafafa 冷冽纯白文本，通过几何高对比度与等宽数字排版展现顶级工业高级感
+- **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制，避免服务端报 code=1 鉴权缺失
+- **学期列表容错与自动平滑回退（Fallback）**：`FindElectives` 在尝试获取可选学期列表时，若因特定时段或接口异常导致学期列表返回错误（如 code=1），自动回退并直接请求默认激活学期数据（`findElectivesData` 传空体），杜绝选课大厅因非核心接口报错而白屏或崩溃
+- **预选目标课程支持随时清空（0 门合法）**：`handleSetTargets` 解除“至少需要 1 门”的死锁限制，允许用户重置清空全部目标；同时本地数据库严禁注入测试课程，保证新账号登录时绝对干净空白
+- **UI 设计系统规范（纯黑白极简艺术 + 瑞士国际排版规范）**：彻底清除任何喧宾夺主的技术宣传口号（如“毫秒级并发”、“每个发布批次锁定1门心仪目标·秒级抢报”、“目标阵容”等吵闹词汇），全站统一为纯黑白极简高级艺术设计（纯黑 `#000000` 底色、发丝灰边框、纯白高对比文字与单色等宽数据）
 - 数据库 data/xuanke.db（纯 Go SQLite），重启恢复账密/token/目标/已成功课程
 
 ### Go 接口速查（backend/internal/zhidao）

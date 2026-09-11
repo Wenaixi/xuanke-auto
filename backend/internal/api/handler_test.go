@@ -163,11 +163,11 @@ func TestSetTargetsAndState(t *testing.T) {
 	}
 }
 
-func TestSetTargetsEmptyRejected(t *testing.T) {
+func TestSetTargetsEmptyAllowed(t *testing.T) {
 	d := newTestDeps(t)
 	code, j := doJSON(t, d.api, "PUT", "/api/targets", `{"targets":[]}`)
-	if code != 200 || j["code"].(float64) == 0 {
-		t.Fatalf("空目标应被拒绝: %d %v", code, j)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("应允许设置空目标以支持清空: %d %v", code, j)
 	}
 }
 

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -47,5 +48,25 @@ func refuseLegacy(d *sql.DB) error {
 	if empty > 0 {
 		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 " + "data/xuanke.db" + " 后重新启动")
 	}
+	// 旧 v2 库缺列（targets.priority / task_log.account）——不兼容，提示删除重建
+	for _, col := range [][2]string{{"targets", "priority"}, {"task_log", "account"}} {
+		ok, err := columnExists(d, col[0], col[1])
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("检测到旧版数据库（%s 表缺 %s 列），本版本不兼容旧数据。请删除 %s 后重新启动", col[0], col[1], "data/xuanke.db")
+		}
+	}
 	return nil
+}
+
+// columnExists 检查表是否存在指定列。
+func columnExists(d *sql.DB, table, column string) (bool, error) {
+	rows, err := d.Query(fmt.Sprintf("SELECT 1 FROM pragma_table_info('%s') WHERE name='%s'", table, column))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	return rows.Next(), nil
 }

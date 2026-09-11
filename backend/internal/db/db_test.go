@@ -17,6 +17,28 @@ func TestOpenAndSchema(t *testing.T) {
 	if n < 4 {
 		t.Fatalf("expected >=4 tables, got %d", n)
 	}
+	// 新表存在性检查
+	d.QueryRow("SELECT count(*) FROM activation_codes").Scan(&n)
+	d.QueryRow("SELECT count(*) FROM activations").Scan(&n)
+	// 新列存在性检查
+	d.QueryRow("SELECT priority FROM targets LIMIT 0").Scan(&n)
+	d.QueryRow("SELECT account FROM task_log LIMIT 0").Scan(&n)
+}
+
+// TestRefuseOldSchemaMissingColumns v2 库缺 priority/account 列必须被拒绝启动。
+func TestRefuseOldSchemaMissingColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	d, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec("CREATE TABLE targets (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, publish_id INTEGER, class_id INTEGER, course_name TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	if _, err := Open(path); err == nil {
+		t.Fatal("缺 priority 列的旧库应被拒绝启动")
+	}
 }
 
 // TestRefuseLegacyDB 旧版数据形状（account 表）必须被拒绝启动——政策：不兼容旧数据。

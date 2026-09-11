@@ -20,6 +20,7 @@ import {
 
 interface Props {
   account: Account
+  sessionToken: string
   accounts: Account[]
   onSwitchAccount: (acct: Account) => void
   onLogout: () => void
@@ -59,16 +60,16 @@ function parseCountdown(target: string | null): ParsedCountdown {
   }
 }
 
-export default function Dashboard({ account, accounts, onSwitchAccount, onLogout, onGoSelect }: Props) {
+export default function Dashboard({ account, sessionToken, accounts, onSwitchAccount, onLogout, onGoSelect }: Props) {
   const { data: state, isError: stateErr, isLoading: stateLoading } = useQuery({
-    queryKey: ["state", account],
-    queryFn: () => api<SchedulerState>("/state", { account }),
+    queryKey: ["state", account, sessionToken],
+    queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
     refetchInterval: 3000,
   })
 
   const { data: logs } = useQuery({
-    queryKey: ["logs"],
-    queryFn: () => api<LogEntry[]>("/logs"),
+    queryKey: ["logs", sessionToken],
+    queryFn: () => api<LogEntry[]>("/logs", { session: sessionToken }),
     refetchInterval: 3000,
   })
 

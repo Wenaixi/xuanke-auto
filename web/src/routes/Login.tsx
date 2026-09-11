@@ -3,7 +3,7 @@ import { api } from "../api/client"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
-import { ArrowRight, Loader2, User, Lock, Eye, EyeOff } from "lucide-react"
+import { ArrowRight, Loader2, User, Lock, ShieldCheck, Eye, EyeOff } from "lucide-react"
 
 interface Props {
   onLogin: (token: string, account: string) => void
@@ -12,13 +12,14 @@ interface Props {
 export default function Login({ onLogin }: Props) {
   const [account, setAccount] = useState("")
   const [password, setPassword] = useState("")
+  const [adminToken, setAdminToken] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
   const submit = async () => {
-    if (!account.trim() || !password) {
-      setError("请完整输入您的账号与密码喵~")
+    if (!account.trim() || !password || !adminToken.trim()) {
+      setError("请完整输入账号、密码与部署访问口令喵~")
       return
     }
     setLoading(true)
@@ -26,7 +27,7 @@ export default function Login({ onLogin }: Props) {
     try {
       const data = await api<{ token: string; account: string }>("/login", {
         method: "POST",
-        body: JSON.stringify({ account: account.trim(), password }),
+        body: JSON.stringify({ account: account.trim(), password, admin_token: adminToken.trim() }),
       })
       onLogin(data.token, data.account)
     } catch (e: any) {
@@ -108,6 +109,24 @@ export default function Login({ onLogin }: Props) {
                 </div>
               </div>
 
+              {/* 部署访问口令输入框（公网安全闸门） */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-neutral-400 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-neutral-500" />
+                    <span>部署访问口令</span>
+                  </span>
+                </label>
+                <Input
+                  type="password"
+                  placeholder="输入服务部署时设置的口令"
+                  value={adminToken}
+                  onChange={(e) => setAdminToken(e.target.value)}
+                  disabled={loading}
+                  className="h-10 pr-10 text-sm bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+                />
+              </div>
+
               {/* 错误提示框 */}
               {error && (
                 <div className="p-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 text-xs text-neutral-300 flex items-center gap-2">
@@ -140,8 +159,8 @@ export default function Login({ onLogin }: Props) {
 
             {/* 底部信息：极简纯粹 */}
             <div className="mt-6 pt-4 border-t border-neutral-900 flex items-center justify-between text-[11px] text-neutral-500">
-              <span>本地安全隔离</span>
-              <span>单机运行</span>
+              <span>口令保护</span>
+              <span>多账号隔离</span>
             </div>
           </CardContent>
         </Card>

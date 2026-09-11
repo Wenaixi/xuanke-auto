@@ -84,3 +84,6 @@ export interface LogEntry {
 
 // 账号名（多账号下拉列表项）
 export type Account = string
+
+// 会话令牌映射：账号名 -> 服务端签发令牌（localStorage 持久化）
+export type Sessions = Record<string, string>

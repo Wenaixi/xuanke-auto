@@ -39,6 +39,7 @@ import {
 
 interface Props {
   account: Account
+  sessionToken: string
   onDone: () => void
 }
 
@@ -47,18 +48,18 @@ function fillRate(c: ClassItem): number {
   return Math.min(100, Math.round((c.selected_count / c.max_count) * 100))
 }
 
-export default function Select({ account, onDone }: Props) {
+export default function Select({ account, sessionToken, onDone }: Props) {
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["electives"],
-    queryFn: () => api<ElectivesData>("/electives"),
+    queryKey: ["electives", sessionToken],
+    queryFn: () => api<ElectivesData>("/electives", { session: sessionToken }),
     refetchInterval: 10000,
   })
 
-  // 查询当前调度器已保存的目标课程并自动回显（按账号）
+  // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）
   const { data: stateData } = useQuery({
-    queryKey: ["state", account],
-    queryFn: () => api<SchedulerState>("/state", { account }),
+    queryKey: ["state", account, sessionToken],
+    queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
   })
 
   const [selected, setSelected] = useState<Record<number, number>>({})
@@ -133,7 +134,8 @@ export default function Select({ account, onDone }: Props) {
     try {
       await api("/targets", {
         method: "PUT",
-        body: JSON.stringify({ account, targets }),
+        body: JSON.stringify({ targets }),
+        session: sessionToken,
       })
       setSaved(true)
       toast({

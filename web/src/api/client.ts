@@ -1,6 +1,6 @@
 const BASE = "/api"
 
-// 未登录（token 失效）事件：全局通知 App 登出
+// 未登录（会话失效）事件：全局通知 App 移除对应账号会话
 export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
 export class ApiError extends Error {
@@ -11,24 +11,22 @@ export class ApiError extends Error {
   }
 }
 
-// api 统一请求：非零 code 抛 ApiError；account 可选参数会附加到 URL query
-export async function api<T>(path: string, opts?: RequestInit & { account?: string }): Promise<T> {
-  const { account, ...rest } = opts ?? {}
-  const q = account ? `?account=${encodeURIComponent(account)}` : ""
-  const r = await fetch(BASE + path + q, {
-    headers: { "Content-Type": "application/json" },
-    ...rest,
-  })
+// api 统一请求：非零 code 抛 ApiError；session 为服务端签发的会话令牌（Bearer 认证）
+export async function api<T>(path: string, opts?: RequestInit & { session?: string }): Promise<T> {
+  const { session, ...rest } = opts ?? {}
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (session) headers.Authorization = `Bearer ${session}`
+  const r = await fetch(BASE + path, { headers, ...rest })
   let j: { code: number; data: T; msg: string }
   try {
     j = await r.json()
   } catch {
     throw new ApiError(-2, "服务器响应异常（HTTP " + r.status + "）")
   }
-  if (j.code === -1) {
-    // token 失效：广播事件，由 App 统一登出
+  if (j.code === 401) {
+    // 会话过期：广播事件，由 App 移除该账号会话
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
-    throw new ApiError(j.code, j.msg || "登录已失效")
+    throw new ApiError(j.code, j.msg || "会话已失效")
   }
   if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
   return j.data

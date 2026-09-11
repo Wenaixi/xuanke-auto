@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,8 +28,10 @@ type Deps struct {
 	Accounts *accounts.Manager
 	Sessions *session.Store
 	OpenTime string
-	// AdminToken 部署访问口令（main 从环境变量注入，启动必填）。
+	// AdminToken 管理口令（main 从环境变量注入，启动必填；用于生成激活码）。
 	AdminToken string
+	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
+	ActivationEnabled bool
 	// Encrypt 密码加密（secure.Encrypt 绑定主密钥闭包）。
 	Encrypt func(string) (string, error)
 }
@@ -37,14 +42,13 @@ func writeJSON(w http.ResponseWriter, code int, data any, msg string) {
 	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
 }
 
-// LoginRequest 登录请求体（部署口令 + 教务账密）。
+// LoginRequest 登录请求体（教务账密，无部署口令——激活码已取代登录口令 gate）。
 type LoginRequest struct {
-	Account    string `json:"account"`
-	Password   string `json:"password"`
-	AdminToken string `json:"admin_token"`
+	Account  string `json:"account"`
+	Password string `json:"password"`
 }
 
-// handleLogin 登录：校验部署口令 -> 教务登录 -> 签发会话并返回。
+// handleLogin 登录：教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
 func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -55,21 +59,66 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "账号与密码不能为空")
 		return
 	}
-	// 部署口令校验（启动必须配置）
-	if d.AdminToken == "" || subtle.ConstantTimeCompare([]byte(req.AdminToken), []byte(d.AdminToken)) != 1 {
-		writeJSON(w, 403, nil, "部署访问口令错误")
-		return
-	}
 	if _, err := d.Accounts.LoginByPassword(req.Account, req.Password, d.Encrypt); err != nil {
 		writeJSON(w, 1, nil, "登录失败: "+err.Error())
 		return
 	}
-	if err := d.Store.SaveAccountName(req.Account); err != nil {
+	if d.ActivationEnabled {
+		activated, err := d.Store.IsActivated(req.Account)
+		if err != nil {
+			writeJSON(w, 1, nil, "查询激活状态失败: "+err.Error())
+			return
+		}
+		if !activated {
+			// 未激活：前端据此弹出激活码输入框
+			writeJSON(w, 1001, map[string]string{"account": req.Account}, "该账号尚未激活，请输入激活码")
+			return
+		}
+	}
+	d.issueSession(w, req.Account)
+}
+
+// ActivateRequest 激活请求体。
+type ActivateRequest struct {
+	Account string `json:"account"`
+	Code    string `json:"code"`
+}
+
+// handleActivate 激活账号：消耗激活码并签发会话（机制关闭时拒绝）。
+func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
+	if !d.ActivationEnabled {
+		writeJSON(w, 1, nil, "激活码机制已关闭")
+		return
+	}
+	var req ActivateRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+		return
+	}
+	if req.Account == "" || req.Code == "" {
+		writeJSON(w, 1, nil, "账号与激活码不能为空")
+		return
+	}
+	ok, err := d.Store.ConsumeActivationCode(strings.TrimSpace(req.Code), strings.TrimSpace(req.Account))
+	if err != nil {
+		writeJSON(w, 1, nil, "激活失败: "+err.Error())
+		return
+	}
+	if !ok {
+		writeJSON(w, 1, nil, "激活码无效或已用尽")
+		return
+	}
+	d.issueSession(w, strings.TrimSpace(req.Account))
+}
+
+// issueSession 记录账号名 + 签发会话 + 记日志。
+func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
+	if err := d.Store.SaveAccountName(acct); err != nil {
 		log.Printf("[api] 保存账号名失败: %v", err)
 	}
-	sess := d.Sessions.Create(req.Account)
-	d.Store.AppendLog(req.Account, 0, "login", "账号 "+req.Account+" 登录成功", true)
-	writeJSON(w, 0, map[string]string{"token": sess, "account": req.Account}, "登录成功")
+	sess := d.Sessions.Create(acct)
+	d.Store.AppendLog(acct, 0, "login", "账号 "+acct+" 登录成功", true)
+	writeJSON(w, 0, map[string]string{"token": sess, "account": acct}, "登录成功")
 }
 
 // handleElectives 课程列表：直读调度器内存快照（超高性能），快照过期才触发探测。
@@ -151,7 +200,7 @@ func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, d.Accounts.Registered(), "")
 }
 
-// handleLogs 报名日志。
+// handleLogs 报名日志（仅返回当前会话账号自己的日志）。
 func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 	logs, err := d.Store.LoadLogs(sessionAccount(r), 100)
 	if err != nil {
@@ -164,6 +213,87 @@ func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 // handleHealth 健康检查（免认证，仅探活）。
 func (d *Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, "ok", "")
+}
+
+// ---- 激活码管理接口 ----
+
+// requireAdmin 管理口令校验（仅激活码管理接口专用，不再是登录 gate）。
+func requireAdmin(d *Deps, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !d.ActivationEnabled {
+			writeJSON(w, 1, nil, "激活码机制已关闭")
+			return
+		}
+		tok := r.Header.Get("X-Admin-Token")
+		if d.AdminToken == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(d.AdminToken)) != 1 {
+			writeJSON(w, 403, nil, "管理口令错误")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// handleAdminCodes 激活码管理：POST 生成 / GET 列表 / DELETE 删除。
+func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		codes, err := d.Store.ListActivationCodes()
+		if err != nil {
+			writeJSON(w, 1, nil, "读取激活码失败: "+err.Error())
+			return
+		}
+		writeJSON(w, 0, codes, "")
+	case http.MethodPost:
+		var req struct {
+			Count int `json:"count"`
+			Uses  int `json:"uses"` // 每个激活码可用次数
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+			return
+		}
+		if req.Count < 1 || req.Count > 100 {
+			writeJSON(w, 1, nil, "生成数量需在 1-100 之间")
+			return
+		}
+		if req.Uses < 1 {
+			writeJSON(w, 1, nil, "每个激活码使用次数至少为 1")
+			return
+		}
+		codes := make([]string, 0, req.Count)
+		for i := 0; i < req.Count; i++ {
+			code := newActivationCode()
+			if err := d.Store.CreateActivationCode(code, req.Uses); err != nil {
+				writeJSON(w, 1, nil, "生成激活码失败: "+err.Error())
+				return
+			}
+			codes = append(codes, code)
+		}
+		writeJSON(w, 0, codes, "生成成功")
+	case http.MethodDelete:
+		var req struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+			return
+		}
+		if err := d.Store.DeleteActivationCode(strings.TrimSpace(req.Code)); err != nil {
+			writeJSON(w, 1, nil, "删除失败: "+err.Error())
+			return
+		}
+		writeJSON(w, 0, nil, "已删除")
+	default:
+		writeJSON(w, 405, nil, "方法不允许")
+	}
+}
+
+// newActivationCode 生成 XK-XXXX-XXXX-XXXX 格式激活码（12 位十六进制）。
+func newActivationCode() string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	s := strings.ToUpper(hex.EncodeToString(b))
+	return fmt.Sprintf("XK-%s-%s-%s", s[0:4], s[4:8], s[8:12])
 }
 
 // ---- 会话认证中间件 ----

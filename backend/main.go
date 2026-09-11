@@ -20,12 +20,17 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// 公网安全：部署访问口令必填，否则拒绝启动
+	// 公网安全：管理口令必填（用于生成激活码），否则拒绝启动
 	if cfg.AdminToken == "" {
-		log.Fatal("未设置部署访问口令：请设置环境变量 XUANKE_ADMIN_TOKEN 后启动")
+		log.Fatal("未设置管理口令：请设置环境变量 XUANKE_ADMIN_TOKEN 后启动")
 	}
 	if cfg.SFAPIKey == "" {
 		log.Println("[main] 警告：未设置 SF_API_KEY，教务登录验证码识别将不可用")
+	}
+	if cfg.ActivationCodesEnabled {
+		log.Printf("[main] 激活码机制已启用（XUANKE_ACTIVATION=off 可完全关闭）")
+	} else {
+		log.Printf("[main] 激活码机制已关闭：账号登录后直接进入系统")
 	}
 
 	// 数据库（拒绝旧版数据形状）
@@ -82,11 +87,12 @@ func main() {
 	sessions := session.New(12 * time.Hour)
 
 	mux := http.NewServeMux()
-	apiHandler := api.Register(mux, st, sched, accts, sessions, cfg.OpenTime, cfg.AdminToken, encrypt)
+	apiHandler := api.Register(mux, st, sched, accts, sessions, cfg.OpenTime, cfg.AdminToken,
+		cfg.ActivationCodesEnabled, encrypt)
 	mux.Handle("/", web.SpaHandler())
 
 	addr := ":" + cfg.Port
-	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（部署口令已启用）", addr)
+	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
 	if err := http.ListenAndServe(addr, apiHandler); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}

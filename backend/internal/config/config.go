@@ -13,8 +13,10 @@ type Config struct {
 	SFBaseURL string
 	SFAPIKey  string
 	SFModel   string
-	// AdminToken 部署访问口令（公网部署必备，启动时校验）
+	// AdminToken 管理口令（用于生成激活码；main 从环境变量注入，启动必填）
 	AdminToken string
+	// ActivationCodesEnabled 激活码机制开关（环境变量 XUANKE_ACTIVATION，默认 on；off 完全禁用激活码）
+	ActivationCodesEnabled bool
 }
 
 // Load 从环境变量与常量组装配置。
@@ -27,7 +29,8 @@ func Load() Config {
 		SFBaseURL:  envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
 		SFAPIKey:   os.Getenv("SF_API_KEY"),
 		SFModel:    envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
-		AdminToken: os.Getenv("XUANKE_ADMIN_TOKEN"),
+		AdminToken:            os.Getenv("XUANKE_ADMIN_TOKEN"),
+		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") != "off",
 	}
 }
 

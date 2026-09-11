@@ -3,7 +3,7 @@ import { api } from "../api/client"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
-import { ArrowRight, Loader2, User, Lock, ShieldCheck, Eye, EyeOff } from "lucide-react"
+import { ArrowRight, Loader2, User, Lock, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react"
 
 interface Props {
   onLogin: (token: string, account: string) => void
@@ -12,14 +12,18 @@ interface Props {
 export default function Login({ onLogin }: Props) {
   const [account, setAccount] = useState("")
   const [password, setPassword] = useState("")
-  const [adminToken, setAdminToken] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  // 激活码模态框状态：登录返回 code=1001 时弹出
+  const [pendingAccount, setPendingAccount] = useState("")
+  const [activationCode, setActivationCode] = useState("")
+  const [activating, setActivating] = useState(false)
+
   const submit = async () => {
-    if (!account.trim() || !password || !adminToken.trim()) {
-      setError("请完整输入账号、密码与部署访问口令喵~")
+    if (!account.trim() || !password) {
+      setError("请完整输入教学账号与登录密码喵~")
       return
     }
     setLoading(true)
@@ -27,13 +31,40 @@ export default function Login({ onLogin }: Props) {
     try {
       const data = await api<{ token: string; account: string }>("/login", {
         method: "POST",
-        body: JSON.stringify({ account: account.trim(), password, admin_token: adminToken.trim() }),
+        body: JSON.stringify({ account: account.trim(), password }),
       })
       onLogin(data.token, data.account)
     } catch (e: any) {
-      setError(e.message || "登录认证失败，请检查账号密码是否正确")
+      if (e.code === 1001) {
+        // 账号未激活：弹出激活码输入模态框
+        setPendingAccount(account.trim())
+        setActivationCode("")
+      } else {
+        setError(e.message || "登录认证失败，请检查账号密码是否正确")
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const activate = async () => {
+    if (!activationCode.trim()) {
+      setError("请输入激活码喵~")
+      return
+    }
+    setActivating(true)
+    setError("")
+    try {
+      const data = await api<{ token: string; account: string }>("/activate", {
+        method: "POST",
+        body: JSON.stringify({ account: pendingAccount, code: activationCode.trim() }),
+      })
+      setPendingAccount("")
+      onLogin(data.token, data.account)
+    } catch (e: any) {
+      setError(e.message || "激活失败，请检查激活码是否正确")
+    } finally {
+      setActivating(false)
     }
   }
 
@@ -109,24 +140,6 @@ export default function Login({ onLogin }: Props) {
                 </div>
               </div>
 
-              {/* 部署访问口令输入框（公网安全闸门） */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-neutral-400 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <ShieldCheck className="h-3.5 w-3.5 text-neutral-500" />
-                    <span>部署访问口令</span>
-                  </span>
-                </label>
-                <Input
-                  type="password"
-                  placeholder="输入服务部署时设置的口令"
-                  value={adminToken}
-                  onChange={(e) => setAdminToken(e.target.value)}
-                  disabled={loading}
-                  className="h-10 pr-10 text-sm bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
-                />
-              </div>
-
               {/* 错误提示框 */}
               {error && (
                 <div className="p-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 text-xs text-neutral-300 flex items-center gap-2">
@@ -159,12 +172,87 @@ export default function Login({ onLogin }: Props) {
 
             {/* 底部信息：极简纯粹 */}
             <div className="mt-6 pt-4 border-t border-neutral-900 flex items-center justify-between text-[11px] text-neutral-500">
-              <span>口令保护</span>
-              <span>多账号隔离</span>
+              <span>账号隔离</span>
+              <span>实时调度</span>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* 激活码输入模态框（登录返回 1001 时弹出） */}
+      {pendingAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+          <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] shadow-2xl">
+            <div className="p-6 pb-4">
+              <div className="flex items-center gap-2 text-xs tracking-wider uppercase text-neutral-500 font-mono">
+                <KeyRound className="h-3.5 w-3.5 text-neutral-500" />
+                <span>ACTIVATE ACCOUNT</span>
+              </div>
+              <h2 className="text-lg font-medium tracking-tight text-white pt-2">
+                输入激活码
+              </h2>
+              <p className="text-xs text-neutral-400 pt-1">
+                账号 {pendingAccount} 尚未激活，请输入管理员发放的激活码以开通使用权限
+              </p>
+            </div>
+
+            <div className="p-6 pt-2">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs text-neutral-400 flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-neutral-500" />
+                    <span>激活码</span>
+                  </label>
+                  <Input
+                    value={activationCode}
+                    onChange={(e) => setActivationCode(e.target.value)}
+                    placeholder="XK-XXXX-XXXX-XXXX"
+                    disabled={activating}
+                    autoFocus
+                    className="h-10 text-sm font-mono tracking-widest bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+                  />
+                </div>
+
+                {error && (
+                  <div className="p-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 text-xs text-neutral-300 flex items-center gap-2">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <Button
+                  variant="primary"
+                  size="lg"
+                  disabled={activating}
+                  onClick={activate}
+                  className="w-full h-10 flex items-center justify-center gap-2 text-sm font-semibold rounded-[var(--radius-sm)]"
+                >
+                  {activating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      <span>正在激活...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>激活并登录</span>
+                      <ArrowRight className="h-4 w-4 text-black" />
+                    </>
+                  )}
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={() => setPendingAccount("")}
+                  disabled={activating}
+                  className="text-xs text-neutral-500 hover:text-white transition-colors mx-auto py-1"
+                >
+                  取消，返回登录
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

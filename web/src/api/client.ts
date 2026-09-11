@@ -12,10 +12,15 @@ export class ApiError extends Error {
 }
 
 // api 统一请求：非零 code 抛 ApiError；session 为服务端签发的会话令牌（Bearer 认证）
-export async function api<T>(path: string, opts?: RequestInit & { session?: string }): Promise<T> {
-  const { session, ...rest } = opts ?? {}
+// headers 可附加自定义头（如激活码管理接口的 X-Admin-Token）
+export async function api<T>(
+  path: string,
+  opts?: RequestInit & { session?: string; headers?: Record<string, string> }
+): Promise<T> {
+  const { session, headers: extraHeaders, ...rest } = opts ?? {}
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (session) headers.Authorization = `Bearer ${session}`
+  Object.assign(headers, extraHeaders ?? {})
   const r = await fetch(BASE + path, { headers, ...rest })
   let j: { code: number; data: T; msg: string }
   try {

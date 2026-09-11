@@ -87,3 +87,11 @@ export type Account = string
 
 // 会话令牌映射：账号名 -> 服务端签发令牌（localStorage 持久化）
 export type Sessions = Record<string, string>
+
+// 激活码记录（管理面板展示）
+export interface ActivationCode {
+  code: string
+  total_uses: number
+  used_uses: number
+  created_at: string
+}

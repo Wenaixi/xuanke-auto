@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"xuanke-auto/backend/internal/accounts"
+	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
@@ -13,10 +14,10 @@ import (
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
 func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	accts *accounts.Manager, sessions *session.Store, openTime, adminToken string,
-	activationEnabled bool, encrypt func(string) (string, error)) http.Handler {
+	activationEnabled bool, encrypt func(string) (string, error), rt *runtime.Store) http.Handler {
 
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
-		OpenTime: openTime, AdminToken: adminToken, ActivationEnabled: activationEnabled, Encrypt: encrypt}
+		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled, Encrypt: encrypt}
 	limiter := newLoginLimiter()
 
 	mux.HandleFunc("GET /api/health", d.handleHealth)
@@ -36,15 +37,15 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 		}
 		d.handleActivate(w, r)
 	})
-	// 激活码管理接口（管理口令 X-Admin-Token）
+	// 激活码管理接口（会话级管理员鉴权）
 	mux.HandleFunc("GET /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdmin(d, d.handleAdminCodes)(w, r)
+		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
 	mux.HandleFunc("POST /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdmin(d, d.handleAdminCodes)(w, r)
+		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
 	mux.HandleFunc("DELETE /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdmin(d, d.handleAdminCodes)(w, r)
+		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
 	// 其余接口全部要求会话认证
 	mux.HandleFunc("GET /api/electives", func(w http.ResponseWriter, r *http.Request) {

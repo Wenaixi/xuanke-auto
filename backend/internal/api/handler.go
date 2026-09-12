@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
+	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
@@ -28,7 +29,9 @@ type Deps struct {
 	Accounts *accounts.Manager
 	Sessions *session.Store
 	OpenTime string
-	// AdminToken 管理口令（main 从环境变量注入，启动必填；用于生成激活码）。
+	// Runtime 进程内配置中心（管理员热重载生效）。
+	Runtime *runtime.Store
+	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；admin 账号的密码）。
 	AdminToken string
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
@@ -48,7 +51,10 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// handleLogin 登录：教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
+// handleLogin 登录：
+//   - admin 账号 + 管理口令 → 签发管理员会话（绕过教务登录，避免平台登录限流）
+//   - 其他账号 → 教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
+// 激活码机制关闭（ActivationEnabled=false）时跳过激活检查，登录即签发会话。
 func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -59,11 +65,22 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "账号与密码不能为空")
 		return
 	}
+	// 管理员入口：账号 admin + 管理口令（不触碰教务登录，口令比对恒定时间防爆破）
+	if req.Account == "admin" {
+		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
+			writeJSON(w, 1, nil, "管理口令错误")
+			return
+		}
+		sess := d.Sessions.CreateAdmin()
+		d.Store.AppendLog("admin", 0, "login", "管理员登录成功", true)
+		writeJSON(w, 0, map[string]string{"token": sess, "account": "admin"}, "管理员登录成功")
+		return
+	}
 	if _, err := d.Accounts.LoginByPassword(req.Account, req.Password, d.Encrypt); err != nil {
 		writeJSON(w, 1, nil, "登录失败: "+err.Error())
 		return
 	}
-	if d.ActivationEnabled {
+	if d.activationEnabled() {
 		activated, err := d.Store.IsActivated(req.Account)
 		if err != nil {
 			writeJSON(w, 1, nil, "查询激活状态失败: "+err.Error())
@@ -84,9 +101,18 @@ type ActivateRequest struct {
 	Code    string `json:"code"`
 }
 
+// activationEnabled 读取激活码机制开关：优先运行时配置（管理员热改立即生效），
+// 无配置中心时回落静态 Deps 字段（测试直构场景）。
+func (d *Deps) activationEnabled() bool {
+	if d.Runtime != nil {
+		return d.Runtime.Get().ActivationEnabled
+	}
+	return d.ActivationEnabled
+}
+
 // handleActivate 激活账号：消耗激活码并签发会话（机制关闭时拒绝）。
 func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
-	if !d.ActivationEnabled {
+	if !d.activationEnabled() {
 		writeJSON(w, 1, nil, "激活码机制已关闭")
 		return
 	}
@@ -217,16 +243,18 @@ func (d *Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // ---- 激活码管理接口 ----
 
-// requireAdmin 管理口令校验（仅激活码管理接口专用，不再是登录 gate）。
-func requireAdmin(d *Deps, next http.HandlerFunc) http.HandlerFunc {
+// requireAdminSession 管理员会话校验：仅接受 admin 账号登录签发的会话令牌。
+// 管理口令只在登录时比对一次，后续一律走会话（X-Admin-Token 已废弃）。
+func requireAdminSession(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !d.ActivationEnabled {
-			writeJSON(w, 1, nil, "激活码机制已关闭")
-			return
+		tok := ""
+		if h := r.Header.Get("Authorization"); len(h) > 7 && h[:7] == "Bearer " {
+			tok = h[7:]
+		} else if xt := r.Header.Get("X-Auth-Token"); xt != "" {
+			tok = xt
 		}
-		tok := r.Header.Get("X-Admin-Token")
-		if d.AdminToken == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(d.AdminToken)) != 1 {
-			writeJSON(w, 403, nil, "管理口令错误")
+		if !d.Sessions.IsAdmin(tok) {
+			writeJSON(w, 403, nil, "需要管理员权限")
 			return
 		}
 		next(w, r)
@@ -234,7 +262,12 @@ func requireAdmin(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 }
 
 // handleAdminCodes 激活码管理：POST 生成 / GET 列表 / DELETE 删除。
+// 激活码机制关闭时整个接口禁用（关了就根本没有）。
 func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
+	if !d.activationEnabled() {
+		writeJSON(w, 1, nil, "激活码机制已关闭")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		codes, err := d.Store.ListActivationCodes()

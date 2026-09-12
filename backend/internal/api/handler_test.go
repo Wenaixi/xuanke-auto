@@ -11,6 +11,7 @@ import (
 
 	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/db"
+	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
@@ -98,8 +99,15 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 	t.Cleanup(sched.Stop)
 
 	mux := http.NewServeMux()
-	apiHandler := Register(mux, st, sched, accts, sessions, "2026-09-13 09:00:00", testAdminToken, activation,
-		func(s string) (string, error) { return "ENC:" + s, nil })
+	rt := runtime.New(runtime.Config{
+		ActivationEnabled: activation,
+		VisionBaseURL:     zhi.URL,
+		VisionAPIKey:      "k",
+		VisionModel:       "m",
+		OpenTime:          "2026-09-13 09:00:00",
+	})
+	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken,
+		rt.Get().ActivationEnabled, func(s string) (string, error) { return "ENC:" + s, nil }, rt)
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts}
 }
 
@@ -130,27 +138,24 @@ func doJSONAuth(t *testing.T, h http.Handler, method, path, body, auth string) (
 	return rec.Code, j
 }
 
-// doJSONAdmin 携带管理口令 X-Admin-Token 访问激活码管理接口。
+// adminTokenFor 用管理口令登录 admin 账号，返回管理员会话令牌。
+func adminTokenFor(t *testing.T, d *testDeps) string {
+	t.Helper()
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"`+testAdminToken+`"}`)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("管理员登录失败: %d %v", code, j)
+	}
+	data, ok := j["data"].(map[string]any)
+	if !ok || data["token"] == "" {
+		t.Fatalf("管理员登录响应缺 token: %v", j)
+	}
+	return data["token"].(string)
+}
+
+// doJSONAdmin 携带管理员会话令牌访问管理接口。
 func doJSONAdmin(t *testing.T, h http.Handler, method, path, body, adminTok string) (int, map[string]any) {
 	t.Helper()
-	var reader *strings.Reader
-	if body == "" {
-		reader = strings.NewReader("")
-	} else {
-		reader = strings.NewReader(body)
-	}
-	req := httptest.NewRequest(method, path, reader)
-	req.Header.Set("Content-Type", "application/json")
-	if adminTok != "" {
-		req.Header.Set("X-Admin-Token", adminTok)
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	var j map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
-		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
-	}
-	return rec.Code, j
+	return doJSONAuth(t, h, method, path, body, adminTok)
 }
 
 // loginAndGetToken 复刻真实完整链路：教务登录（未激活返回 code=1001，同时注册账号客户端）-> 激活码激活 -> 返回会话令牌。
@@ -238,7 +243,8 @@ func TestLoginActivationDisabledSkipsCheck(t *testing.T) {
 	if j["code"].(float64) == 0 {
 		t.Fatalf("激活码机制关闭后 activate 不应成功: %v", j)
 	}
-	code, j = doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":1,"uses":1}`, testAdminToken)
+	adminTok := adminTokenFor(t, d) // 机制关闭但管理员登录不受影响
+	code, j = doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":1,"uses":1}`, adminTok)
 	if j["code"].(float64) == 0 {
 		t.Fatalf("激活码机制关闭后不应能生成激活码: %v", j)
 	}
@@ -252,24 +258,37 @@ func TestActivateBadCode(t *testing.T) {
 	}
 }
 
-func TestAdminBadToken(t *testing.T) {
+func TestAdminAuth(t *testing.T) {
 	d := newTestDeps(t)
-	// 错误管理口令访问激活码管理接口应 403
-	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", "wrong")
-	if code != 200 || j["code"].(float64) != 403 {
-		t.Fatalf("错误管理口令应 403: %d %v", code, j)
+	// 错误管理口令登录 admin 应失败
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"wrong"}`)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("错误管理口令登录应 code=1: %d %v", code, j)
 	}
-	// 缺管理口令也应 403
+	// 无会话访问管理接口应 403
 	code, j = doJSON(t, d.api, "GET", "/api/admin/codes", "")
 	if code != 200 || j["code"].(float64) != 403 {
-		t.Fatalf("缺管理口令应 403: %d %v", code, j)
+		t.Fatalf("无会话访问管理接口应 403: %d %v", code, j)
+	}
+	// 普通用户会话访问管理接口应 403
+	userTok := authenticateDirect(t, d, "acct1")
+	code, j = doJSONAuth(t, d.api, "GET", "/api/admin/codes", "", userTok)
+	if code != 200 || j["code"].(float64) != 403 {
+		t.Fatalf("普通用户会话访问管理接口应 403: %d %v", code, j)
+	}
+	// 正确管理口令登录 admin 成功，会话可访问管理接口
+	adminTok := adminTokenFor(t, d)
+	code, j = doJSONAuth(t, d.api, "GET", "/api/admin/codes", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("管理员会话访问管理接口应成功: %d %v", code, j)
 	}
 }
 
 func TestAdminCodesGenerateListDelete(t *testing.T) {
 	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
 	// 生成 2 个激活码，每个可用 3 次
-	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":2,"uses":3}`, testAdminToken)
+	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":2,"uses":3}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("生成激活码失败: %d %v", code, j)
 	}
@@ -278,7 +297,7 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 		t.Fatalf("应生成 2 个激活码: %v", j)
 	}
 	// 列表验证
-	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", testAdminToken)
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", adminTok)
 	list, _ := j["data"].([]any)
 	if code != 200 || j["code"].(float64) != 0 || len(list) != 2 {
 		t.Fatalf("激活码列表异常: %d %v", code, j)
@@ -290,11 +309,11 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 		t.Fatalf("激活失败: %d %v", code, j)
 	}
 	// 删除激活码
-	code, j = doJSONAdmin(t, d.api, "DELETE", "/api/admin/codes", `{"code":"`+first+`"}`, testAdminToken)
+	code, j = doJSONAdmin(t, d.api, "DELETE", "/api/admin/codes", `{"code":"`+first+`"}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("删除激活码失败: %d %v", code, j)
 	}
-	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", testAdminToken)
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", adminTok)
 	list, _ = j["data"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("删除后应剩 1 个激活码: %v", j)

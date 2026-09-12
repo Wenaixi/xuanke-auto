@@ -7,9 +7,10 @@ import (
 	"time"
 )
 
-// Session 一次服务端会话（绑定唯一账号）。
+// Session 一次服务端会话（绑定唯一账号；Admin 标记管理员身份）。
 type Session struct {
 	Account string
+	Admin   bool // 管理员会话（admin 账号 + 管理口令登录签发）
 	Expires time.Time
 }
 
@@ -25,12 +26,21 @@ func New(ttl time.Duration) *Store {
 	return &Store{sessions: make(map[string]*Session), ttl: ttl}
 }
 
-// Create 为账号签发新会话令牌（32 字节 hex）。
+// Create 为账号签发新会话令牌（32 字节 hex，普通用户）。
 func (s *Store) Create(account string) string {
+	return s.create(account, false)
+}
+
+// CreateAdmin 签发管理员会话（账号固定 admin，Admin=true）。
+func (s *Store) CreateAdmin() string {
+	return s.create("admin", true)
+}
+
+func (s *Store) create(account string, admin bool) string {
 	token := randToken()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions[token] = &Session{Account: account, Expires: time.Now().Add(s.ttl)}
+	s.sessions[token] = &Session{Account: account, Admin: admin, Expires: time.Now().Add(s.ttl)}
 	return token
 }
 
@@ -47,6 +57,21 @@ func (s *Store) Account(token string) (string, bool) {
 		return "", false
 	}
 	return sess.Account, true
+}
+
+// IsAdmin 校验令牌是否为管理员会话。
+func (s *Store) IsAdmin(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(sess.Expires) {
+		delete(s.sessions, token)
+		return false
+	}
+	return sess.Admin
 }
 
 // Delete 注销会话（退出登录）。

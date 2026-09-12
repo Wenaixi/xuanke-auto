@@ -9,6 +9,7 @@ import (
 	"xuanke-auto/backend/internal/api"
 	"xuanke-auto/backend/internal/config"
 	"xuanke-auto/backend/internal/db"
+	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/secure"
 	"xuanke-auto/backend/internal/session"
@@ -59,8 +60,39 @@ func main() {
 		accts.Restore(creds, decrypt)
 	}
 
+	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 开放时间）
+	rt := runtime.New(runtime.Config{
+		ActivationEnabled: cfg.ActivationCodesEnabled,
+		VisionBaseURL:     cfg.SFBaseURL,
+		VisionAPIKey:      cfg.SFAPIKey,
+		VisionModel:       cfg.SFModel,
+		OpenTime:          cfg.OpenTime,
+	})
+	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）
+	if kv, err := st.LoadSettings(); err != nil {
+		log.Printf("[main] 读取运行时配置失败: %v", err)
+	} else if len(kv) > 0 {
+		rt.Update(func(c *runtime.Config) {
+			if v, ok := kv["activation_enabled"]; ok {
+				c.ActivationEnabled = v == "true"
+			}
+			if v, ok := kv["vision_base_url"]; ok {
+				c.VisionBaseURL = v
+			}
+			if v, ok := kv["vision_key"]; ok {
+				c.VisionAPIKey = v
+			}
+			if v, ok := kv["vision_model"]; ok {
+				c.VisionModel = v
+			}
+			if v, ok := kv["open_time"]; ok {
+				c.OpenTime = v
+			}
+		})
+	}
+
 	// 调度器（窗口到点立即探测 + 课程快照 + 按账号并发提交）
-	openTime, err := scheduler.FormatOpenTime(cfg.OpenTime)
+	openTime, err := scheduler.FormatOpenTime(rt.Get().OpenTime)
 	if err != nil {
 		log.Fatalf("开放时间配置错误: %v", err)
 	}
@@ -87,8 +119,8 @@ func main() {
 	sessions := session.New(12 * time.Hour)
 
 	mux := http.NewServeMux()
-	apiHandler := api.Register(mux, st, sched, accts, sessions, cfg.OpenTime, cfg.AdminToken,
-		cfg.ActivationCodesEnabled, encrypt)
+	apiHandler := api.Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, cfg.AdminToken,
+		rt.Get().ActivationEnabled, encrypt, rt)
 	mux.Handle("/", web.SpaHandler())
 
 	addr := ":" + cfg.Port

@@ -42,3 +42,22 @@ func TestDelete(t *testing.T) {
 		t.Fatal("删除后会话应失效")
 	}
 }
+
+func TestAdminSession(t *testing.T) {
+	s := New(time.Hour)
+	adminTok := s.CreateAdmin()
+	if !s.IsAdmin(adminTok) {
+		t.Fatal("管理员令牌应 IsAdmin=true")
+	}
+	if acct, ok := s.Account(adminTok); !ok || acct != "admin" {
+		t.Fatalf("管理员会话账号应为 admin: %q %v", acct, ok)
+	}
+	// 普通会话不应被当作管理员
+	userTok := s.Create("acct1")
+	if s.IsAdmin(userTok) {
+		t.Fatal("普通会话不应 IsAdmin=true")
+	}
+	if s.IsAdmin("bogus") {
+		t.Fatal("无效令牌不应 IsAdmin=true")
+	}
+}

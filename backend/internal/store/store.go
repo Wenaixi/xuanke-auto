@@ -304,3 +304,96 @@ func (s *Store) LoadSettings() (map[string]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// DeleteAccount 管理员删除账号：清其凭据/账号名/目标/成功记录/激活状态。
+// 报名日志保留（审计用途），仅重新登录即可重建凭据与客户端。
+func (s *Store) DeleteAccount(acct string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// 凭据与已知账号名（学生客户端按需重新登录）
+	if _, err := tx.Exec("DELETE FROM credentials WHERE account = ?", acct); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM accounts WHERE account = ?", acct); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM targets WHERE account = ?", acct); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM success WHERE account = ?", acct); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM activations WHERE account = ?", acct); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// LoadAllLogs 读取全量日志（管理员日志总览用，不按账号过滤）。
+func (s *Store) LoadAllLogs(limit int) ([]LogEntry, error) {
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+	rows, err := s.db.Query(
+		"SELECT id, account, class_id, action, result, is_ok, created_at FROM task_log ORDER BY id DESC LIMIT ?",
+		limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LogEntry
+	for rows.Next() {
+		var e LogEntry
+		var ok int
+		if err := rows.Scan(&e.ID, &e.Account, &e.ClassID, &e.Action, &e.Result, &ok, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		e.IsOK = ok == 1
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// AdminAccount 账号管理条目：账号名 + 目标 + 已成功课程。
+type AdminAccount struct {
+	Account  string               `json:"account"`
+	Targets  []scheduler.Target   `json:"targets"`
+	Success  []int                `json:"success"`
+}
+
+// ListAdminAccounts 列出全部账号及目标/成功记录（管理员账号管理用）。
+func (s *Store) ListAdminAccounts() ([]AdminAccount, error) {
+	names, err := s.ListAccounts()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdminAccount, 0, len(names))
+	for _, n := range names {
+		ts, err := s.LoadTargetsForAccount(n)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := s.db.Query("SELECT class_id FROM success WHERE account = ? ORDER BY class_id", n)
+		if err != nil {
+			return nil, err
+		}
+		var ids []int
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		out = append(out, AdminAccount{Account: n, Targets: ts, Success: ids})
+	}
+	return out, nil
+}

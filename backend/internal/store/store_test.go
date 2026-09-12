@@ -220,3 +220,70 @@ func TestLogs(t *testing.T) {
 		t.Fatalf("日志 is_ok 标记错误: %+v", logs)
 	}
 }
+
+func TestAdminStore(t *testing.T) {
+	s := openTestStore(t)
+	// 造数据：两个账号 + 目标 + 成功记录
+	if err := s.SaveAccountName("acct1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveAccountName("acct2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTargetsForAccount("acct1", []scheduler.Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSuccess("acct1", 61115); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSuccess("acct2", 61205); err != nil {
+		t.Fatal(err)
+	}
+
+	// 管理员账号列表：账号 + 各自目标 + 成功
+	list, err := s.ListAdminAccounts()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("管理员账号列表异常: %+v %v", list, err)
+	}
+	for _, a := range list {
+		if a.Account == "acct1" {
+			if len(a.Targets) != 1 || len(a.Success) != 1 {
+				t.Fatalf("acct1 应含目标与成功记录: %+v", a)
+			}
+		}
+		if a.Account == "acct2" {
+			if len(a.Targets) != 0 || len(a.Success) != 1 {
+				t.Fatalf("acct2 成功记录异常: %+v", a)
+			}
+		}
+	}
+
+	// 全量日志（跨账号）
+	if err := s.AppendLog("acct1", 61115, "select", "报名成功", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendLog("acct2", 61205, "select", "报名成功", true); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.LoadAllLogs(10)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("全量日志异常: %+v %v", all, err)
+	}
+
+	// 删除账号：凭据/账号名/目标/成功/激活全清，日志保留
+	if err := s.DeleteAccount("acct1"); err != nil {
+		t.Fatal(err)
+	}
+	names, _ := s.ListAccounts()
+	if len(names) != 1 || names[0] != "acct2" {
+		t.Fatalf("删除后账号列表异常: %v", names)
+	}
+	ts, _ := s.LoadTargetsForAccount("acct1")
+	if len(ts) != 0 {
+		t.Fatalf("删除后 acct1 目标应清空: %+v", ts)
+	}
+	all, _ = s.LoadAllLogs(10)
+	if len(all) != 2 {
+		t.Fatalf("删除账号不应清日志（审计保留）: %+v", all)
+	}
+}

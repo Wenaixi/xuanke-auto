@@ -102,7 +102,7 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 	rt := runtime.New(runtime.Config{
 		ActivationEnabled: activation,
 		VisionBaseURL:     zhi.URL,
-		VisionAPIKey:      "k",
+		VisionAPIKey:      "***REMOVED***",
 		VisionModel:       "m",
 		OpenTime:          "2026-09-13 09:00:00",
 	})
@@ -317,6 +317,98 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	list, _ = j["data"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("删除后应剩 1 个激活码: %v", j)
+	}
+}
+
+func TestAdminConfigHotReload(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 初始配置
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/config", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("读取配置失败: %d %v", code, j)
+	}
+	cfg, _ := j["data"].(map[string]any)
+	if cfg["activation_enabled"] != true {
+		t.Fatalf("初始激活码开关应为 true: %v", cfg)
+	}
+	if cfg["vision_api_key_masked"] != "****y123" {
+		t.Fatalf("Vision key 应脱敏回显后 4 位: %v", cfg)
+	}
+	// 热更新：关闭激活码 + 改打开时间（Vision 保持 mock server 可登录）
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
+		`{"activation_enabled":false,"vision_base_url":"`+d.srv.URL+`","vision_api_key":"***REMOVED***","vision_model":"new-model","open_time":"2026-09-14 10:00:00"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("更新配置失败: %d %v", code, j)
+	}
+	// 立即生效（运行时配置中心）：激活码机制已关闭 → 登录直接签发会话
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"acct1","password":"pwd"}`)
+	if j["code"].(float64) != 0 {
+		t.Fatalf("关闭激活码后登录应直接签发会话: %v", j)
+	}
+	// 新值已落库（重启恢复源）
+	kv, err := d.store.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv["activation_enabled"] != "false" || kv["vision_model"] != "new-model" || kv["open_time"] != "2026-09-14 10:00:00" {
+		t.Fatalf("配置未落库: %v", kv)
+	}
+	// Vision 地址热重载生效：改成无效地址后，登录的验证码识别应走新地址并失败
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
+		`{"vision_base_url":"https://invalid.example.com/v1"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("更新 Vision 地址失败: %d %v", code, j)
+	}
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"acct2","password":"pwd"}`)
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "invalid.example.com") {
+		t.Fatalf("Vision 热重载未生效（登录应打到新地址）: %v", j)
+	}
+	// 无效打开时间应被拒绝（保持原值）
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":"bad-time"}`, adminTok)
+	if j["code"].(float64) == 0 {
+		t.Fatalf("无效打开时间不应接受: %v", j)
+	}
+}
+
+func TestAdminStatsAccountsLogs(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 造两个学生账号 + 目标 + 成功
+	tok1 := loginAndGetToken(t, d, "acct1")
+	tok2 := loginAndGetToken(t, d, "acct2")
+	doJSONAuth(t, d.api, "PUT", "/api/targets", `{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`, tok1)
+	doJSONAuth(t, d.api, "PUT", "/api/targets", `{"targets":[{"publish_id":2,"class_id":61205,"course_name":"篮球"}]}`, tok2)
+	// 运行状态
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("stats 异常: %d %v", code, j)
+	}
+	st, _ := j["data"].(map[string]any)
+	if st["account_count"].(float64) != 2 || st["targets_count"].(float64) != 2 {
+		t.Fatalf("stats 计数异常: %v", st)
+	}
+	// 账号管理
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/accounts", "", adminTok)
+	list, _ := j["data"].([]any)
+	if code != 200 || j["code"].(float64) != 0 || len(list) != 2 {
+		t.Fatalf("账号列表异常: %d %v", code, j)
+	}
+	// 删除 acct1（管理员会话自身不受影响）
+	code, j = doJSONAdmin(t, d.api, "DELETE", "/api/admin/accounts", `{"account":"acct1"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("删除账号失败: %d %v", code, j)
+	}
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/accounts", "", adminTok)
+	list, _ = j["data"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("删除后应剩 1 个账号: %v", j)
+	}
+	// 日志总览（全量，包含 admin 自身与 acct2）
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/logs", "", adminTok)
+	logs, _ := j["data"].([]any)
+	if code != 200 || j["code"].(float64) != 0 || len(logs) == 0 {
+		t.Fatalf("日志总览异常: %d %v", code, j)
 	}
 }
 

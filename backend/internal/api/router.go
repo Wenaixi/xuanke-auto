@@ -47,6 +47,25 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("DELETE /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
+	// 管理员后台：配置热重载 / 运行状态 / 账号管理 / 日志总览（会话级管理员鉴权）
+	mux.HandleFunc("GET /api/admin/config", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminConfig)(w, r)
+	})
+	mux.HandleFunc("PUT /api/admin/config", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminConfig)(w, r)
+	})
+	mux.HandleFunc("GET /api/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminStats)(w, r)
+	})
+	mux.HandleFunc("GET /api/admin/accounts", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminAccounts)(w, r)
+	})
+	mux.HandleFunc("DELETE /api/admin/accounts", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminDeleteAccount)(w, r)
+	})
+	mux.HandleFunc("GET /api/admin/logs", func(w http.ResponseWriter, r *http.Request) {
+		requireAdminSession(d, d.handleAdminLogs)(w, r)
+	})
 	// 其余接口全部要求会话认证
 	mux.HandleFunc("GET /api/electives", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleElectives)(w, r)

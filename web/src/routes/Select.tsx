@@ -1,27 +1,13 @@
 import { useMemo, useState, useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { Account, ClassItem, ClassDetail, ElectivesData, Target, SchedulerState } from "../types"
+import type { Account, ClassItem, ElectivesData, Target, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"
 import { Badge } from "../components/ui/Badge"
 import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "../components/ui/Dialog"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "../components/ui/Sheet"
 import { useToast } from "../components/ui/Toast"
 import {
   ArrowLeft,
@@ -30,7 +16,6 @@ import {
   Check,
   Clock,
   Filter,
-  Info,
   MapPin,
   Search,
   User,
@@ -99,26 +84,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
-  const [detailClass, setDetailClass] = useState<ClassItem | null>(null)
-  const [detail, setDetail] = useState<ClassDetail | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [detailErr, setDetailErr] = useState("")
-
-  // 打开详情弹窗：先显示列表已知数据，同时向后端拉取 classDetail 详情
-  const openDetail = (c: ClassItem) => {
-    setDetailClass(c)
-    setDetail(null)
-    setDetailErr("")
-    setDetailLoading(true)
-    api<ClassDetail>(`/electives/detail?id=${c.id}`, { session: sessionToken })
-      .then(setDetail)
-      .catch((e: any) => setDetailErr(e.message || "详情加载失败"))
-      .finally(() => setDetailLoading(false))
-  }
-
-  // 详情值统一回退：弹窗内容优先用后端详情，缺字段用列表已知值
-  const dv = (k: keyof ClassDetail): string | number =>
-    detail ? (detail[k] as string | number) : ""
 
   // 本地每秒刷新倒计时，确保数字秒级平滑跳动
   const [, setTick] = useState(0)
@@ -427,8 +392,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                           key={c.id}
                           className={`relative rounded-[var(--radius-lg)] border transition-all duration-200 flex flex-col justify-between shadow-none ${
                             isSelected
-                              ? "border-white glass-strong"
-                              : "glass border-neutral-800 hover:border-neutral-600"
+                              ? "border-white bg-black/15"
+                              : "bg-black/10 border-neutral-800/70 hover:border-neutral-600"
                           }`}
                         >
                           <CardContent className="p-3.5 flex flex-col gap-2.5">
@@ -503,22 +468,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                             </div>
 
                             {/* 操作按钮区 */}
-                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-800 mt-0.5">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openDetail(c)}
-                                className="flex items-center justify-center gap-1.5 text-xs h-8 text-neutral-400 hover:text-white hover:border-white/60"
-                              >
-                                <Info className="h-3.5 w-3.5" />
-                                <span>详情</span>
-                              </Button>
-
+                            <div className="pt-2 border-t border-neutral-800/70 mt-0.5">
                               <Button
                                 variant={isSelected ? "outline" : "primary"}
                                 size="sm"
                                 onClick={() => pick(t.publish_id, c)}
-                                className="flex items-center justify-center gap-1.5 text-xs h-8"
+                                className="w-full flex items-center justify-center gap-1.5 text-xs h-8"
                               >
                                 {isSelected ? (
                                   <>
@@ -539,7 +494,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                     })}
 
                     {filteredClasses.length === 0 && (
-                      <div className="col-span-full rounded-[var(--radius-lg)] border border-dashed border-neutral-700 glass p-10 text-center text-xs text-neutral-400">
+                      <div className="col-span-full rounded-[var(--radius-lg)] border border-dashed border-neutral-700 bg-black/10 p-10 text-center text-xs text-neutral-400">
                         没有符合当前搜索或筛选条件的选修课程
                       </div>
                     )}
@@ -552,214 +507,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
         {/* 选课改动自动保存，无需手动按钮；底部留白避免内容被遮挡 */}
         <div className="h-20 sm:h-16" aria-hidden />
-
-        {/* 📱 手机端专用抽屉详情 (Bottom Sheet)：先从列表已知值渲染，详情接口返回后热替换 */}
-        <div className="sm:hidden">
-          <Sheet open={!!detailClass} onOpenChange={(open) => !open && setDetailClass(null)}>
-            {detailClass && (
-              <SheetContent side="bottom">
-                <SheetHeader>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="primary" className="text-[10px]">
-                      课程编号 #{detailClass.id}
-                    </Badge>
-                    <span className="text-xs text-[var(--fg-dim)]">班次详情</span>
-                  </div>
-                  <SheetTitle className="text-lg font-bold text-[var(--fg)] pt-1">
-                    {detailClass.course_name}
-                  </SheetTitle>
-                  <SheetDescription>
-                    {detail?.class_name || detailClass.class_name || "标准选修班级"}
-                  </SheetDescription>
-                </SheetHeader>
-
-                {detailLoading && (
-                  <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--fg-dim)]">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                    正在同步课程详情...
-                  </div>
-                )}
-
-                {detailErr && !detailLoading && (
-                  <div className="py-6 text-center text-xs text-[var(--fg-muted)] space-y-2">
-                    <p>详情加载失败：{detailErr}</p>
-                    <p className="text-[var(--fg-dim)]">以下为列表同步的已知信息</p>
-                  </div>
-                )}
-
-                <div className="space-y-3 text-xs divide-y divide-[var(--border)] py-3">
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">任课教师</span>
-                    <span className="text-[var(--fg)] font-medium">
-                      {String(dv("teacher_name") || detailClass.teacher_name_list || "暂无教师信息")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">上课教室</span>
-                    <span className="text-[var(--fg)] font-medium">
-                      {String(dv("classroom_name") || detailClass.class_room_name || "待教室分配")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">上课课节</span>
-                    <span className="text-[var(--fg)]">{String(dv("lessons_date") || detailClass.lessons_date || "课表编排中")}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">课程状态</span>
-                    <span className="text-[var(--fg)] font-medium">{String(dv("class_status_str") || detailClass.btn_text || "未开始")}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">计划容量比</span>
-                    <span className="text-[var(--fg)] font-semibold tabular-nums">
-                      {detail?.audited_count ?? detailClass.selected_count} /{" "}
-                      {detail?.plan_count ?? detailClass.plan_count ?? detailClass.max_count} 人
-                    </span>
-                  </div>
-                  {detail && (
-                    <>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">学年学期</span>
-                        <span className="text-[var(--fg)]">{String(dv("school_year_term") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">选修类型</span>
-                        <span className="text-[var(--fg)]">{String(dv("course_type_name") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">教学方式</span>
-                        <span className="text-[var(--fg)]">{String(dv("method_name") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">评价方式</span>
-                        <span className="text-[var(--fg)]">{String(dv("evaluate_type_name") || "—")}</span>
-                      </div>
-                    </>
-                  )}
-                  {detailClass.title && (
-                    <div className="py-2.5 text-xs text-[var(--fg-muted)] leading-relaxed bg-[var(--surface)] p-3 rounded-[var(--radius-md)]">
-                      说明：{detailClass.title}
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-3">
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={() => setDetailClass(null)}
-                    className="w-full h-11 text-xs font-medium"
-                  >
-                    关闭详情
-                  </Button>
-                </div>
-              </SheetContent>
-            )}
-          </Sheet>
-        </div>
-
-        {/* 💻 PC 电脑端专用模态弹窗 (Dialog)：详情接口返回后热替换，失败仍展示列表已知信息 */}
-        <div className="hidden sm:block">
-          <Dialog open={!!detailClass} onOpenChange={(open) => !open && setDetailClass(null)}>
-            {detailClass && (
-              <DialogContent className="max-w-md rounded-[var(--radius-xl)]">
-                <DialogHeader>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="primary" className="text-[10px]">
-                      ID: {detailClass.id}
-                    </Badge>
-                    <span className="text-xs text-[var(--fg-dim)]">课程详细参数</span>
-                  </div>
-                  <DialogTitle className="text-lg font-bold pt-1">
-                    {detailClass.course_name}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {detail?.class_name || detailClass.class_name || "标准选修班级"}
-                  </DialogDescription>
-                </DialogHeader>
-
-                {detailLoading && (
-                  <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--fg-dim)]">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                    正在同步课程详情...
-                  </div>
-                )}
-
-                {detailErr && !detailLoading && (
-                  <div className="py-6 text-center text-xs text-[var(--fg-muted)] space-y-2">
-                    <p>详情加载失败：{detailErr}</p>
-                    <p className="text-[var(--fg-dim)]">以下为列表同步的已知信息</p>
-                  </div>
-                )}
-
-                <div className="space-y-3 text-xs divide-y divide-[var(--border)] py-2">
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">任课教师</span>
-                    <span className="text-[var(--fg)] font-medium">
-                      {String(dv("teacher_name") || detailClass.teacher_name_list || "暂无教师信息")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">上课教室</span>
-                    <span className="text-[var(--fg)] font-medium">
-                      {String(dv("classroom_name") || detailClass.class_room_name || "待教室分配")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">上课课节</span>
-                    <span className="text-[var(--fg)]">{String(dv("lessons_date") || detailClass.lessons_date || "课表编排中")}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">课程状态</span>
-                    <span className="text-[var(--fg)] font-medium">{String(dv("class_status_str") || detailClass.btn_text || "未开始")}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-[var(--fg-dim)]">计划容量比</span>
-                    <span className="text-[var(--fg)] font-semibold tabular-nums">
-                      {detail?.audited_count ?? detailClass.selected_count} /{" "}
-                      {detail?.plan_count ?? detailClass.plan_count ?? detailClass.max_count} 人
-                    </span>
-                  </div>
-                  {detail && (
-                    <>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">学年学期</span>
-                        <span className="text-[var(--fg)]">{String(dv("school_year_term") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">选修类型</span>
-                        <span className="text-[var(--fg)]">{String(dv("course_type_name") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">教学方式</span>
-                        <span className="text-[var(--fg)]">{String(dv("method_name") || "—")}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-[var(--fg-dim)]">评价方式</span>
-                        <span className="text-[var(--fg)]">{String(dv("evaluate_type_name") || "—")}</span>
-                      </div>
-                    </>
-                  )}
-                  {detailClass.title && (
-                    <div className="py-2.5 text-xs text-[var(--fg-muted)] leading-relaxed bg-[var(--surface-soft)] p-3 rounded-[var(--radius-md)]">
-                      说明：{detailClass.title}
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-3 flex justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDetailClass(null)}
-                    className="text-xs font-medium px-4"
-                  >
-                    关闭
-                  </Button>
-                </div>
-              </DialogContent>
-            )}
-          </Dialog>
-        </div>
       </div>
     </div>
   )

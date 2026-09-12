@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { ArrowRight, Loader2, User, Lock, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react"
 
 interface Props {
-  onLogin: (token: string, account: string) => void
+  onLogin: (token: string, account: string, adminName?: string) => void
 }
 
 export default function Login({ onLogin }: Props) {
@@ -29,11 +29,12 @@ export default function Login({ onLogin }: Props) {
     setLoading(true)
     setError("")
     try {
-      const data = await api<{ token: string; account: string }>("/login", {
+      const data = await api<{ token: string; account: string; adminName?: string }>("/login", {
         method: "POST",
         body: JSON.stringify({ account: account.trim(), password }),
       })
-      onLogin(data.token, data.account)
+      // 管理员登录响应带 adminName；普通登录没有 → 传入可选的额外参数
+      onLogin(data.token, data.account, data.adminName)
     } catch (e: any) {
       if (e.code === 1001) {
         // 账号未激活：弹出激活码输入模态框

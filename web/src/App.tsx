@@ -26,14 +26,15 @@ export default function App() {
   const [page, setPage] = useState<"dashboard" | "select">("dashboard")
   const [current, setCurrent] = useState<Account>("")
   const [inAdmin, setInAdmin] = useState(false)
-  // 管理员账号名（后端下发的当前管理员名，默认 admin）
+  // 管理员账号名：登录返回 adminName 时同步（后端 XUANKE_ADMIN_NAME 决定，默认 admin）
   const [adminName, setAdminName] = useState("admin")
 
   const accounts = Object.keys(sessions)
   const sessionToken = current ? sessions[current] : undefined
 
   // 登录成功：写入（或覆盖）该账号会话，登录即自动加入账号列表
-  const login = (token: string, account: Account) => {
+  const login = (token: string, account: Account, adminName?: string) => {
+    if (adminName) setAdminName(adminName)
     const next = { ...loadSessions(), [account]: token }
     localStorage.setItem("xk_sessions", JSON.stringify(next))
     setSessions(next)
@@ -41,7 +42,6 @@ export default function App() {
     // 管理员账号登录后直接进入管理员界面（账号名与后端管理员名一致即管理员）
     setInAdmin(account === adminName)
   }
-
   // 退出当前账号：仅移除该账号会话，其他账号保留
   const logout = () => {
     const next = { ...loadSessions() }
@@ -58,9 +58,9 @@ export default function App() {
     } else if (!current || !accounts.includes(current)) {
       setCurrent(accounts[0])
     }
-    // 当前账号已不是 admin 时退出管理态
-    if (current !== "admin") setInAdmin(false)
-  }, [accounts, current])
+    // 当前账号已不是管理员时退出管理态
+    if (current !== adminName) setInAdmin(false)
+  }, [accounts, current, adminName])
 
   // 后端返回 401（会话过期）：剔除当前账号的失效令牌
   useEffect(() => {
@@ -114,14 +114,14 @@ export default function App() {
         <div className="canvas-bg" aria-hidden />
         <main className="app-content">
           {sessionToken ? (
-            inAdmin || current === "admin" ? (
+            inAdmin || current === adminName ? (
               <Admin
                 account={current}
                 sessionToken={sessionToken}
                 onLogout={logout}
                 onBackToStudent={() => {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
-                  const others = accounts.filter((a) => a !== "admin")
+                  const others = accounts.filter((a) => a !== adminName)
                   setInAdmin(false)
                   if (others.length > 0) setCurrent(others[0])
                 }}

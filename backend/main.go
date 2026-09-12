@@ -3,8 +3,11 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
@@ -22,6 +25,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	maybeStartTerminal()
 
 	// 公网安全：管理口令必填（用于生成激活码），否则拒绝启动
 	if cfg.AdminToken == "" {
@@ -68,7 +72,7 @@ func main() {
 		VisionBaseURL:      cfg.SFBaseURL,
 		VisionAPIKey:       cfg.SFAPIKey,
 		VisionModel:        cfg.SFModel,
-		CaptchaEngine:      "vision",
+		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr（本地免密钥），无环境自动回退 Vision
 		CaptchaConcurrency: 1,
 		OpenTime:           cfg.OpenTime,
 	})
@@ -152,12 +156,47 @@ func main() {
 
 	mux := http.NewServeMux()
 	apiHandler := api.Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, cfg.AdminToken,
-		rt.Get().ActivationEnabled, encrypt, decrypt, rt)
+		cfg.AdminName, rt.Get().ActivationEnabled, encrypt, decrypt, rt)
 	mux.Handle("/", web.SpaHandler())
 
 	addr := ":" + cfg.Port
 	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
+	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
+	openBrowser("http://localhost" + addr)
 	if err := http.ListenAndServe(addr, apiHandler); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}
+}
+
+// adminNameOrDefault 管理员账号名（配置为空时默认 admin）。
+func adminNameOrDefault(name string) string {
+	if name == "" {
+		return "admin"
+	}
+	return name
+}
+
+// openBrowser 在服务启动后用系统默认浏览器打开前端页面。
+func openBrowser(url string) {
+	start := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	start.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = start.Start()
+}
+
+// maybeStartTerminal 双击启动（无控制台，如 -H windowsgui 构建）时弹出独立终端显示日志；
+// 命令行运行（控制台子系统有终端）时跳过，避免重复弹窗。
+func maybeStartTerminal() {
+	// 有终端（控制台程序/命令行）→ 直接返回
+	if _, err := os.Stdout.Stat(); err == nil {
+		return
+	}
+	// 无控制台（GUI 双击）→ conhost 拉起本程序到新控制台，旧进程隐藏后退出
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command("conhost.exe", exe)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
+	os.Exit(0)
 }

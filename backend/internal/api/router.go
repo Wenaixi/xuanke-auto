@@ -61,12 +61,12 @@ func jsonContentType(r *http.Request) bool {
 // Register 注册所有 API 路由到 mux，并返回包装了安全中间件的根 handler。
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
 func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
-	accts *accounts.Manager, sessions *session.Store, openTime, adminToken string,
+	accts *accounts.Manager, sessions *session.Store, openTime, adminToken, adminName string,
 	activationEnabled bool, encrypt, decrypt func(string) (string, error), rt *runtime.Store) http.Handler {
 
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
-		Encrypt: encrypt, Decrypt: decrypt}
+		Encrypt: encrypt, Decrypt: decrypt, AdminName: adminName}
 	limiter := newLoginLimiter()
 
 	// 启动即按运行时配置初始化验证码识别引擎与并发信号量（幂等）

@@ -111,7 +111,7 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 	}
 	enc := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
 	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
-	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken,
+	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken, "admin",
 		rt.Get().ActivationEnabled, enc, dec, rt)
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, dec: dec}
 }

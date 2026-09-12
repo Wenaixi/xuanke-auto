@@ -519,14 +519,16 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
 
   const rows: { label: string; value: string }[] = s
     ? [
-        { label: "开放时间", value: s.open_time },
+        { label: "开放时间", value: s.open_time_set === false ? "未设置" : s.open_time },
         { label: "窗口状态", value: s.window_opened ? "已开放" : "待命中" },
         { label: "激活码机制", value: s.activation_on ? "开启" : "关闭" },
         { label: "账号数", value: String(s.account_count) },
         { label: "预选目标", value: String(s.targets_count) },
         { label: "已选成功", value: String(s.success_count) },
         { label: "日志条数", value: String(s.log_count) },
-        { label: "识别模型", value: s.vision_model },
+        { label: "识别引擎", value: s.captcha_engine === "ddddocr" ? "本地 ddddocr" : "硅基流动 Vision" },
+        { label: "识别并发", value: String(s.captcha_concurrency ?? 1) },
+        { label: "识别模型", value: s.vision_model || "（未配置）" },
       ]
     : []
 

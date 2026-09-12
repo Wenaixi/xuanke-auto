@@ -106,6 +106,9 @@ export interface AdminStats {
   log_count: number
   vision_model: string
   vision_base_url: string
+  captcha_engine?: string
+  captcha_concurrency?: number
+  open_time_set?: boolean
 }
 
 // 账号管理条目（GET /api/admin/accounts）

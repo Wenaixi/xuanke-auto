@@ -33,14 +33,23 @@ type Deps struct {
 	OpenTime string
 	// Runtime 进程内配置中心（管理员热重载生效）。
 	Runtime *runtime.Store
-	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；admin 账号的密码）。
-	// Encrypt 数据加密函数（main 注入：secure.Encrypt，凭据与 vision_key 落库前加密）。
+	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；管理员账号的密码）。
 	Encrypt func(string) (string, error)
 	// Decrypt 数据解密函数（main 注入：secure.Decrypt，vision_key 读回时解密）。
 	Decrypt func(string) (string, error)
 	AdminToken string
+	// AdminName 管理员登录账号名（默认 admin，可用 XUANKE_ADMIN_NAME 改名）。
+	AdminName string
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
+}
+
+// AdminNameValue 返回管理员账号名（默认 admin）。
+func (d *Deps) AdminNameValue() string {
+	if d.AdminName == "" {
+		return "admin"
+	}
+	return d.AdminName
 }
 
 // secureEncrypt 用注入的 Encrypt 加密敏感值，并加 enc: 前缀标记（main 读回时据此解密）。
@@ -72,6 +81,10 @@ type LoginRequest struct {
 //   - admin 账号 + 管理口令 → 签发管理员会话（绕过教务登录，避免平台登录限流）
 //   - 其他账号 → 教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
 // 激活码机制关闭（ActivationEnabled=false）时跳过激活检查，登录即签发会话。
+// handleLogin 登录：
+//   - 管理员账号（默认 admin，可在 data/.env 用 XUANKE_ADMIN_NAME 改名）+ 管理口令 → 签发管理员会话（绕过教务登录，避免平台登录限流）
+//   - 其他账号 → 教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
+// 激活码机制关闭（ActivationEnabled=false）时跳过激活检查，登录即签发会话。
 func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -82,15 +95,16 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "账号与密码不能为空")
 		return
 	}
-	// 管理员入口：账号 admin + 管理口令（不触碰教务登录，口令比对恒定时间防爆破）
-	if req.Account == "admin" {
+	adminName := d.AdminNameValue()
+	// 管理员入口：默认账号 admin（可配置改名）+ 管理口令（不触碰教务登录，口令比对恒定时间防爆破）
+	if req.Account == adminName {
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
 			writeJSON(w, 1, nil, "管理口令错误")
 			return
 		}
 		sess := d.Sessions.CreateAdmin()
-		d.Store.AppendLog("admin", 0, "login", "管理员登录成功", true)
-		writeJSON(w, 0, map[string]string{"token": sess, "account": "admin"}, "管理员登录成功")
+		d.Store.AppendLog(adminName, 0, "login", "管理员登录成功", true)
+		writeJSON(w, 0, map[string]string{"token": sess, "account": adminName, "adminName": adminName}, "管理员登录成功")
 		return
 	}
 	if _, err := d.Accounts.LoginByPassword(req.Account, req.Password, d.Encrypt); err != nil {
@@ -480,16 +494,26 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if windowOpened == nil {
 		windowOpened = boolPtr(time.Now().After(open)) // 调度器未启动时的回退
 	}
+	// 全账号日志总数（LoadAllLogs 含全部账号）
+	logsCount := len(allLogs)
+	// 识别引擎与并发上限（管理员后台展示当前生效值）
+	eng := cfg.CaptchaEngine
+	if eng == "" {
+		eng = "ddddocr"
+	}
 	writeJSON(w, 0, map[string]any{
-		"open_time":        open.Format("2006-01-02 15:04:05"),
-		"activation_on":    cfg.ActivationEnabled,
-		"window_opened":    *windowOpened,
-		"account_count":    len(accounts),
-		"targets_count":    targetsCount,
-		"success_count":    len(success),
-		"log_count":        len(allLogs),
-		"vision_model":     cfg.VisionModel,
-		"vision_base_url":  cfg.VisionBaseURL,
+		"open_time":           open.Format("2006-01-02 15:04:05"),
+		"activation_on":       cfg.ActivationEnabled,
+		"window_opened":       *windowOpened,
+		"account_count":       len(accounts),
+		"targets_count":       targetsCount,
+		"success_count":       len(success),
+		"log_count":           logsCount,
+		"vision_model":        cfg.VisionModel,
+		"vision_base_url":     cfg.VisionBaseURL,
+		"captcha_engine":      eng,
+		"captcha_concurrency": cfg.CaptchaConcurrency,
+		"open_time_set":       true,
 	}, "")
 }
 

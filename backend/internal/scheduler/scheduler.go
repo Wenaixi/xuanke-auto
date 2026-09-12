@@ -294,6 +294,8 @@ func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
 }
 
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
+// 命中 token 失效（ErrUnauthorized）时同步触发该账号自动重登——用户刷新课程页
+// 不必等调度器下个 30s 周期探测才发现并恢复（异步重登，不阻塞响应）。
 func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	if s.clients == nil {
 		return nil, errors.New("没有任何已登录账号")
@@ -304,6 +306,11 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	}
 	data, err := client.FindElectives()
 	if err != nil {
+		if errors.Is(err, zhidao.ErrUnauthorized) {
+			if acct, _, ok := s.clients.AnyClientWithAccount(); ok {
+				s.maybeRelogin(acct)
+			}
+		}
 		return nil, err
 	}
 	s.lastProbe = time.Now()

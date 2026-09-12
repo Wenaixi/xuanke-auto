@@ -337,6 +337,37 @@ func TestRestoreDoneSkipsResubmit(t *testing.T) {
 	waitStatusAcct(t, s, "acct1", 61115, "success", 1*time.Second)
 }
 
+// TestProbeNowUnauthorizedTriggersRelogin ProbeNow 命中 token 失效（用户刷新课程页场景）
+// 也应立即触发该账号自动重登（而非等调度器下个 30s 周期）。
+func TestProbeNowUnauthorizedTriggersRelogin(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.err = zhidao.ErrUnauthorized // ProbeNow 探测返回失效
+	relogStart := make(chan bool)   // 重登开始信号
+	relogDone := make(chan bool)    // 重登完成信号（阻塞重登，让测试断言已触发）
+	fa := &fakeAccts{c: fc, relog: func() {
+		relogStart <- true
+		<-relogDone
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour) // 调度器不轮询（interval=1h）
+
+	// 不 Start 调度器：仅调用 ProbeNow，证明它自己就会触发重登
+	_, err := s.ProbeNow()
+	if err == nil {
+		t.Fatal("失效时 ProbeNow 应返回 ErrUnauthorized")
+	}
+	// 重登应已被触发（ProbeNow 内部同步调用 maybeRelogin → 异步 goroutine）
+	select {
+	case <-relogStart:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ProbeNow 命中失效后应触发自动重登")
+	}
+	close(relogDone) // 放行重登完成
+	time.Sleep(100 * time.Millisecond)
+	if !s.TokenValidFor("acct1") {
+		t.Fatal("重登成功后 token 应显示有效")
+	}
+}
+
 // TestElectivesSnapshot 快照命中与过期后刷新。
 func TestElectivesSnapshot(t *testing.T) {
 	fc := newFakeClient(false)

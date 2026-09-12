@@ -21,8 +21,6 @@ import {
 interface Props {
   account: Account
   sessionToken: string
-  accounts: Account[]
-  onSwitchAccount: (acct: Account) => void
   onLogout: () => void
   onGoSelect: () => void
 }
@@ -70,7 +68,7 @@ function isFullFallback(c: { status: string; result: string }): boolean {
   return c.status === "failed" && c.result.includes("已满员")
 }
 
-export default function Dashboard({ account, sessionToken, accounts, onSwitchAccount, onLogout, onGoSelect }: Props) {
+export default function Dashboard({ account, sessionToken, onLogout, onGoSelect }: Props) {
   const { data: state, isError: stateErr, isLoading: stateLoading } = useQuery({
     queryKey: ["state", account, sessionToken],
     queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
@@ -115,29 +113,15 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* 账号切换下拉（纯黑白极简） */}
-            {accounts.length > 0 && (
-              <select
-                value={account}
-                onChange={(e) => onSwitchAccount(e.target.value)}
-                className="h-8 px-2 bg-neutral-950 border border-neutral-800 text-xs text-white rounded-[var(--radius-sm)] focus:border-white transition-colors"
-              >
-                {accounts.map((a) => (
-                  <option key={a} value={a} className="bg-neutral-950 text-white">
-                    {a}
-                  </option>
-                ))}
-              </select>
-            )}
             <Button
-              variant="primary"
+              variant="dark"
               size="sm"
               onClick={onGoSelect}
               className="flex items-center gap-1.5 text-xs"
             >
-              <BookOpen className="h-3.5 w-3.5 text-black" />
+              <BookOpen className="h-3.5 w-3.5 text-white" />
               <span>选课大厅</span>
-              <ArrowUpRight className="h-3.5 w-3.5 text-black" />
+              <ArrowUpRight className="h-3.5 w-3.5 text-white" />
             </Button>
             <Button
               variant="outline"
@@ -153,7 +137,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
 
         {/* 错误提示条 */}
         {!stateLoading && stateErr && (
-          <div className="rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 p-4 text-xs flex items-center justify-between text-neutral-300">
+          <div className="rounded-[var(--radius-sm)] border border-neutral-800 glass-strong p-4 text-xs flex items-center justify-between text-neutral-300">
             <div className="flex items-center gap-2">
               <XCircle className="h-4 w-4 shrink-0 text-white" />
               <span>当前登录凭据已失效，请重新进行账户认证</span>
@@ -287,8 +271,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                       </>
                     )}
                   </span>
-                </div>
-                <div className="py-2.5 flex items-center justify-between">
+                </div>                <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">频控保护策略</span>
                   <span className="text-white">单次熔断冷却</span>
                 </div>
@@ -476,12 +459,12 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
           </div>
         </div>
         <Button
-          variant="primary"
+          variant="dark"
           size="sm"
           onClick={onGoSelect}
           className="h-8 px-3 text-xs"
         >
-          <BookOpen className="h-3.5 w-3.5 mr-1 text-black" />
+          <BookOpen className="h-3.5 w-3.5 mr-1 text-white" />
           <span>选课大厅</span>
         </Button>
       </div>

@@ -4,7 +4,7 @@ import { cn } from "../../lib/utils"
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   asChild?: boolean
-  variant?: "default" | "primary" | "success" | "warning" | "destructive" | "outline" | "secondary" | "ghost" | "invert"
+  variant?: "default" | "primary" | "success" | "warning" | "destructive" | "outline" | "secondary" | "ghost" | "invert" | "dark"
   size?: "default" | "sm" | "lg" | "icon"
 }
 
@@ -18,6 +18,7 @@ const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
   secondary: "bg-[var(--surface)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-soft)] hover:border-[var(--border-hover)]",
   ghost: "bg-transparent text-[var(--fg-muted)] border-transparent hover:bg-[var(--surface-soft)] hover:text-[var(--fg)]",
   invert: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 shadow-sm",
+  dark: "bg-black text-white border border-white/25 font-medium hover:bg-neutral-900 hover:border-white/50",
 }
 
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {

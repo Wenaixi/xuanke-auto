@@ -78,41 +78,41 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        {sessionToken ? (
-          inAdmin || current === "admin" ? (
-            <Admin
-              account={current}
-              sessionToken={sessionToken}
-              onLogout={logout}
-              onBackToStudent={() => {
-                // 切回学生端：改用其他已登录账号，否则退出 admin
-                const others = accounts.filter((a) => a !== "admin")
-                setInAdmin(false)
-                if (others.length > 0) setCurrent(others[0])
-              }}
-            />
-          ) : page === "dashboard" ? (
-            <Dashboard
-              account={current}
-              sessionToken={sessionToken}
-              accounts={accounts}
-              onSwitchAccount={(acct) => {
-                setCurrent(acct)
-                setInAdmin(acct === "admin")
-              }}
-              onLogout={logout}
-              onGoSelect={() => setPage("select")}
-            />
+        {/* 水墨画布背景层：固定全屏于内容之下（z-index 0），路由页面在 .app-content 层（z-index 1）上 */
+        }
+        <div className="canvas-bg" aria-hidden />
+        <main className="app-content">
+          {sessionToken ? (
+            inAdmin || current === "admin" ? (
+              <Admin
+                account={current}
+                sessionToken={sessionToken}
+                onLogout={logout}
+                onBackToStudent={() => {
+                  // 切回学生端：改用其他已登录账号，否则退出 admin
+                  const others = accounts.filter((a) => a !== "admin")
+                  setInAdmin(false)
+                  if (others.length > 0) setCurrent(others[0])
+                }}
+              />
+            ) : page === "dashboard" ? (
+              <Dashboard
+                account={current}
+                sessionToken={sessionToken}
+                onLogout={logout}
+                onGoSelect={() => setPage("select")}
+              />
+            ) : (
+              <Select
+                account={current}
+                sessionToken={sessionToken}
+                onDone={() => setPage("dashboard")}
+              />
+            )
           ) : (
-            <Select
-              account={current}
-              sessionToken={sessionToken}
-              onDone={() => setPage("dashboard")}
-            />
-          )
-        ) : (
-          <Login onLogin={login} />
-        )}
+            <Login onLogin={login} />
+          )}
+        </main>
       </ToastProvider>
     </QueryClientProvider>
   )

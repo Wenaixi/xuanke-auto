@@ -117,7 +117,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
   - 极简几何圆角（4px - 8px），摒弃臃肿膨胀的大圆角与花哨阴影，保留建筑般的硬朗质感。
 
 ### 关键决策与系统化调试排错记录
-- **禁止自动重登**：doRequest 对 code=-1 直接返回 ErrUnauthorized，不触发重登（平台"访问过于频繁"限流 1 分钟，频繁登录会触发）。重登能力保留为显式 ReloginIfNeeded（最多一次）
+- **教务 token 失效自动重登（取代早期"禁止自动重登"）**：doRequest 对 code=-1 返回 `ErrUnauthorized` 本身不重登；调度器探测命中该错误时按账号标记失效并异步自动重登（防重入 + 30 秒节流，Vision 持续失败不轰炸登录接口），成功后新 token 落库（UpdateIDToken）+ 立即补一次探测。网络类失败绝不重登。前端 `/state` 只读 `token_valid` 显示有效性（有效 / 已失效·自动恢复中），不显示次数与时间
 - **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制，避免服务端报 code=1 鉴权缺失
 - **课程探测 30 秒节流（根因修复"选课大厅突然啥都没了"）**：调度器对 `findElectivesData` 的成功探测加 30 秒最小间隔（`probeInterval` 常量），探测成功或失败均记录时间戳，网络故障时不会 300ms 疯狂重试；窗口未开启时也绝不高频轮询，从根因消除平台"访问过于频繁"1 分钟熔断导致的课程列表拉空。轮询 ticker 仍为 300ms（负责窗口开启后的**立即**探测与提交），但探测动作本身被 30 秒节流闸门挡下
 - **多账号物理隔离 + 会话级账号绑定**：每个账号独立 `zhidao.Client`（账号 A 绝不携带账号 B 的会话），认证后服务端签发随机 Bearer 会话令牌（12h TTL），所有租户接口从会话读取账号（`sessionAccount(r)`）——忽略客户端传入的账号参数，`/state`、`/targets`、`/electives/detail` 均按会话账号隔离。/electives 全校共享（同一平台同一学期数据），但读取快照不需要账号身份

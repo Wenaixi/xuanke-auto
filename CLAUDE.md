@@ -32,22 +32,12 @@
 | `POST /electives/select?idToken=..` | 无 | 学期列表 currentYearTermList（含 selected 标记） |
 | `POST /electives/select/findElectivesData?idToken=..` | json: `{"schoolYear":2026,"schoolTerm":1}` | 课程数据（不传 body 也会返回当前学期） |
 | `POST /electives/select/findElectivesStudentCount?idToken=..` | form: `ids=1,2,3`（逗号分隔） | 实时已报/已确认人数（前端每 10 秒轮询） |
-| `POST /electives/classDetail?idToken=..` | form: `id=<课程id>` | 课程详情弹窗（上课地点/授课老师/课节等） |
 | `POST /electives/select/selectElectivesClass?idToken=..` | form: `classId=<课程id>` | 报名（参数名已用 classId=-1 无风险验证：返回"选修班不存在"） |
 | `POST /electives/select/exitElectivesClass?idToken=..` | form: `classId=<课程id>` | 退选 |
 
 响应统一为 `{"code":0,"isOk":true,...}`；code=-1 未登录、code=1 业务错误（如"选修班不存在"）。
 
-## classDetail 详情接口（弹窗逆向，新 HAR 来源：课程www.zhidao.fj.cn.har）
-- 请求：`POST /electives/classDetail?idToken=..`，form 体 `id=61245`
-- 响应 value 关键字段：
-  - `course_name` 课程名、`class_name` 选修班名称、`teacher_name` 授课老师
-  - `classroom_name` **上课地点**、`lessons_date` **上课课节**、`school_year_term` 学年学期
-  - `course_type_name` 课程类型（选修I/必修）、`method_name` 任课方式、`evaluate_type_name` 评价方式
-  - `audited_count` / `plan_count` 已确认/计划人数、`class_status_str` 状态（未开始）
-  - `shareUrl` 分享链接（`/electives/detail/elecClass/<hex>`）
-  - `electivesClassId` 选修班 id（= 请求的 id）
-- 注意：`class_name` 可能带"1、2班"后缀（体育课合并班），`lessons_date` 体育课为 null（课节在别的字段）
+> 注：`POST /electives/classDetail` 详情接口已逆向（上课地点/授课老师/课节等，详见旧版记录），因选课大厅已取消"详情弹窗"，后端与前端不再调用，代码已全部移除；如未来需要可据 HAR（课程www.zhidao.fj.cn.har）恢复。
 
 ## 课程数据关键字段（findElectivesData → electivesClassList 每项）
 - `id`：课程 id（报名用 classId，详情用 id），范围 61115-61283
@@ -135,6 +125,9 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **学期列表容错与自动平滑回退（Fallback）**：`FindElectives` 在尝试获取可选学期列表时，若因特定时段或接口异常导致学期列表返回错误（如 code=1），自动回退并直接请求默认激活学期数据（`findElectivesData` 传空体），杜绝选课大厅因非核心接口报错而白屏或崩溃
 - **预选目标课程支持随时清空（0 门合法）**：`handleSetTargets` 解除“至少需要 1 门”的死锁限制，允许用户重置清空全部目标；同时本地数据库严禁注入测试课程，保证新账号登录时绝对干净空白
 - **UI 设计系统规范（纯黑白极简艺术 + 瑞士国际排版规范）**：彻底清除任何喧宾夺主的技术宣传口号（如“毫秒级并发”、“每个发布批次锁定1门心仪目标·秒级抢报”、“目标阵容”等吵闹词汇），全站统一为纯黑白极简高级艺术设计（纯黑 `#000000` 底色、发丝灰边框、纯白高对比文字与单色等宽数据）
+- **水墨画布背景（全站含登录/管理页）**：`web/public/bg.jpg`（来源用户桌面 boqi.jpg）经 Vite 打包进 `backend/web/dist` 再 `//go:embed` 进单二进制。实现：App.tsx 根部渲染 `<div className="canvas-bg" aria-hidden />`，`.canvas-bg` 为 fixed 全屏 + `linear-gradient(rgba(0,0,0,0.72) 45%→rgba(0,0,0,0.38) 中部)` 深黑遮罩保证任意亮度下白字清晰。**堆叠层级关键**：背景 `z-index:0`，路由内容包在 `.app-content`（`position:relative; z-index:1`）里——不可用 `z-index:-1`（在含 fixed/Portal 堆叠上下文的页面上会被内容层的实色背景盖住，已用 test-a/test-b 隔离实验验证）。`#root` 必须 `background-color:transparent`，html/body 保留 `--bg` 纯黑底色兜底
+- **磨砂玻璃组件（.glass / .glass-strong 工具类）**：`global.css` 定义——`rgba(255,255,255,0.06)` 半透明白底 + `backdrop-filter: blur(16px) saturate(1.2)` 毛玻璃 + 1px 发丝边框；`glass-strong`（`rgba(18,18,22,0.72)` + blur(20px)）用于选中态卡片与底部固定栏等需强可读性面板。选课大厅/控制中心的卡片、搜索栏、标签页、底部栏全部换用
+- **选课大厅人性化便利**：顶栏新增选课开放倒计时条（`/state.open_time` 秒级跳动，窗口开放显示"窗口已开放"脉动点）；搜索栏新增"按剩余排序"（名额少靠前）+ "仅看有余量"双筛按钮；课程网格桌面 3 列 → `lg:3 xl:4` 列更密集，卡片内边距 `p-3.5` 紧凑化
 - 数据库 data/xuanke.db（纯 Go SQLite），重启恢复加密凭据/token/目标/已成功课程；`.master_key` 为主密钥文件（需与 db 一起备份）；schema v3：targets.priority / task_log.account / activation_codes / activations 表，缺列拒绝启动
 
 ### 部署（公网）
@@ -156,7 +149,7 @@ xuanke.exe                       # 无任何环境变量直接启动，自动读
 ### Go 接口速查（backend/internal/zhidao）
 - Login(account, password) (token, err)：完整登录链路含 Vision 验证码，重试收敛（识别≤3 次 + 提交≤2 次，网络/配置错误立即返回）
 - FindElectives() (*ElectivesData, error)：学期列表 -> 课程数据（含 BeginTimes/Publishes/Classes）
-- ClassDetail(id) / SelectClass(id) / StudentCounts(ids)
+- SelectClass(id) / ExitClass(id) / StudentCounts(ids) / IsClassFull(id)（ClassDetail 已移除）
 - SetCredentials / SetCookies / Token / SetVision(热更新识别配置) / ReloginIfNeeded
 
 ### 测试

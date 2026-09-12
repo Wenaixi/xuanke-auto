@@ -162,28 +162,6 @@ func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, data, "")
 }
 
-// handleElectivesDetail 课程详情。
-func (d *Deps) handleElectivesDetail(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Query().Get("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
-		writeJSON(w, 1, nil, "id 参数无效")
-		return
-	}
-	acct := sessionAccount(r)
-	client, ok := d.Accounts.ClientFor(acct)
-	if !ok {
-		writeJSON(w, 1, nil, "账号会话未建立，请重新登录")
-		return
-	}
-	detail, err := client.ClassDetail(id)
-	if err != nil {
-		writeJSON(w, 1, nil, "查询详情失败: "+err.Error())
-		return
-	}
-	writeJSON(w, 0, detail, "")
-}
-
 // TargetsRequest 设置目标请求体（账号由会话决定，不接收客户端传账号）。
 type TargetsRequest struct {
 	Targets []scheduler.Target `json:"targets"`

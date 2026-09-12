@@ -461,47 +461,6 @@ func parseElectives(body []byte) (*ElectivesData, error) {
 	}
 	return out, nil
 }
-
-// ClassDetail 课程详情（弹窗内容）。
-type ClassDetail struct {
-	ID             int    `json:"id"`
-	CourseName     string `json:"course_name"`
-	ClassName      string `json:"class_name"`
-	TeacherName    string `json:"teacher_name"`
-	ClassroomName  string `json:"classroom_name"`
-	LessonsDate    string `json:"lessons_date"`
-	SchoolYearTerm string `json:"school_year_term"`
-	CourseTypeName string `json:"course_type_name"`
-	MethodName     string `json:"method_name"`
-	EvaluateType   string `json:"evaluate_type_name"`
-	AuditedCount   int    `json:"audited_count"`
-	PlanCount      int    `json:"plan_count"`
-	ClassStatusStr string `json:"class_status_str"`
-	ShareURL       string `json:"shareUrl"`
-}
-
-// ClassDetail 查询课程详情。
-func (c *Client) ClassDetail(classID int) (*ClassDetail, error) {
-	form := url.Values{}
-	form.Set("id", fmt.Sprintf("%d", classID))
-	body, err := c.doRequest(http.MethodPost, "/electives/classDetail",
-		[]byte(form.Encode()), "application/x-www-form-urlencoded")
-	if err != nil {
-		return nil, err
-	}
-	var j struct {
-		Code  int          `json:"code"`
-		Value *ClassDetail `json:"value"`
-	}
-	if err := json.Unmarshal(body, &j); err != nil {
-		return nil, err
-	}
-	if j.Code != 0 || j.Value == nil {
-		return nil, fmt.Errorf("课程详情错误: %s", extractMsg(body))
-	}
-	return j.Value, nil
-}
-
 // SelectClass 报名。返回平台消息（isOk 时含成功信息）。
 func (c *Client) SelectClass(classID int) (string, error) {
 	form := url.Values{}

@@ -65,7 +65,6 @@ const snapshotTTL = 40 * time.Second
 type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
-	ClassDetail(classID int) (*zhidao.ClassDetail, error)
 	IsClassFull(classID int) (bool, error)
 	Token() string // 重登后读取新 token 落库
 }

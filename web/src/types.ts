@@ -36,24 +36,6 @@ export interface ElectivesData {
   publishes: Publish[]
 }
 
-export interface ClassDetail {
-  id: number
-  course_name: string
-  class_name: string
-  teacher_name: string
-  classroom_name: string
-  lessons_date: string
-  school_year_term: string
-  course_type_name: string
-  method_name: string
-  evaluate_type_name: string
-  audited_count: number
-  plan_count: number
-  class_status_str: string
-  // 真实接口 key 为 shareUrl（HAR 实测：https://www.zhidao.fj.cn/electives/detail/elecClass/<hex>）
-  shareUrl: string
-}
-
 export interface CourseStatus {
   publish_id: number
   class_id: number

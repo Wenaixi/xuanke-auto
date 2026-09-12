@@ -60,12 +60,6 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 					}},
 				}},
 			})
-		case strings.HasSuffix(r.URL.Path, "/classDetail"):
-			json.NewEncoder(w).Encode(map[string]any{
-				"code": 0, "value": map[string]any{
-					"course_name": "健美操", "classroom_name": "操场", "teacher_name": "陈跃强",
-				},
-			})
 		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
 			json.NewEncoder(w).Encode(map[string]any{
 				"choices": []any{map[string]any{"message": map[string]any{"content": "abcd"}}},

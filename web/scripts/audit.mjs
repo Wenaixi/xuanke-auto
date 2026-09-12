@@ -1,5 +1,5 @@
 // 视觉一致性回归护栏（TDD 守护）：
-//   A. 水墨画布须为 150% 放大且顶格对齐（用户的明确要求）
+//   A. 水墨画布：移动端 180% 放大贴顶随滚动、桌面端 160% 放大同样随滚动，下滑可见图片下方（用户的明确要求）
 //   B. 全站 UI 表面须走统一半透明工具类（glass-overlay / glass-input）
 //   C. 禁止遗留实心不透明黑洞：bg-black/25|30|70|75、bg-neutral-950、整页 bg-black
 // 用法：node scripts/audit.mjs （退出码非 0 即存在违例）
@@ -30,9 +30,11 @@ const css = sources.filter(([p]) => p.endsWith(".css")).map(([, t]) => t).join("
 const all = sources.map(([, t]) => t).join("\n")
 
 // ---------- A. 画布背景规格 ----------
-console.log("A. 画布背景：150% 放大 + 顶格对齐")
-assertFile(css.includes("background-size: 100% 100%, 150% auto"), "canvas-bg 图片层放大至 150%")
+console.log("A. 画布背景：全端随文档滚动，移动端 180% 放大贴顶、桌面端 160% 放大")
+assertFile(css.includes("background-size: 100% 100%, 180% auto"), "canvas-bg 移动端图片层放大至 180%")
+assertFile(css.includes("background-size: 100% 100%, 160% auto"), "canvas-bg 桌面端图片层放大至 160%")
 assertFile(css.includes("background-position: center, top 0 center"), "canvas-bg 图片顶格对齐（top 0 center）")
+assertFile(css.includes("position: absolute"), "canvas-bg 全端起效 absolute（随文档纵向滚动，下滑可见图片下方）")
 
 // ---------- B. 统一半透明工具 ----------
 console.log("B. 统一半透明工具类已就位")

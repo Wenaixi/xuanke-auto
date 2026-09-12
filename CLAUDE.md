@@ -85,14 +85,13 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - 待办：xuanke.py 遇到 code=-1（token 过期）时尚未自动重新登录，只在 monitor 打印提示
 ## Go + React 现代版（backend/ + web/）
 
-**状态：** 独立模块化 React 前端 + Go 嵌入式单二进制交付（开箱即用，免环境依赖）。选课窗口 2026-09-13 09:00:00。已落地：连接池预热 / 服务端时钟对齐 / 黄金期 250ms 冲刺 / 骑驴找马换课 / 失败分级退避 / ddddocr 本地识别（引擎热切换）。
+**状态：** 独立模块化 React 前端 + Go 嵌入式单二进制交付（开箱即用，免环境依赖）。选课窗口 2026-09-13 09:00:00。已落地：连接池预热 / 服务端时钟对齐 / 黄金期 250ms 冲刺 / 失败分级退避 / ddddocr 本地识别（引擎热切换）。
 
 ### 高性能抢课架构（P0 三刀 + 智能调度）
 - **共享高性能连接池 + 预热（压制 1.9s TLS 握手）**：`zhidao.sharedTransport`——`MaxIdleConnsPerHost: 64`、`IdleConnTimeout: 120s`、`ForceAttemptHTTP2: true`；调度器开窗前 2 分钟起 `maybePrewarm` 每 15s 静默 GET /login 保持 TCP/TLS 热态，首波提交零握手等待
 - **服务端时钟毫秒级对齐（tick 全程用校准时间）**：`SyncServerTime` 读 HTTP `Date` 响应头 + RTT/2 中点近似得 `clockOffset`，调度器 `nowAligned()` 统一取校准时刻判定开窗点与冲刺期，根本性消除本地时钟误差（实测校准偏差 ~640ms）；5 秒内不同步一次
 - **开窗前 10 秒黄金期 250ms 高频冲刺**：`submitIntervalFor` 依据对齐后时刻在开窗后 10s 内压到 250ms 间隔持续 submitAll，10s 后回落 1s 常态；探测仍受 30s 节流但提交完全不受限
 - **失败分级智能退避（风控 30s / 网络快重试）**：`isRateLimitError` 匹配"频繁/429/稍后重试"文案→`markRateLimitedLocked` 该课程退避 30s；纯网络失败终止本链下 tick 快重试（250ms 黄金期）；Token 失效走 maybeRelogin 异步自动重登
-- **骑驴找马自动换课（每目标可配，默认关）**：目标 `AllowSwap=true` 且已持有同发布保底课时，`maybeSwapLocked` 在快照显示更高优先级心仪课有空位时执行 退保底（ExitClass）→ 抢心仪（SelectClass）；心仪抢报失败**立即回抢保底课**绝不裸奔；换课成功转移 done + SaveSuccess/RemoveSuccess（重启不重复报名）。db.AddColumn 原地迁移 `targets.allow_swap` 支持 v4 老库无缝升级（非拒绝重建）
 - **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局信号量 `captchaSemaphore` 串行化识别（默认并发 1，管理员可热收敛）；Admin「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
 
 ### 架构设计（模块化开发 + 单二进制嵌入交付）
@@ -132,10 +131,10 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **学期列表容错与自动平滑回退（Fallback）**：`FindElectives` 在尝试获取可选学期列表时，若因特定时段或接口异常导致学期列表返回错误（如 code=1），自动回退并直接请求默认激活学期数据（`findElectivesData` 传空体），杜绝选课大厅因非核心接口报错而白屏或崩溃
 - **预选目标课程支持随时清空（0 门合法）**：`handleSetTargets` 解除“至少需要 1 门”的死锁限制，允许用户重置清空全部目标；同时本地数据库严禁注入测试课程，保证新账号登录时绝对干净空白
 - **UI 设计系统规范（纯黑白极简艺术 + 瑞士国际排版规范）**：彻底清除任何喧宾夺主的技术宣传口号（如“毫秒级并发”、“每个发布批次锁定1门心仪目标·秒级抢报”、“目标阵容”等吵闹词汇），全站统一为纯黑白极简高级艺术设计（纯黑 `#000000` 底色、发丝灰边框、纯白高对比文字与单色等宽数据）
-- **水墨画布背景（全站含登录/管理页）**：`web/public/bg.jpg`（来源用户桌面 boqi.jpg）经 Vite 打包进 `backend/web/dist` 再 `//go:embed` 进单二进制。实现：App.tsx 根部渲染 `<div className="canvas-bg" aria-hidden />`，`.canvas-bg` 为 fixed 全屏 + `linear-gradient(rgba(0,0,0,0.72) 45%→rgba(0,0,0,0.38) 中部)` 深黑遮罩保证任意亮度下白字清晰。**堆叠层级关键**：背景 `z-index:0`，路由内容包在 `.app-content`（`position:relative; z-index:1`）里——不可用 `z-index:-1`（在含 fixed/Portal 堆叠上下文的页面上会被内容层的实色背景盖住，已用 test-a/test-b 隔离实验验证）。`#root` 必须 `background-color:transparent`，html/body 保留 `--bg` 纯黑底色兜底
+- **水墨画布背景（全站含登录/管理页）**：`web/public/bg.jpg`（来源用户桌面 boqi.jpg）经 Vite 打包进 `backend/web/dist` 再 `//go:embed` 进单二进制。实现：App.tsx 根部渲染 `<div className="canvas-bg" aria-hidden />`，`.canvas-bg` 为 `position:absolute` 覆盖整个滚动文档 + `linear-gradient(rgba(0,0,0,0.72) 45%→rgba(0,0,0,0.38) 中部)` 深黑遮罩保证任意亮度下白字清晰。**滚动表现**（用户明确要求）：全端（含桌面）背景随页面纵向滚动，下滑即可看到水墨图更下方，非 fixed 钉死；放大比例移动端 180% 宽、桌面端（`@media (hover:hover) and (pointer:fine)`）160% 宽，图片层 `background-position: top 0 center` 贴顶对齐。**堆叠层级关键**：背景 `z-index:0`，路由内容包在 `.app-content`（`position:relative; z-index:1`）里——不可用 `z-index:-1`（在含 fixed/Portal 堆叠上下文的页面上会被内容层的实色背景盖住，已用 test-a/test-b 隔离实验验证）。`#root` 必须 `background-color:transparent`，html/body 保留 `--bg` 纯黑底色兜底
 - **磨砂玻璃组件（.glass / .glass-strong 工具类）**：`global.css` 定义——`rgba(255,255,255,0.06)` 半透明白底 + `backdrop-filter: blur(16px) saturate(1.2)` 毛玻璃 + 1px 发丝边框；`glass-strong`（`rgba(18,18,22,0.72)` + blur(20px)）用于选中态卡片与底部固定栏等需强可读性面板。选课大厅/控制中心的卡片、搜索栏、标签页、底部栏全部换用
 - **选课大厅人性化便利**：顶栏新增选课开放倒计时条（`/state.open_time` 秒级跳动，窗口开放显示"窗口已开放"脉动点）；搜索栏新增"按剩余排序"（名额少靠前）+ "仅看有余量"双筛按钮；课程网格桌面 3 列 → `lg:3 xl:4` 列更密集，卡片内边距 `p-3.5` 紧凑化
-- 数据库 data/xuanke.db（纯 Go SQLite），重启恢复加密凭据/token/目标/已成功课程；`.master_key` 为主密钥文件（需与 db 一起备份）；schema v4：targets.priority / targets.allow_swap / task_log.account / activation_codes / activations 表，缺列拒绝启动
+- 数据库 data/xuanke.db（纯 Go SQLite），重启恢复加密凭据/token/目标/已成功课程；`.master_key` 为主密钥文件（需与 db 一起备份）；schema v4：targets.priority / task_log.account / activation_codes / activations 表，缺列拒绝启动（`targets.allow_swap` 列为历史遗留，读路径已不含换课，保留列不读不写）
 
 ### 部署（公网）
 配置统一放 **`backend/data/.env`**（随 data/ 一起备份迁移；真实环境变量优先，文件兜底）：
@@ -156,7 +155,7 @@ xuanke.exe                       # 无任何环境变量直接启动，自动读
 ### Go 接口速查（backend/internal/zhidao）
 - Login(account, password) (token, err)：完整登录链路含 Vision 验证码，重试收敛（识别≤3 次 + 提交≤2 次，网络/配置错误立即返回）
 - FindElectives() (*ElectivesData, error)：学期列表 -> 课程数据（含 BeginTimes/Publishes/Classes）
-- SelectClass(id) / ExitClass(id) / StudentCounts(ids) / IsClassFull(id)（ClassDetail 已移除）
+- SelectClass(id) / StudentCounts(ids) / IsClassFull(id)（ClassDetail 已移除；ExitClass 退选接口保留在 zhidao 层供未来人工退课/管理用，调度器不再调用）
 - SetCredentials / SetCookies / Token / SetVision(热更新识别配置) / ReloginIfNeeded
 
 ### 测试

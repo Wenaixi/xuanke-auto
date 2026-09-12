@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,9 +22,8 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 	return nil
 }
 
-func (f *fakeStore) SaveSuccess(acct string, classID int) error  { return nil }
-func (f *fakeStore) RemoveSuccess(acct string, classID int) error { return nil }
-func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
+func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
+func (f *fakeStore) UpdateIDToken(acct, idToken string) error    { return nil }
 
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
@@ -70,16 +68,6 @@ func (f *fakeClient) SelectClass(classID int) (string, error) {
 		return "", err
 	}
 	return "报名成功", nil
-}
-
-// ExitClass 记录退选调用（换课引擎退保底课时走这里）。
-func (f *fakeClient) ExitClass(classID int) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err, ok := f.selectErr[classID]; ok && err != nil {
-		return "", err
-	}
-	return "退选成功", nil
 }
 
 func (f *fakeClient) Token() string { return "new-token-999" }
@@ -730,61 +718,5 @@ func TestServerClockAlignment(t *testing.T) {
 	aligned := s.nowAligned()
 	if diff := aligned.Sub(time.Now()); diff < 4*time.Second || diff > 6*time.Second {
 		t.Fatalf("校准后时间应快约 5 秒, 实际差值: %v", diff)
-	}
-}
-
-// TestAllowSwapKeptInTargetState 验证 allow_swap 配置经 SetTargetsForAccount 完整保留。
-func TestAllowSwapKeptInTargetState(t *testing.T) {
-	s := New(nil, &fakeStore{}, time.Now().Add(time.Hour), time.Second)
-	s.SetTargetsForAccount("acct1", []Target{
-		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 1, AllowSwap: true},
-		{PublishID: 2, ClassID: 61205, CourseName: "篮球", Priority: 0},
-	})
-	st := s.StateForAccount("acct1")
-	if len(st.Courses) != 2 {
-		t.Fatalf("目标数应为 2, 实际 %d", len(st.Courses))
-	}
-	if !st.Courses[0].AllowSwap {
-		t.Fatalf("课程 61115 应保留 allow_swap=true, 实际 %+v", st.Courses[0])
-	}
-	if st.Courses[1].AllowSwap {
-		t.Fatalf("课程 61205 应为 allow_swap=false, 实际 %+v", st.Courses[1])
-	}
-}
-
-// TestSwapToHigherPriority 验证骑驴找马换课：已持有保底课 + 更高优先级目标有空位 → 退低抢高成功。
-func TestSwapToHigherPriority(t *testing.T) {
-	fc := newFakeClient(false)
-	fc.data.Publishes[1].Classes[0].SelectedCount = 1 // 校本1 篮球（低优先级）已有 1 人占位，仍有空位
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
-	// 同发布 1 内：心仪 61115（priority 0）优先级更高，保底 61205（priority 1）优先级更低
-	s.SetTargetsForAccount("acct1", []Target{
-		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0, AllowSwap: true},
-		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
-	})
-	// 预注入保底课已成功
-	s.RestoreDone(map[string][]int{"acct1": {61205}})
-	s.Start()
-	defer s.Stop()
-
-	setAllOpened(fc)
-	s.resetProbe()
-	// 换课成功后 61115 为 success
-	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
-	// 保底课 done 已被转移到心仪课：61205 不再 done（状态为 success 表示换课历史，非 done）
-	st := s.StateForAccount("acct1")
-	for _, c := range st.Courses {
-		if c.ClassID == 61205 {
-			if !strings.Contains(c.Result, "换课") {
-				t.Fatalf("保底课 61205 应记录换课结果, 实际 %+v", c)
-			}
-		}
-	}
-	// 心仪课报名成功应恰好 1 次（换课路径）
-	fc.mu.Lock()
-	callsWant := fc.selectCalls[61115]
-	fc.mu.Unlock()
-	if callsWant != 1 {
-		t.Fatalf("心仪课 61115 应恰好报名 1 次（换课路径）, 实际 %d", callsWant)
 	}
 }

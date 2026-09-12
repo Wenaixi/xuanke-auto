@@ -97,13 +97,9 @@ func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) er
 		return err
 	}
 	for _, t := range targets {
-		allowSwap := 0
-		if t.AllowSwap {
-			allowSwap = 1
-		}
 		if _, err := tx.Exec(
-			"INSERT INTO targets (account, publish_id, class_id, course_name, priority, allow_swap) VALUES (?, ?, ?, ?, ?, ?)",
-			acct, t.PublishID, t.ClassID, t.CourseName, t.Priority, allowSwap); err != nil {
+			"INSERT INTO targets (account, publish_id, class_id, course_name, priority) VALUES (?, ?, ?, ?, ?)",
+			acct, t.PublishID, t.ClassID, t.CourseName, t.Priority); err != nil {
 			return err
 		}
 	}
@@ -112,7 +108,7 @@ func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) er
 
 // LoadTargetsForAccount 读取指定账号的目标课程（按 priority 排序）。
 func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
-	rows, err := s.db.Query("SELECT publish_id, class_id, course_name, priority, allow_swap FROM targets WHERE account = ? ORDER BY priority", acct)
+	rows, err := s.db.Query("SELECT publish_id, class_id, course_name, priority FROM targets WHERE account = ? ORDER BY priority", acct)
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +116,9 @@ func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
 	var out []scheduler.Target
 	for rows.Next() {
 		var t scheduler.Target
-		var allowSwap int
-		if err := rows.Scan(&t.PublishID, &t.ClassID, &t.CourseName, &t.Priority, &allowSwap); err != nil {
+		if err := rows.Scan(&t.PublishID, &t.ClassID, &t.CourseName, &t.Priority); err != nil {
 			return nil, err
 		}
-		t.AllowSwap = allowSwap == 1
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -133,12 +127,6 @@ func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
 // SaveSuccess 记录某账号某课程已报名成功（幂等）。
 func (s *Store) SaveSuccess(acct string, classID int) error {
 	_, err := s.db.Exec("INSERT OR IGNORE INTO success (account, class_id) VALUES (?, ?)", acct, classID)
-	return err
-}
-
-// RemoveSuccess 删除某账号某课程的已报名成功记录（骑驴找马换课后清理旧保底课记录）。
-func (s *Store) RemoveSuccess(acct string, classID int) error {
-	_, err := s.db.Exec("DELETE FROM success WHERE account = ? AND class_id = ?", acct, classID)
 	return err
 }
 

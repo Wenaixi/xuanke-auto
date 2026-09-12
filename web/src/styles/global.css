@@ -81,11 +81,18 @@ body {
   background-image:
     linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%),
     url("/bg.jpg");
-  /* 渐变遮罩保持全屏 100%x100%，水墨图片放大至 150% 宽，贴顶对齐保持滚动跟随 */
-  background-size: 100% 100%, 150% auto;
-  /* 图片层 150% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，随文档纵向滚动 */
+  /* 默认（移动端）：absolute 覆盖整个文档随滚动，水墨图放大至 180% 宽，贴顶对齐 */
+  background-size: 100% 100%, 180% auto;
+  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，随文档纵向滚动 */
   background-position: center, top 0 center;
   background-repeat: no-repeat;
+}
+
+/* 桌面端（鼠标设备）：同样随文档纵向滚动（下滑可看到水墨图下方），仅放大比例缩为 160% 宽 */
+@media (hover: hover) and (pointer: fine) {
+  .canvas-bg {
+    background-size: 100% 100%, 160% auto;
+  }
 }
 
 /* 页面内容壳层：显式置于水墨背景下但仍在所有弹层之上 */

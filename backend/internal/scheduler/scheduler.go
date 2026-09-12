@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -20,7 +19,6 @@ type Target struct {
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
 	Priority   int    `json:"priority"`
-	AllowSwap  bool   `json:"allow_swap"`
 }
 
 // CourseStatus 单课程任务状态。
@@ -30,7 +28,6 @@ type CourseStatus struct {
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
 	Priority   int    `json:"priority"`
-	AllowSwap  bool   `json:"allow_swap"`
 	Status     string `json:"status"` // pending|in_range|submitted|success|failed
 	Result     string `json:"result"`
 }
@@ -83,7 +80,6 @@ type Prewarmer interface {
 type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
-	ExitClass(classID int) (string, error) // 骑驴找马换课：退选保底课
 	IsClassFull(classID int) (bool, error)
 	Token() string // 重登后读取新 token 落库
 }
@@ -102,8 +98,7 @@ type AccountClients interface {
 type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
-	RemoveSuccess(acct string, classID int) error // 换课退掉保底课后清理旧成功记录
-	UpdateIDToken(acct, idToken string) error      // 自动重登后落库新 token
+	UpdateIDToken(acct, idToken string) error // 自动重登后落库新 token
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -289,7 +284,6 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 			ClassID:    t.ClassID,
 			CourseName: t.CourseName,
 			Priority:   t.Priority,
-			AllowSwap:  t.AllowSwap,
 			Status:     status,
 			Result:     result,
 		})
@@ -678,18 +672,6 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			// 骑驴找马换课：本目标允许换课且账号已持有保底课 → 尝试退低抢高
-			if t.AllowSwap {
-				now := s.nowAlignedLocked()
-				// maybeSwapLocked 返回值：stop=本链需要终止/跳过当前备选，swapped=已成功换课
-				if stop, swapped := s.maybeSwapLocked(acct, t, now); stop {
-					s.mu.Unlock()
-					if swapped {
-						return
-					}
-					continue
-				}
-			}
 			// 平台风控退避中：跳过本课程
 			now := s.nowAlignedLocked()
 			if s.isRateLimitedLocked(acct, t.ClassID, now) {
@@ -913,152 +895,6 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 	}
 	s.state.Courses[idx].Status = status
 	s.state.Courses[idx].Result = result
-}
-
-// maybeSwapLocked 骑驴找马换课引擎核心（需持有锁，网络请求在锁外进行）。
-//
-// 语义：本目标 t 允许换课（AllowSwap）且当前已持有更低优先级的保底课时，
-// 一旦快照显示更高优先级课程有空位（selected < max），就执行
-// 退保底课（ExitClass）→ 抢心仪课（SelectClass）；若心仪课抢报失败，
-// 立即回抢保底课（SelectClass），绝不裸奔。
-//
-// 返回 (stop, swapped)：
-//   - stop=false：本目标无需换课（无空位或未持有保底课），继续走常规提交路径；
-//   - stop=true, swapped=true：已成功换课到本目标，本发布目标达成，链应终止；
-//   - stop=true, swapped=false：换课尝试失败（心仪课被抢/回抢失败等），
-//     本 tick 暂停本目标提交（避免同一目标反复空转），下个 tick 重试。
-func (s *Scheduler) maybeSwapLocked(acct string, t Target, now time.Time) (stop, swapped bool) {
-	// 仅当本目标比已持有课程优先级更低（或已持有课程就在本发布内且比它高）时才换
-	held := s.heldClassForPublishLocked(acct, t.PublishID)
-	if held == 0 || held == t.ClassID {
-		return false, false // 无保底课或已持有本目标，无需换课
-	}
-	// 心仪课需优先于当前保底课（换课只允许往上换，绝不往下换）
-	if t.Priority >= s.priorityOf(acct, held) {
-		return false, false
-	}
-	// 快照确认心仪课存在空位（名额未满才值得退课抢报）
-	if s.classFullInSnapshot(t.ClassID) {
-		return false, false
-	}
-	// 心仪课处于风控退避中，本 tick 不动（下个 tick 再试）
-	if s.isRateLimitedLocked(acct, t.ClassID, now) {
-		return false, false
-	}
-
-	// 关键区：正式发起换课，先记录到 inflight 防并发重入
-	if s.inflight[acct] == nil {
-		s.inflight[acct] = map[int]bool{}
-	}
-	// 退保底课 + 抢心仪课 都标记 inflight，双保险防并发换课
-	s.inflight[acct][held] = true
-	s.inflight[acct][t.ClassID] = true
-	idxWant := s.statusIndexLocked(acct, t.ClassID)
-	if idxWant >= 0 && s.state.Courses[idxWant].Status != "success" {
-		s.state.Courses[idxWant].Status = "submitted"
-	}
-	s.mu.Unlock() // 锁外执行网络请求（退选 + 报名），避免持锁等待网络
-
-	client, ok := s.clients.ClientFor(acct)
-	if !ok {
-		s.mu.Lock()
-		s.clearInflightLocked(acct, held, t.ClassID)
-		return true, false
-	}
-
-	// 第一步：退掉保底课（失败即终止，绝不能带课换课）
-	_, err := client.ExitClass(held)
-	if err != nil {
-		s.mu.Lock()
-		s.clearInflightLocked(acct, held, t.ClassID)
-		s.setStateLocked(s.statusIndexLocked(acct, held), "failed", "换课失败：退保底课失败 "+err.Error())
-		s.logLocked(acct, held, "exit", "账号 "+acct+": 换课退保底课失败: "+err.Error(), false)
-		return true, false
-	}
-
-	// 第二步：抢心仪课（失败立即回抢保底课）
-	wantMsg, wantErr := client.SelectClass(t.ClassID)
-	if wantErr == nil {
-		// 换课成功：done 转移到心仪课，保底课成功记录清理
-		s.mu.Lock()
-		s.clearInflightLocked(acct, held, t.ClassID)
-		delete(s.done[acct], held)
-		s.setStateLocked(s.statusIndexLocked(acct, held), "success", "换课：已退保底课")
-		if s.done[acct] == nil {
-			s.done[acct] = map[int]bool{}
-		}
-		s.done[acct][t.ClassID] = true
-		s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "success", "换课成功："+wantMsg)
-		if s.store != nil {
-			s.store.AppendLog(acct, t.ClassID, "swap", "账号 "+acct+": 骑驴找马换课成功 保底课 "+fmt.Sprint(held)+" → "+t.CourseName, true)
-			_ = s.store.SaveSuccess(acct, t.ClassID)
-			_ = s.store.RemoveSuccess(acct, held)
-		}
-		return true, true // 锁已重新持有，由调用方统一解锁
-	}
-
-	// 抢心仪课失败：立即回抢保底课（绝不裸奔）
-	s.mu.Lock()
-	s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "换课失败：抢心仪课失败 "+wantErr.Error())
-	s.setStateLocked(s.statusIndexLocked(acct, held), "failed", "回抢保底课中…")
-	s.logLocked(acct, t.ClassID, "swap", "账号 "+acct+": 换课抢心仪课失败（"+wantErr.Error()+"），立即回抢保底课 "+fmt.Sprint(held), false)
-	s.mu.Unlock()
-
-	// 回抢保底课（锁外）
-	retMsg, retErr := client.SelectClass(held)
-	s.mu.Lock()
-	s.clearInflightLocked(acct, held, t.ClassID)
-	if retErr == nil {
-		// 回抢成功：恢复保底课 done 状态
-		if s.done[acct] == nil {
-			s.done[acct] = map[int]bool{}
-		}
-		s.done[acct][held] = true
-		s.setStateLocked(s.statusIndexLocked(acct, held), "success", "换课失败，已回抢保底课："+retMsg)
-		s.logLocked(acct, held, "select", "账号 "+acct+": 换课失败已回抢保底课 "+fmt.Sprint(held)+"："+retMsg, true)
-	} else {
-		// 回抢也失败：保底课裸奔了，标记失败等待下个 tick 抢救
-		s.setStateLocked(s.statusIndexLocked(acct, held), "failed", "换课失败且回抢保底课失败: "+retErr.Error())
-		s.logLocked(acct, held, "select", "账号 "+acct+": 换课失败且回抢保底课失败: "+retErr.Error(), false)
-	}
-	return true, false // 锁已重新持有，由调用方统一解锁
-}
-
-// heldClassForPublishLocked 返回该账号在该发布下已持有的（done 且仍在目标中的）课程 id；
-// 无则返回 0。换课引擎需要确认"已有一门保底课"才值得退低抢高。
-func (s *Scheduler) heldClassForPublishLocked(acct string, publishID int) int {
-	for _, t := range s.acctTargets[acct] {
-		if t.PublishID == publishID && s.doneHas(acct, t.ClassID) {
-			return t.ClassID
-		}
-	}
-	return 0
-}
-
-// priorityOf 返回某课程在账号目标中的优先级（未在目标中返回最大优先级，永不视为更高）。
-func (s *Scheduler) priorityOf(acct string, classID int) int {
-	for _, t := range s.acctTargets[acct] {
-		if t.ClassID == classID {
-			return t.Priority
-		}
-	}
-	return 1 << 30
-}
-
-// clearInflightLocked 清理换课过程中占用的 inflight 标记（需持锁）。
-func (s *Scheduler) clearInflightLocked(acct string, ids ...int) {
-	for _, id := range ids {
-		if m := s.inflight[acct]; m != nil {
-			delete(m, id)
-		}
-	}
-}
-
-// logLocked 持锁状态下记录日志（store 调用在锁内完成——append 是内存操作，无需解锁）。
-func (s *Scheduler) logLocked(acct string, classID int, action, result string, isOK bool) {
-	if s.store != nil {
-		_ = s.store.AppendLog(acct, classID, action, result, isOK)
-	}
 }
 
 // FormatOpenTime 解析开放时间字符串（本地时区）。

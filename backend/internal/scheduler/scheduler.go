@@ -334,10 +334,13 @@ func (s *Scheduler) tick() {
 	s.mu.Lock()
 	opened := s.state.WindowOpened
 	s.mu.Unlock()
-	// 窗口未确认开启：等待（窗口开启前的探测由节流闸门控制频率，不在此处高频空转）。
+	// 提交触发条件（或关系）：
+	//   1) 探测已确认窗口开启（WindowOpened）；
+	//   2) 本地时间已过开窗点（openTimeNow）——兜底：平台在到点瞬间把课程列表拉空
+	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
-	if !opened {
+	if !opened && !now.After(open) {
 		return
 	}
 	// 提交重试闸门：距上次提交不足 1 秒则跳过本轮（提交不被探测节流卡死）

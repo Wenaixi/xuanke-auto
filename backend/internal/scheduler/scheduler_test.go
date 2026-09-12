@@ -111,10 +111,16 @@ type fakeAccts struct {
 	relogErr      error  // 重登错误（可编程）
 	relog         func() // 重登钩子（可编程，记录是否被调用）
 	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
+	removed       map[string]bool // 已删除账号（ClientFor/AnyClient 返回不存在）
 }
 
-func (f *fakeAccts) ClientFor(acct string) (Client, bool) { return f.c, true }
-func (f *fakeAccts) AnyClient() (Client, bool)            { return f.c, true }
+func (f *fakeAccts) ClientFor(acct string) (Client, bool) {
+	if f.removed != nil && f.removed[acct] {
+		return nil, false
+	}
+	return f.c, true
+}
+func (f *fakeAccts) AnyClient() (Client, bool) { return f.c, true }
 func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
 	return "acct1", f.c, true
 }
@@ -414,6 +420,29 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 	fc.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("未确认满员时不应切备选，备选被提交 %d 次", calls)
+	}
+}
+
+// TestWindowOpenedWithEmptyPublishes 窗口到点瞬间探测返回空 Publishes（平台拉空学期数据）
+// 不得浪费黄金期：提交循环仍应启动并尝试报名。
+func TestWindowOpenedWithEmptyPublishes(t *testing.T) {
+	fc := newFakeClient(false)
+	// 窗口已到点（openTime 设在过去），但探测返回空 Publishes（平台熔断/学期异常被拉空）
+	fc.mu.Lock()
+	fc.data.Publishes = nil
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 即使 Publishes 为空（WindowOpened 无法确认为 true），本地时间已过开窗点也应尝试提交
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+	fc.mu.Lock()
+	calls := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if calls == 0 {
+		t.Fatal("窗口到点空列表时也应尝试提交（黄金期不容浪费）")
 	}
 }
 

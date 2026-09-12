@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type { Account, ClassItem, ElectivesData, Target, SchedulerState } from "../types"
@@ -33,7 +33,6 @@ import {
   Filter,
   Info,
   MapPin,
-  Save,
   Search,
   User,
   Users,
@@ -96,9 +95,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
-  const [saving, setSaving] = useState(false)
-  const [errorMsg, setErrorMsg] = useState("")
-  const [saved, setSaved] = useState(false)
+  // 选课改动自增计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存
+  const [rev, setRev] = useState(0)
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
@@ -167,49 +165,49 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       })
       return { ...prev, [publishId]: [...arr, classItem] }
     })
-    setSaved(false)
+    setRev((r) => r + 1) // 标记选课改动，触发自动保存防抖
   }
 
-  const save = async () => {
-    const targets: Target[] = []
-    for (const p of publishes) {
-      const list = selected[p.publish_id] ?? []
-      list.forEach((cls, i) => {
-        targets.push({
-          publish_id: p.publish_id,
-          class_id: cls.id,
-          course_name: cls.course_name,
-          priority: i,
+  // 自动保存：选课一变（仅用户点击），400ms 防抖后整包 PUT 到后端；成功静默，失败仅提示
+  const lastJson = useRef("")
+  useEffect(() => {
+    if (rev === 0) return
+    const build = (): Target[] => {
+      const targets: Target[] = []
+      for (const p of publishes) {
+        const list = selected[p.publish_id] ?? []
+        list.forEach((cls, i) => {
+          targets.push({
+            publish_id: p.publish_id,
+            class_id: cls.id,
+            course_name: cls.course_name,
+            priority: i,
+          })
         })
-      })
+      }
+      return targets
     }
-
-    setSaving(true)
-    setErrorMsg("")
-    try {
-      await api("/targets", {
-        method: "PUT",
-        body: JSON.stringify({ targets }),
-        session: sessionToken,
-      })
-      setSaved(true)
-      toast({
-        title: targets.length > 0 ? "目标保存成功" : "目标已清空",
-        description: targets.length > 0 ? `已锁定 ${publishes.length} 个发布的多备选目标` : "已清空所有预选目标",
-        variant: "default",
-      })
-      onDone() // 保存成功直接返回控制台
-    } catch (e: any) {
-      setErrorMsg(e.message || "目标保存失败，请检查网络通信")
-      toast({
-        title: "保存失败",
-        description: e.message || "通信异常",
-        variant: "destructive",
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
+    const timer = setTimeout(async () => {
+      const targets = build()
+      const json = JSON.stringify(targets)
+      if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
+      try {
+        await api("/targets", {
+          method: "PUT",
+          body: json,
+          session: sessionToken,
+        })
+        lastJson.current = json
+      } catch (e: any) {
+        toast({
+          title: "目标保存失败",
+          description: e.message || "通信异常，请重试",
+          variant: "destructive",
+        })
+      }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [rev, selected, publishes, sessionToken, toast])
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
@@ -534,31 +532,17 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           </Tabs>
         )}
 
-        {/* 底部吸底保存工具栏 */}
+        {/* 底部吸底状态栏：实时展示预选总览，改动自动保存 */}
         <footer className="fixed bottom-4 inset-x-4 max-w-6xl mx-auto z-40 p-4 rounded-[var(--radius-lg)] border border-neutral-700 glass-strong flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-xs font-mono">
             <span className="text-white font-medium">
               已选备选: {selectedCount} 门 · 发布 {Object.keys(selected).length} 个
             </span>
-            {saved && (
-              <span className="text-white flex items-center gap-1 text-[11px]">
-                <CheckCircle className="h-3.5 w-3.5 text-white" />
-                <span>已保存预选</span>
-              </span>
-            )}
-            {errorMsg && <span className="text-neutral-400">{errorMsg}</span>}
+            <span className="text-neutral-500 flex items-center gap-1 text-[11px]">
+              <CheckCircle className="h-3.5 w-3.5" />
+              <span>改动自动保存</span>
+            </span>
           </div>
-
-          <Button
-            variant="primary"
-            size="default"
-            onClick={save}
-            disabled={saving}
-            className="w-full sm:w-auto h-10 px-6 flex items-center justify-center gap-2 text-xs font-medium"
-          >
-            <Save className="h-3.5 w-3.5 text-black" />
-            <span>{saving ? "正在保存..." : "保存预选课程"}</span>
-          </Button>
         </footer>
 
         {/* 📱 手机端专用抽屉详情 (Bottom Sheet) */}

@@ -26,6 +26,8 @@ export default function App() {
   const [page, setPage] = useState<"dashboard" | "select">("dashboard")
   const [current, setCurrent] = useState<Account>("")
   const [inAdmin, setInAdmin] = useState(false)
+  // 管理员账号名（后端下发的当前管理员名，默认 admin）
+  const [adminName, setAdminName] = useState("admin")
 
   const accounts = Object.keys(sessions)
   const sessionToken = current ? sessions[current] : undefined
@@ -36,8 +38,8 @@ export default function App() {
     localStorage.setItem("xk_sessions", JSON.stringify(next))
     setSessions(next)
     setCurrent(account)
-    // admin 账号登录后直接进入管理员界面
-    setInAdmin(account === "admin")
+    // 管理员账号登录后直接进入管理员界面（账号名与后端管理员名一致即管理员）
+    setInAdmin(account === adminName)
   }
 
   // 退出当前账号：仅移除该账号会话，其他账号保留
@@ -74,6 +76,35 @@ export default function App() {
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [current])
+
+  // 桌面版壁纸“边滚边露底、触底冻结”：滚动时先一格格露出水墨图下方，
+  // 露到图片底边即停——再往下滚整张图冻住不动（用户明确要求）。
+  // 实现：把位移写进 canvas-bg 上的 --bg-shift 变量（CSS 桌面媒体查询消费），
+  // 移动端不消费该变量，fixed 贴顶钉住视口、纹丝不动，逻辑只在桌面生效。
+  useEffect(() => {
+    const el = document.querySelector<HTMLElement>(".canvas-bg")
+    if (!el) return
+    let frame = 0
+    const apply = () => {
+      const vh = window.innerHeight
+      const imgH = vh * 1.6 /* 桌面端 160% 放大后图片高度 = 视口高 * 1.6 */
+      const maxShift = imgH - vh /* 最多能露出的图片高度（160% 多出的 60%） */
+      const ratio = Math.min(1, window.scrollY / maxShift) /* 滚动进度封顶 1 */
+      el.style.setProperty("--bg-shift", `${ratio * maxShift}px`)
+      frame = 0
+    }
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(apply)
+    }
+    apply()
+    window.addEventListener("scroll", onScroll, { passive: true })
+    window.addEventListener("resize", onScroll)
+    return () => {
+      window.removeEventListener("scroll", onScroll)
+      window.removeEventListener("resize", onScroll)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>

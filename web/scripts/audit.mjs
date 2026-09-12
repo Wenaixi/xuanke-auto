@@ -1,5 +1,5 @@
 // 视觉一致性回归护栏（TDD 守护）：
-//   A. 水墨画布：移动端 180% 放大贴顶 fixed 钉住不随滚动、桌面端 160% 放大随滚动下滑见图片下方（用户的明确要求）
+//   A. 水墨画布：全端 fixed 钉视口；移动端 180% 贴顶、桌面端 160% 借助 --bg-shift 边滚边露底触底冻结（用户的明确要求）
 //   B. 全站 UI 表面须走统一半透明工具类（glass-overlay / glass-input）
 //   C. 禁止遗留实心不透明黑洞：bg-black/25|30|70|75、bg-neutral-950、整页 bg-black
 // 用法：node scripts/audit.mjs （退出码非 0 即存在违例）
@@ -30,12 +30,12 @@ const css = sources.filter(([p]) => p.endsWith(".css")).map(([, t]) => t).join("
 const all = sources.map(([, t]) => t).join("\n")
 
 // ---------- A. 画布背景规格 ----------
-console.log("A. 画布背景：移动端 180% 放大贴顶 fixed 钉住不随滚动，桌面端 160% 放大随滚动")
+console.log("A. 画布背景：全端 fixed 钉视口，移动端 180% 贴顶、桌面端 160% 借助 --bg-shift 边滚边露底触底冻结")
 assertFile(css.includes("background-size: 100% 100%, 180% auto"), "canvas-bg 移动端图片层放大至 180%")
 assertFile(css.includes("background-size: 100% 100%, 160% auto"), "canvas-bg 桌面端图片层放大至 160%")
-assertFile(css.includes("background-position: center, top 0 center"), "canvas-bg 图片顶格对齐（top 0 center）")
-assertFile(css.includes("position: fixed"), "canvas-bg 默认（移动端）fixed 钉住视口（不随滚动）")
-assertFile(css.includes("position: absolute") && /hover: hover\) and \(pointer: fine\)/.test(css), "canvas-bg 桌面端 absolute 随文档滚动（下滑见图片下方）")
+assertFile(css.includes("background-position: center, center var(--bg-shift"), "canvas-bg 图片层位移由 --bg-shift 变量控制")
+assertFile(css.includes("position: fixed"), "canvas-bg 全端 fixed 钉住视口（不随文档滚动）")
+assertFile(css.includes("--bg-shift, 0px"), "canvas-bg --bg-shift 缺省为 0px（移动端/无滚动贴顶不动）")
 
 // ---------- B. 统一半透明工具 ----------
 console.log("B. 统一半透明工具类已就位")

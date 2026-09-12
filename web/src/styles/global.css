@@ -81,17 +81,20 @@ body {
   background-image:
     linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%),
     url("/bg.jpg");
-  /* 默认（移动端）：fixed 钉住视口不随滚动，水墨图放大至 180% 宽，贴顶对齐 */
+  /* 默认（移动端）：fixed 钉住视口不随滚动，水墨图放大至 180% 宽，贴顶对齐；
+     桌面端经媒体查询借助 --bg-shift 变量做“边滚边露底、触底冻结” */
   background-size: 100% 100%, 180% auto;
-  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，不随文档纵向滚动 */
-  background-position: center, top 0 center;
+  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，fixed 不随文档纵向滚动；
+     位置偏移量 --bg-shift 由 App.tsx 按滚动距离写入（移动端恒为 0，即全程贴顶） */
+  background-position: center, center var(--bg-shift, 0px);
   background-repeat: no-repeat;
 }
 
-/* 桌面端（鼠标设备）：absolute 随文档纵向滚动（下滑可看到水墨图下方），放大至 160% 宽 */
+/* 桌面端（鼠标设备）：fixed 钉住视口，图片层纵向位置由 App.tsx 按
+   “边滚动边露下方、图片底边触到视口底部后冻结”写入 --bg-shift 位移；
+   移动端不消费该变量，仍保持贴顶纹丝不动 */
 @media (hover: hover) and (pointer: fine) {
   .canvas-bg {
-    position: absolute;
     background-size: 100% 100%, 160% auto;
   }
 }

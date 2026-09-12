@@ -109,10 +109,11 @@ type Scheduler struct {
 	lastData         *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
 	tokenValid       map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
-	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流）
+	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流 + 退避计时基准）
+	reloginFail      map[string]int       // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
 	relogging        map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
 	reloginMu        sync.Mutex           // 重登防重入（全局限一把，账号并发低）
-	reloginResults   chan reloginResult  // 重登结果回传（异步结果在 tick 主循环统一处理）
+	reloginResults   chan reloginResult   // 重登结果回传（异步结果在 tick 主循环统一处理）
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -136,6 +137,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		full:        make(map[string]map[int]bool),
 		tokenValid:  make(map[string]bool),
 		reloginAt:   make(map[string]time.Time),
+		reloginFail: make(map[string]int),
 		relogging:   make(map[string]bool),
 		chains:      make(map[string]bool),
 		ctx:         ctx,
@@ -305,11 +307,9 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
 	s.lastProbe = time.Now()
 	s.lastData = data
 	s.lastDataAt = time.Now()
-	s.mu.Unlock()
 	return data, nil
 }
 
@@ -335,6 +335,9 @@ func (s *Scheduler) tick() {
 	s.mu.Lock()
 	opened := s.state.WindowOpened
 	s.mu.Unlock()
+	// 窗口未确认开启：等待（窗口开启前的探测由节流闸门控制频率，不在此处高频空转）。
+	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
+	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
 	if !opened {
 		return
 	}
@@ -349,6 +352,10 @@ func (s *Scheduler) tick() {
 }
 
 // probe 执行一次课程探测并刷新快照与窗口状态。
+// 窗口状态判定与提交状态解耦：即使快照 Publishes 为空（平台熔断/学期数据异常被拉空），
+// 也只视为"尚未确认窗口开启"，绝不把已开启的窗口误判为关闭（安全审计 MAJOR#4）——
+// prevWindowOpened 在探测失败/空数据路径保持原值，窗口一旦开过就维持已开状态，
+// 提交循环（spawnChain）仍会继续尝试目标课程，黄金期不因数据异常而停摆。
 func (s *Scheduler) probe() {
 	now := time.Now()
 	client, ok := s.clients.AnyClient()
@@ -391,21 +398,54 @@ func (s *Scheduler) probe() {
 }
 
 // reloginInterval 重登节流：30 秒内最多重登一次（与探测节流同频，避免频繁登录触发平台限流）。
+// 这是同一账号重登的最短间隔；排它控制交给下面的失败退避表（连续失败时间隔指数拉长）。
 const reloginInterval = 30 * time.Second
 
-// maybeRelogin 对指定账号异步自动重登：防重入 + 30s 节流，成功后落库新 token 并补一次探测。
-// 失败/未重登会复位失效标记，下个 30s 节流窗口后仍可再试（绝不卡死为永久失效）。
+// 重登失败退避（防平台锁号的最后防线）：连续失败 n 次后，距离下次重试为 backoffMin << n，
+// 封顶 backoffMax，所以 Vision 服务持续故障时登录频率只会越来越低，绝不会把账号刷到锁号。
+const (
+	backoffMin = 30 * time.Second
+	backoffMax = 10 * time.Minute
+)
+
+func (s *Scheduler) reloginBackoff(n int) time.Duration {
+	d := backoffMin << n // 每次失败翻倍
+	if d > backoffMax || d <= 0 {
+		return backoffMax
+	}
+	return d
+}
+
+// maybeRelogin 对指定账号异步自动重登：防重入 + 30s 节流 + 失败指数退避（安全审计要求），
+// 成功后落库新 token 并补一次探测。失败/未重登会复位失效标记，退避窗口过后仍可再试。
+// 锁纪律：决策段持有 reloginMu 串行化"是否发起"；所有 map 读写一律持 s.mu（含 goroutine 内），
+// 避免 reloginMu 与 s.mu 混用导致的并发读写数据竞争。
 func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
+
+	s.mu.Lock()
 	if s.relogging[acct] {
+		s.mu.Unlock()
 		return // 已有重登 goroutine 在跑，绝不再开第二条
 	}
-	if t, ok := s.reloginAt[acct]; ok && time.Since(t) < reloginInterval {
-		return // 30s 节流
+	// 失败退避：连续失败次数 >0 时，按指数间隔等待，Vision 故障期不轰炸登录接口
+	if n := s.reloginFail[acct]; n > 0 {
+		wait := s.reloginBackoff(n)
+		if t, ok := s.reloginAt[acct]; ok {
+			if time.Since(t) < wait {
+				s.mu.Unlock()
+				return // 退避窗口内不再发起
+			}
+			log.Printf("[scheduler] 账号 %s 自动重登失败 %d 次，已过 %v 退避窗口，再次尝试", acct, n, wait)
+		}
+		delete(s.reloginAt, acct) // 退避窗口已过：清等待时间，走本次新间隔
+	} else if t, ok := s.reloginAt[acct]; ok && time.Since(t) < reloginInterval {
+		s.mu.Unlock()
+		return // 30s 基础节流
 	}
-	s.reloginAt[acct] = time.Now() // 节流时间戳：探测每 30s 命中一次失效，这里防的是链内高频命中
-	s.mu.Lock()
+	s.reloginAt[acct] = time.Now()
+	s.reloginFail[acct]++
 	s.relogging[acct] = true // 标记重登中
 	s.mu.Unlock()
 
@@ -417,9 +457,10 @@ func (s *Scheduler) maybeRelogin(acct string) {
 
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
-		delete(s.relogging, acct) // 清重登中标记（defer 保证失败也清，才能再试）
+		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
 		s.tokenValid[acct] = false
 		if err == nil && relogged {
+			delete(s.reloginFail, acct) // 成功清零失败计数，退避表归零
 			// 新 token 落库（持久化，重启后恢复不丢）
 			if client, ok := s.clients.ClientFor(acct); ok {
 				if tok := client.Token(); tok != "" {
@@ -428,8 +469,13 @@ func (s *Scheduler) maybeRelogin(acct string) {
 					}
 				}
 			}
-			// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
-			s.reloginResults <- reloginResult{acct: acct, relogged: true, err: nil}
+			// 重登成功后立即补一次探测（换新 token 后窗口可能已开）。
+			// 非阻塞发送：通道满（并发重登全部成功）时宁可弃掉补探测信号，
+			// 也不持 s.mu 阻塞整个调度器（安全审查发现的持锁阻塞风险）。
+			select {
+			case s.reloginResults <- reloginResult{acct: acct, relogged: true, err: nil}:
+			default:
+			}
 			s.mu.Unlock()
 			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
 			return

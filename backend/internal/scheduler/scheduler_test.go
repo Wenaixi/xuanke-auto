@@ -156,6 +156,7 @@ func (s *Scheduler) resetReloginAtForTest(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
 	s.reloginAt[acct] = time.Time{}
+	delete(s.reloginFail, acct) // 清失败计数：避免上次失败退避影响本次断言
 	delete(s.relogging, acct)
 }
 

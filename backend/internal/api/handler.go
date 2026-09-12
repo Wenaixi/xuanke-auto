@@ -527,6 +527,7 @@ func requireAuth(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 type loginLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
+	lastGC  time.Time // 上次惰性清理时间
 }
 
 type tokenBucket struct {
@@ -537,6 +538,7 @@ type tokenBucket struct {
 const (
 	loginRate  = 5.0 / 60.0 // 每分钟 5 次
 	loginBurst = 5
+	bucketTTL  = 10 * time.Minute // 空闲桶回收阈值
 )
 
 func newLoginLimiter() *loginLimiter {
@@ -546,8 +548,18 @@ func newLoginLimiter() *loginLimiter {
 func (l *loginLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	b, ok := l.buckets[ip]
 	now := time.Now()
+	// 惰性清理：回收超过 10 分钟未活动的 IP 桶，防止公网扫描/代理轮换把桶表撑到 OOM
+	// （偶发触发，O(桶数) 线性扫描可接受——桶数本应有界）
+	if len(l.buckets) > 1024 && now.Sub(l.lastGC) > time.Minute {
+		for k, b := range l.buckets {
+			if now.Sub(b.lastFill) > bucketTTL {
+				delete(l.buckets, k)
+			}
+		}
+		l.lastGC = now
+	}
+	b, ok := l.buckets[ip]
 	if !ok {
 		b = &tokenBucket{tokens: loginBurst, lastFill: now}
 		l.buckets[ip] = b

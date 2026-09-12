@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -556,6 +557,22 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 	if !limited {
 		t.Fatalf("期望触发限流 code=429，实际 code 序列: %v", codes)
+	}
+}
+
+// TestLoginLimiterGC 登录限流桶惰性清理：空闲桶超过 TTL 被回收，桶表有界不会 OOM。
+func TestLoginLimiterGC(t *testing.T) {
+	l := newLoginLimiter()
+	// 造大量不同 IP 的桶并全部标记为长期空闲
+	before := time.Now().Add(-bucketTTL - time.Minute).Add(-time.Hour)
+	for i := 0; i < 1500; i++ {
+		l.buckets[fmt.Sprintf("10.0.0.%d", i)] = &tokenBucket{tokens: loginBurst, lastFill: before}
+	}
+	l.lastGC = time.Time{} // 强制下一次 allow 触发清理（桶数 > 1024）
+	// 触发一次 allow：应回收全部空闲桶
+	l.allow("10.0.0.1")
+	if len(l.buckets) != 1 {
+		t.Fatalf("空闲桶应被回收，桶表应只剩当前 IP 一个，实际 %d", len(l.buckets))
 	}
 }
 

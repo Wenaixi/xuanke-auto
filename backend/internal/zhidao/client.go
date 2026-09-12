@@ -87,124 +87,172 @@ type YearTerm struct {
 }
 
 // Login 完整登录链路：GET /login 初始化会话，GET /login/captcha 取验证码，
-// Vision 识别后 POST /login/doLogin。验证码识别失败自动刷新重试，最多 10 次。
+// Vision 识别后 POST /login/doLogin。
+//
+// 平台限流安全设计（避免触发"登录失败次数过多"熔断）：
+//   - 识别共 maxCaptchaAttempts 次：识别失败/识别码提交被拒，刷新验证码重新识别；
+//   - 提交共 maxSubmitAttempts 次（提交被拒多为验证码过期，重试意义大）；
+//   - 任一环节网络/配置错误立即返回，绝不无谓重试；识别结果为空视为识别失败，不提交。
+//
 // 成功后将 token 写入客户端并返回。
 func (c *Client) Login(account, password string) (string, error) {
-	var lastMsg string
-	jar, _ := cookiejar.New(nil)
-	for attempt := 1; attempt <= 10; attempt++ {
+	const (
+		maxCaptchaAttempts = 3 // 验证码识别最大次数（识别失败/提交被拒各刷新一次）
+		maxSubmitAttempts  = 2 // 提交登录最大次数
+	)
+	var lastErr error
+	for attempt := 1; attempt <= maxCaptchaAttempts; attempt++ {
 		// 每个 attempt 使用独立会话：登录页 Cookie 与验证码绑定
+		jar, _ := cookiejar.New(nil)
 		sess := &http.Client{Timeout: 15 * time.Second, Jar: jar}
-		ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+		ua := loginUserAgent
 
-		// 1. 初始化会话
-		req, err := http.NewRequest(http.MethodGet, c.baseURL+"/login", nil)
-		if err != nil {
-			return "", err
+		// 1. 初始化会话（失败即返回：无谓重试只会累积平台限流）
+		if err := fetchLoginPage(sess, ua, c.baseURL); err != nil {
+			return "", fmt.Errorf("初始化登录会话失败: %w", err)
 		}
-		req.Header.Set("User-Agent", ua)
-		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-		resp, err := sess.Do(req)
-		if err != nil {
-			return "", err
-		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
 
 		// 2. 取验证码图片
-		capReq, err := http.NewRequest(http.MethodGet,
-			fmt.Sprintf("%s/login/captcha?v=%d", c.baseURL, time.Now().UnixMilli()), nil)
+		img, err := fetchCaptchaImage(sess, ua, c.baseURL)
 		if err != nil {
-			return "", err
-		}
-		capReq.Header.Set("User-Agent", ua)
-		capReq.Header.Set("Referer", c.baseURL+"/login")
-		capResp, err := sess.Do(capReq)
-		if err != nil {
-			return "", err
-		}
-		img, err := io.ReadAll(capResp.Body)
-		capResp.Body.Close()
-		if err != nil {
-			return "", err
+			return "", fmt.Errorf("获取验证码失败: %w", err)
 		}
 
-		// 3. Vision 识别
+		// 3. Vision 识别（识别失败 → 刷新验证码换一次，最多 maxCaptchaAttempts 次）
 		c.mu.Lock()
 		vc := c.visionCfg
 		c.mu.Unlock()
 		captchaText, err := recognizeCaptcha(vc, img)
-		if err != nil {
-			lastMsg = fmt.Sprintf("第%d次验证码识别失败: %v", attempt, err)
+		if err != nil || strings.TrimSpace(captchaText) == "" {
+			if err == nil {
+				err = fmt.Errorf("识别结果为空")
+			}
+			lastErr = fmt.Errorf("第%d次验证码识别失败: %w", attempt, err)
 			continue
 		}
 
-		// 4. RSA 加密账密
-		identification, err := encryptIdentification(account, password)
-		if err != nil {
-			return "", err
-		}
-
-		// 5. 提交登录
-		form := url.Values{}
-		form.Set("captcha", captchaText)
-		form.Set("identification", identification)
-		form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
-		form.Set("priorityId", "")
-		loginReq, err := http.NewRequest(http.MethodPost, c.baseURL+"/login/doLogin",
-			strings.NewReader(form.Encode()))
-		if err != nil {
-			return "", err
-		}
-		loginReq.Header.Set("User-Agent", ua)
-		loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		loginReq.Header.Set("X-Requested-With", "XMLHttpRequest")
-		loginReq.Header.Set("Referer", c.baseURL+"/login")
-		loginResp, err := sess.Do(loginReq)
-		if err != nil {
-			return "", err
-		}
-		body, _ := io.ReadAll(loginResp.Body)
-		loginResp.Body.Close()
-
-		var j struct {
-			Code  int    `json:"code"`
-			IsOk  bool   `json:"isOk"`
-			Token string `json:"token"`
-			Msg   string `json:"msg"`
-		}
-		if err := json.Unmarshal(body, &j); err != nil {
-			lastMsg = fmt.Sprintf("第%d次登录响应解析失败: %v", attempt, err)
-			continue
-		}
-		if j.IsOk && j.Token != "" {
-			c.mu.Lock()
-			c.token = j.Token
-			c.account = account
-			c.password = password
-			c.cookies["zd_edu_cookie"] = j.Token
-			u, _ := url.Parse(c.baseURL)
-			if u != nil && sess.Jar != nil {
-				for _, ck := range sess.Jar.Cookies(u) {
-					if ck.Name != "" && ck.Value != "" {
-						c.cookies[ck.Name] = ck.Value
-					}
-				}
+		// 4. 提交登录（提交被拒多为验证码过期，最多 maxSubmitAttempts 次）
+		for submit := 1; submit <= maxSubmitAttempts; submit++ {
+			identification, err := encryptIdentification(account, password)
+			if err != nil {
+				return "", err
 			}
-			if _, ok := c.cookies["access_limit_cookie"]; !ok {
-				c.cookies["access_limit_cookie"] = "***REMOVED***"
+			token, err := c.submitLogin(sess, ua, captchaText, identification)
+			if err != nil {
+				lastErr = fmt.Errorf("第%d次验证码提交被拒: %w", attempt, err)
+				break // 验证码可能已失效：刷新重识别
 			}
-			c.mu.Unlock()
-			return j.Token, nil
+			return token, nil
 		}
-		lastMsg = fmt.Sprintf("第%d次登录失败: %s", attempt, j.Msg)
-		time.Sleep(800 * time.Millisecond)
 	}
-	return "", fmt.Errorf("登录失败：验证码识别 10 次均未通过（%s）", lastMsg)
+	if lastErr != nil {
+		return "", fmt.Errorf("登录失败：验证码识别 %d 次均未通过（%s）", maxCaptchaAttempts, lastErr)
+	}
+	return "", fmt.Errorf("登录失败")
 }
 
 // ErrUnauthorized token 失效（code=-1）错误。
 var ErrUnauthorized = fmt.Errorf("未登录，token 已失效")
+
+// loginUserAgent 教务登录统一 UA（与页面 /login 一致）。
+const loginUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+
+// fetchLoginPage 初始化登录会话：GET /login 种下会话 Cookie。
+func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	resp, err := sess.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, resp.Body)
+	return err
+}
+
+// fetchCaptchaImage 取验证码图片（会话绑定校验码）。
+func fetchCaptchaImage(sess *http.Client, ua string, baseURL string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet,
+		fmt.Sprintf("%s/login/captcha?v=%d", baseURL, time.Now().UnixMilli()), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Referer", baseURL+"/login")
+	resp, err := sess.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	img, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(img) == 0 {
+		return nil, fmt.Errorf("验证码图片为空")
+	}
+	return img, nil
+}
+
+// submitLogin 提交登录表单并登记成功后的 token/cookie。
+// 返回错误表示提交被拒（多为验证码过期），可由调用方刷新验证码重试。
+func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification string) (string, error) {
+	form := url.Values{}
+	form.Set("captcha", captchaText)
+	form.Set("identification", identification)
+	form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
+	form.Set("priorityId", "")
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/login/doLogin",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Referer", c.baseURL+"/login")
+	resp, err := sess.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("提交登录请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取登录响应失败: %w", err)
+	}
+
+	var j struct {
+		Code  int    `json:"code"`
+		IsOk  bool   `json:"isOk"`
+		Token string `json:"token"`
+		Msg   string `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return "", fmt.Errorf("登录响应解析失败: %w", err)
+	}
+	if !j.IsOk || j.Token == "" {
+		return "", fmt.Errorf("登录被拒绝: %s", j.Msg)
+	}
+	c.mu.Lock()
+	c.token = j.Token
+	c.cookies["zd_edu_cookie"] = j.Token
+	if u, _ := url.Parse(c.baseURL); u != nil {
+		for _, ck := range sess.Jar.Cookies(u) {
+			if ck.Name != "" && ck.Value != "" {
+				c.cookies[ck.Name] = ck.Value
+			}
+		}
+	}
+	if _, ok := c.cookies["access_limit_cookie"]; !ok {
+		c.cookies["access_limit_cookie"] = "***REMOVED***"
+	}
+	c.mu.Unlock()
+	return j.Token, nil
+}
 
 // doRequest 统一请求入口：转发到至道并附加 idToken 与 Cookie。
 // 不做自动重登：code=-1（token 失效）时返回 ErrUnauthorized，由调用方决定处理。

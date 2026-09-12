@@ -38,8 +38,24 @@ type SchedulerState struct {
 	Courses      []CourseStatus `json:"courses"`
 }
 
-// probeInterval 课程探测最小间隔：30 秒，避免触发平台"访问过于频繁"熔断。
-const probeInterval = 30 * time.Second
+// 探测分阶段间隔：平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 5 秒盯守。
+const (
+	probeIntervalFar  = 30 * time.Second
+	probeIntervalNear = 5 * time.Second
+	nearWindow        = 5 * time.Minute // 临门窗口：开放前 5 分钟起收紧
+)
+
+// probeIntervalFor 按当前时刻与开放时间的距离选择探测间隔。
+// 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 5 秒盯守，保证平台一开立即被发现。
+func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
+	if now.After(s.openTimeNow().Add(-nearWindow)) {
+		return probeIntervalNear
+	}
+	return probeIntervalFar
+}
+
+// submitInterval 窗口开启后提交重试最小间隔：1 秒（黄金期高频但不打爆平台）。
+const submitInterval = time.Second
 
 // snapshotTTL 课程快照有效期（大于探测间隔，保证 /electives 总能有数据可读）。
 const snapshotTTL = 40 * time.Second
@@ -71,6 +87,9 @@ type Scheduler struct {
 	openTime time.Time
 	interval time.Duration
 
+	// openTimeFn 运行时打开时间读取器（热重载时代替启动期固化的 openTime；nil 时用 openTime）
+	openTimeFn func() time.Time
+
 	mu          sync.Mutex
 	acctTargets map[string][]Target // 按账号隔离的目标课程
 	state       SchedulerState
@@ -78,6 +97,7 @@ type Scheduler struct {
 	done        map[string]map[int]bool // [账号][classID] 已成功
 	full        map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	lastProbe   time.Time
+	lastSubmit  time.Time // 上次提交时间（submitAll 节流）
 	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt  time.Time
 
@@ -107,6 +127,24 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 	}
 	s.state.OpenTime = openTime
 	return s
+}
+
+// SetOpenTimeFn 设置运行时打开时间读取器（管理员热改配置后立即生效；传入 nil 恢复启动值）。
+func (s *Scheduler) SetOpenTimeFn(fn func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openTimeFn = fn
+	if fn != nil {
+		s.state.OpenTime = fn()
+	}
+}
+
+// openTimeNow 返回当前生效的打开时间（运行时读取器优先）。
+func (s *Scheduler) openTimeNow() time.Time {
+	if s.openTimeFn != nil {
+		return s.openTimeFn()
+	}
+	return s.openTime
 }
 
 // SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
@@ -201,6 +239,7 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
+	st.OpenTime = s.openTimeNow() // 运行时配置优先（热重载立即反映）
 	st.Courses = nil
 	for _, c := range s.state.Courses {
 		if c.Account == acct {
@@ -241,23 +280,44 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	return data, nil
 }
 
-// tick 单次轮询：查课程数据，判断窗口是否开启，开启则并发提交所有账号目标。
+// tick 单次轮询：先按需探测刷新窗口状态与课程快照；窗口开启后按 1 秒间隔持续提交。
+// 探测与提交解耦：窗口开启后提交重试不受探测 30 秒节流限制（黄金期高频重试）。
 func (s *Scheduler) tick() {
 	now := time.Now()
 	s.mu.Lock()
 	last := s.lastProbe
+	open := s.openTimeNow()
 	s.mu.Unlock()
 
-	// 探测闸门：距上次成功探测不足 30 秒且非首次则跳过
-	probe := last.IsZero() || now.Sub(last) >= probeInterval
-	// 超高性能：窗口到点后的首次 tick 立即探测（不等待 30s 闸门放过）
-	if !probe && now.After(s.openTime) && last.Before(s.openTime.Add(-time.Second)) {
+	// 探测闸门：距上次成功探测不足当前阶段间隔且非首次则跳过
+	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalFor(now)
+	// 超高性能：窗口到点后的首次 tick 立即探测（不等待节流闸门放过）
+	if !probe && now.After(open) && last.Before(open.Add(-time.Second)) {
 		probe = true
 	}
-	if !probe {
-		return
+	if probe {
+		s.probe()
 	}
 
+	s.mu.Lock()
+	opened := s.state.WindowOpened
+	s.mu.Unlock()
+	if !opened {
+		return
+	}
+	// 提交重试闸门：距上次提交不足 1 秒则跳过本轮（提交不被探测节流卡死）
+	s.mu.Lock()
+	lastSubmit := s.lastSubmit
+	s.mu.Unlock()
+	if !lastSubmit.IsZero() && now.Sub(lastSubmit) < submitInterval {
+		return
+	}
+	s.submitAll()
+}
+
+// probe 执行一次课程探测并刷新快照与窗口状态。
+func (s *Scheduler) probe() {
+	now := time.Now()
 	client, ok := s.clients.AnyClient()
 	if !ok {
 		return // 尚无账号登录，安静等待
@@ -266,7 +326,6 @@ func (s *Scheduler) tick() {
 	if err != nil {
 		s.mu.Lock()
 		s.lastProbe = now // 失败同样计入节流闸门，网络故障时不会每 300ms 疯狂重试
-		s.state.WindowOpened = false
 		s.mu.Unlock()
 		if !errors.Is(err, zhidao.ErrUnauthorized) {
 			log.Printf("[scheduler] 查询课程失败: %v", err)
@@ -277,8 +336,6 @@ func (s *Scheduler) tick() {
 	s.lastProbe = now
 	s.lastData = data
 	s.lastDataAt = now
-	s.mu.Unlock()
-
 	opened := false
 	for _, p := range data.Publishes {
 		if p.InDateRange {
@@ -286,18 +343,14 @@ func (s *Scheduler) tick() {
 			break
 		}
 	}
-	s.mu.Lock()
 	s.state.WindowOpened = opened
 	s.mu.Unlock()
-	if !opened {
-		return
-	}
-	s.submitAll()
 }
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。
 func (s *Scheduler) submitAll() {
 	s.mu.Lock()
+	s.lastSubmit = time.Now()
 	type chain struct {
 		acct string
 		ts   []Target

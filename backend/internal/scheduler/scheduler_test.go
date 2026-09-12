@@ -44,7 +44,18 @@ func (f *fakeClient) setOpen(open bool) {
 func (f *fakeClient) FindElectives() (*zhidao.ElectivesData, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.data, f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	// 深拷贝后返回：调用方在锁外遍历 Publishes，避免与 setAllOpened 并发写 InDateRange 触发数据竞争
+	cp := *f.data
+	cp.Publishes = make([]zhidao.Publish, len(f.data.Publishes))
+	for i := range f.data.Publishes {
+		p := f.data.Publishes[i]
+		p.Classes = append([]zhidao.Class(nil), f.data.Publishes[i].Classes...)
+		cp.Publishes[i] = p
+	}
+	return &cp, nil
 }
 
 func (f *fakeClient) SelectClass(classID int) (string, error) {
@@ -141,6 +152,24 @@ func waitStatusAcct(t *testing.T, s *Scheduler, acct string, classID int, want s
 		}
 	}
 	t.Fatalf("课程 %d 不在账号 %s 目标中", classID, acct)
+}
+
+func TestWindowOpenRetriesWithoutWaitingProbe(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.selectErr[61115] = errors.New("connection reset") // 第一次提交失败（网络类）
+	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	setAllOpened(fc)
+	s.resetProbe()
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+	// 清除错误：下一次 1 秒重试应成功（不需要等待 30s 探测闸门）
+	fc.mu.Lock()
+	delete(fc.selectErr, 61115)
+	fc.mu.Unlock()
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
 }
 
 func TestStateMachine(t *testing.T) {

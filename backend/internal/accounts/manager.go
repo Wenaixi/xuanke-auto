@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/zhidao"
@@ -32,16 +33,59 @@ type Manager struct {
 	mu      sync.Mutex
 	clients map[string]*zhidao.Client // 账号名 -> 独立客户端
 	order   []string                  // 登录顺序
+
+	// 全局重登频率闸门（安全审计 CRITICAL 2a）：所有账号共享同一出口 IP 打平台 doLogin，
+	// 若平台风控含 IP 维度，多个账号同时失效时全速重登会把整个 IP 刷到锁号（全盘陪葬）。
+	// 令牌桶：全账号合计每分钟 doLogin 最多 gateLoginPerMin 次；超出的重登等待下个窗口。
+	gateMu     sync.Mutex
+	gateWindow time.Time // 当前一分钟窗口起点
+	gateUsed   int       // 本窗口已消耗的 doLogin 次数
+	gateCond   *sync.Cond
+}
+
+// gateWait 申请一次 doLogin 预算：窗口内已用满则阻塞等待下一个窗口的广播
+// （被调度的重登 goroutine 挂起而非取消，保证所有账号最终都能完成重登）。
+// 广播后所有等待者重新竞争预算，每窗口严格不超过 gateLoginPerMin 次。
+func (m *Manager) gateWait() {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	for {
+		now := time.Now()
+		if now.Sub(m.gateWindow) >= time.Minute {
+			m.gateWindow = now
+			m.gateUsed = 0
+		}
+		if m.gateUsed < gateLoginPerMin {
+			m.gateUsed++
+			return
+		}
+		m.gateCond.Wait() // 预算耗尽：释放锁等待下个窗口广播
+	}
+}
+
+// GatePump 每分钟窗口到点后广播，唤醒排队中的重登重新竞争预算。
+// 由 main 的后台协程每 30 秒调用；无等待者时是空转，开销可忽略。
+func (m *Manager) GatePump() {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	if time.Since(m.gateWindow) < time.Minute {
+		return
+	}
+	m.gateWindow = time.Now()
+	m.gateUsed = 0
+	m.gateCond.Broadcast()
 }
 
 // New 创建多账号客户端注册表。
 func New(baseURL string, vision zhidao.VisionConfig, st Store) *Manager {
-	return &Manager{
+	m := &Manager{
 		baseURL: baseURL,
 		vision:  vision,
 		st:      st,
 		clients: make(map[string]*zhidao.Client),
 	}
+	m.gateCond = sync.NewCond(&m.gateMu)
+	return m
 }
 
 // ensure 返回账号对应的独立客户端（不存在则创建空壳）。
@@ -86,7 +130,14 @@ func (m *Manager) AnyClientWithAccount() (string, scheduler.Client, bool) {
 	return acct, m.clients[acct], true
 }
 
+// gateLoginPerMin 全账号合计每分钟 doLogin 上限。平台登录限流实测「登录失败次数过多，
+// 请 30 分钟后重试」按账号/IP 计数；2 次/分钟是保守下限，10 账号同时失效也不打爆 IP。
+// 反代后跨 IP 共享配额，此闸门仍按服务出口 IP 收敛所有账号的登录流量。
+const gateLoginPerMin = 2
+
 // Relogin 对指定账号客户端执行自动重登（返回是否已重登与错误）。
+// 走全局重登频率闸门：多账号并发重登时，实际触达平台 doLogin 的速率被收敛到
+// gateLoginPerMin/分钟，超出预算的账号排队等待，杜绝把出口 IP 刷到平台锁号。
 func (m *Manager) Relogin(acct string) (bool, error) {
 	m.mu.Lock()
 	c, ok := m.clients[acct]
@@ -94,6 +145,7 @@ func (m *Manager) Relogin(acct string) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("账号 %s 未注册", acct)
 	}
+	m.gateWait()
 	return c.ReloginIfNeeded()
 }
 
@@ -117,6 +169,7 @@ func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 }
 
 // LoginByPassword 用账密登录该账号独立客户端；成功后加密密码与 token 落库。
+// 管理员入口（换绑定新账密）不受全局重登闸门约束，仍走平台登录接口。
 func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (string, error)) (string, error) {
 	c := m.ensure(acct)
 	token, err := c.Login(acct, password)

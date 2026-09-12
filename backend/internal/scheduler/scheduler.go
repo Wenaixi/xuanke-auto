@@ -112,7 +112,7 @@ type Scheduler struct {
 	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流 + 退避计时基准）
 	reloginFail      map[string]int       // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
 	relogging        map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
-	reloginMu        sync.Mutex           // 重登防重入（全局限一把，账号并发低）
+	reloginMu        sync.Mutex           // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
 	reloginResults   chan reloginResult   // 重登结果回传（异步结果在 tick 主循环统一处理）
 
 	chainMu sync.Mutex
@@ -418,8 +418,9 @@ func (s *Scheduler) reloginBackoff(n int) time.Duration {
 
 // maybeRelogin 对指定账号异步自动重登：防重入 + 30s 节流 + 失败指数退避（安全审计要求），
 // 成功后落库新 token 并补一次探测。失败/未重登会复位失效标记，退避窗口过后仍可再试。
-// 锁纪律：决策段持有 reloginMu 串行化"是否发起"；所有 map 读写一律持 s.mu（含 goroutine 内），
-// 避免 reloginMu 与 s.mu 混用导致的并发读写数据竞争。
+// 锁纪律：reloginMu 只串行化"决策是否发起"这一段（纯 map 读写，微秒级），
+// 实际重登（Login）在锁外 goroutine 执行——一个账号重登慢（Vision 最坏 2 分钟）
+// 不会拖延其他账号的重登与提交（安全审计 MINOR 8：全局锁跨长 Login 的修复）。
 func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
@@ -458,9 +459,9 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
-		s.tokenValid[acct] = false
 		if err == nil && relogged {
 			delete(s.reloginFail, acct) // 成功清零失败计数，退避表归零
+			s.tokenValid[acct] = false
 			// 新 token 落库（持久化，重启后恢复不丢）
 			if client, ok := s.clients.ClientFor(acct); ok {
 				if tok := client.Token(); tok != "" {
@@ -480,6 +481,8 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
 			return
 		}
+		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
+		// 不再误报"有效"（安全审计 MINOR 7）。退避窗口过后下个探测周期会再次尝试恢复。
 		s.mu.Unlock()
 		if err != nil {
 			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)

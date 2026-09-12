@@ -152,6 +152,7 @@ func (s *Scheduler) resetProbe() {
 }
 
 // resetReloginAtForTest 清空指定账号的重登节流、失败计数与进行中标记（测试专用）。
+// 锁序与 maybeRelogin 决策段一致（reloginMu 外层 + s.mu 内层），避免测试与调度器并发死锁。
 func (s *Scheduler) resetReloginAtForTest(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
@@ -476,7 +477,8 @@ func TestTokenInvalidTriggersRelogin(t *testing.T) {
 	}
 }
 
-// TestReloginFailureRecoversNextCycle 重登失败不卡死：复位失效标记，下个 30s 节流窗口后可再触发重登。
+// TestReloginFailureRecoversNextCycle 重登失败不卡死：失效标记保持（UI 不再误报"有效"），
+// 下个 30s 节流窗口过后仍可再触发重登。
 func TestReloginFailureRecoversNextCycle(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.err = zhidao.ErrUnauthorized // 探测命中失效
@@ -499,11 +501,11 @@ func TestReloginFailureRecoversNextCycle(t *testing.T) {
 	if s.TokenValidFor("acct1") {
 		t.Fatal("重登进行中 token 应显示失效")
 	}
-	// 放行：重登返回失败 → 复位失效标记
+	// 放行：重登返回失败 → 失效标记保持（安全审计 MINOR 7：不得误报"有效"）
 	close(relogDone)
 	time.Sleep(200 * time.Millisecond)
-	if !s.TokenValidFor("acct1") {
-		t.Fatal("重登失败后失效标记应复位（下个节流窗口可再试）")
+	if s.TokenValidFor("acct1") {
+		t.Fatal("重登失败后失效标记应保持（UI 显示『已失效·自动恢复中』，不误报有效）")
 	}
 	// 下个 30s 节流窗口后可再触发重登（探测仍命中失效；第二次钩子已非阻塞，重登快速返回失败）
 	resetReloginDone := make(chan bool)

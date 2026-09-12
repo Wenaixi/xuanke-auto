@@ -117,6 +117,15 @@ func main() {
 	}
 	sched.Start()
 
+	// 全局重登频率闸门的分钟推进器：每 30 秒检查一次窗口翻页，翻页时放行队列中的重登。
+	go func() {
+		tk := time.NewTicker(30 * time.Second)
+		defer tk.Stop()
+		for range tk.C {
+			accts.GatePump()
+		}
+	}()
+
 	// 会话库（12 小时过期）
 	sessions := session.New(12 * time.Hour)
 

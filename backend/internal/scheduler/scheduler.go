@@ -141,6 +141,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+	s.reloginResults = make(chan reloginResult, 8)
 	s.state.OpenTime = openTime
 	return s
 }
@@ -239,6 +240,13 @@ func (s *Scheduler) Start() {
 				return
 			case <-ticker.C:
 				s.tick()
+			case res := <-s.reloginResults:
+				// 重登成功回传（主循环统一处，避免 goroutine 并发写 s.lastProbe 竞态）
+				if res.relogged && res.err == nil {
+					s.mu.Lock()
+					s.lastProbe = time.Time{} // 补一次探测
+					s.mu.Unlock()
+				}
 			}
 		}
 	}()
@@ -421,7 +429,6 @@ func (s *Scheduler) maybeRelogin(acct string) {
 				}
 			}
 			// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
-			s.lastProbe = time.Time{}
 			s.reloginResults <- reloginResult{acct: acct, relogged: true, err: nil}
 			s.mu.Unlock()
 			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)

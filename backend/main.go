@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
@@ -80,7 +81,16 @@ func main() {
 				c.VisionBaseURL = v
 			}
 			if v, ok := kv["vision_key"]; ok {
-				c.VisionAPIKey = v
+				// vision_key 加密落库（v5）：读回时解密；旧明文值（v4 及更早落库）无 enc: 前缀则原样使用
+				if strings.HasPrefix(v, "enc:") {
+					if plain, err := decrypt(strings.TrimPrefix(v, "enc:")); err == nil {
+						c.VisionAPIKey = plain
+					} else {
+						log.Printf("[main] 解密 vision_key 失败，回退空值: %v", err)
+					}
+				} else {
+					c.VisionAPIKey = v
+				}
 			}
 			if v, ok := kv["vision_model"]; ok {
 				c.VisionModel = v
@@ -131,7 +141,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	apiHandler := api.Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, cfg.AdminToken,
-		rt.Get().ActivationEnabled, encrypt, rt)
+		rt.Get().ActivationEnabled, encrypt, decrypt, rt)
 	mux.Handle("/", web.SpaHandler())
 
 	addr := ":" + cfg.Port

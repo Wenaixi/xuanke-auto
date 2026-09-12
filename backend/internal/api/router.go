@@ -22,10 +22,11 @@ func jsonContentType(r *http.Request) bool {
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
 func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	accts *accounts.Manager, sessions *session.Store, openTime, adminToken string,
-	activationEnabled bool, encrypt func(string) (string, error), rt *runtime.Store) http.Handler {
+	activationEnabled bool, encrypt, decrypt func(string) (string, error), rt *runtime.Store) http.Handler {
 
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
-		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled, Encrypt: encrypt}
+		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
+		Encrypt: encrypt, Decrypt: decrypt}
 	limiter := newLoginLimiter()
 
 	mux.HandleFunc("GET /api/health", d.handleHealth)

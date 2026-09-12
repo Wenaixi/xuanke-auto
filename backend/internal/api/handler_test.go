@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"xuanke-auto/backend/internal/db"
 	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
+	"xuanke-auto/backend/internal/secure"
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
 	"xuanke-auto/backend/internal/zhidao"
@@ -29,6 +31,7 @@ type testDeps struct {
 	sched    *scheduler.Scheduler
 	sessions *session.Store
 	accts    *accounts.Manager
+	dec      func(string) (string, error) // 注入的解密函数（测试断言加密还原用）
 }
 
 func newTestDeps(t *testing.T) *testDeps {
@@ -101,9 +104,16 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 		VisionModel:       "m",
 		OpenTime:          "2026-09-13 09:00:00",
 	})
+	// 与 main 一致：注入真实 AES-256-GCM 加密（凭据与 vision_key 落库前加密）
+	masterKey := make([]byte, 32)
+	if _, err := rand.Read(masterKey); err != nil {
+		t.Fatal(err)
+	}
+	enc := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
+	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
 	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken,
-		rt.Get().ActivationEnabled, func(s string) (string, error) { return "ENC:" + s, nil }, rt)
-	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts}
+		rt.Get().ActivationEnabled, enc, dec, rt)
+	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, dec: dec}
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path, body string) (int, map[string]any) {
@@ -363,6 +373,36 @@ func TestAdminConfigHotReload(t *testing.T) {
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":"bad-time"}`, adminTok)
 	if j["code"].(float64) == 0 {
 		t.Fatalf("无效打开时间不应接受: %v", j)
+	}
+}
+
+// TestAdminConfigVisionKeyEncryptedAtRest vision_key 加密落库锁定：
+// settings 表内只存 enc: 前缀密文（绝不出现明文），main 启动按同规则解密还原。
+func TestAdminConfigVisionKeyEncryptedAtRest(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	const plain = "***REMOVED***-rest-secret"
+	// PUT 更新 Vision key（明文只出现在请求里）
+	code, j := doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"vision_api_key":"`+plain+`"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("更新 Vision key 失败: %d %v", code, j)
+	}
+	kv, err := d.store.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := kv["vision_key"]
+	// 落库值必须带 enc: 前缀，且不含明文
+	if !strings.HasPrefix(got, "enc:") {
+		t.Fatalf("vision_key 应加密落库（enc: 前缀）: %q", got)
+	}
+	if strings.Contains(got, plain) {
+		t.Fatalf("settings 表出现 vision_key 明文: %q", got)
+	}
+	// 复刻 main.go LoadSettings 恢复规则：enc: 前缀 → 解密还原为原明文
+	restored, err := d.dec(strings.TrimPrefix(got, "enc:"))
+	if err != nil || restored != plain {
+		t.Fatalf("vision_key 解密还原失败: %q -> %q (%v)", got, restored, err)
 	}
 }
 

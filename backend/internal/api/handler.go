@@ -33,11 +33,26 @@ type Deps struct {
 	// Runtime 进程内配置中心（管理员热重载生效）。
 	Runtime *runtime.Store
 	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；admin 账号的密码）。
+	// Encrypt 数据加密函数（main 注入：secure.Encrypt，凭据与 vision_key 落库前加密）。
+	Encrypt func(string) (string, error)
+	// Decrypt 数据解密函数（main 注入：secure.Decrypt，vision_key 读回时解密）。
+	Decrypt func(string) (string, error)
 	AdminToken string
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
-	// Encrypt 密码加密（secure.Encrypt 绑定主密钥闭包）。
-	Encrypt func(string) (string, error)
+}
+
+// secureEncrypt 用注入的 Encrypt 加密敏感值，并加 enc: 前缀标记（main 读回时据此解密）；
+// 未注入 Encrypt 时原样返回（测试环境直构），读回时按旧版明文兼容处理。
+func (d *Deps) secureEncrypt(v string) (string, error) {
+	if d.Encrypt == nil {
+		return v, nil
+	}
+	enc, err := d.Encrypt(v)
+	if err != nil {
+		return "", err
+	}
+	return "enc:" + enc, nil
 }
 
 // writeJSON 统一 JSON 响应：{"code":0,"data":...,"msg":""}
@@ -380,14 +395,23 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 		cfg := d.Runtime.Get()
-		// 配置变更落库（settings 全量替换，重启后恢复）
-		_ = d.Store.SaveSettings(map[string]string{
+		// 配置变更落库（settings 全量替换，重启后恢复）。vision_key 加密落库：
+		// 与凭据同强度（AES-256-GCM），settings 表内永不出现明文密钥。
+		visionKey, vErr := d.secureEncrypt(cfg.VisionAPIKey)
+		if vErr != nil {
+			writeJSON(w, 1, nil, "配置加密失败: "+vErr.Error())
+			return
+		}
+		if sErr := d.Store.SaveSettings(map[string]string{
 			"activation_enabled": strconv.FormatBool(cfg.ActivationEnabled),
 			"vision_base_url":    cfg.VisionBaseURL,
-			"vision_key":         cfg.VisionAPIKey,
+			"vision_key":         visionKey,
 			"vision_model":       cfg.VisionModel,
 			"open_time":          cfg.OpenTime,
-		})
+		}); sErr != nil {
+			log.Printf("[api] 配置落库失败: %v", sErr)
+			// 落库失败不阻塞生效（内存已改），但必须如实记录，避免重启后配置回退无感知
+		}
 		// 热重载下游组件：验证码识别配置推给全部账号客户端；打开时间由调度器运行时读取
 		d.Accounts.SetVision(zhidao.VisionConfig{
 			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,

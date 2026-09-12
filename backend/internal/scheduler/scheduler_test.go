@@ -151,12 +151,14 @@ func (s *Scheduler) resetProbe() {
 	s.mu.Unlock()
 }
 
-// resetReloginAtForTest 清空指定账号的重登节流与进行中标记（测试专用：模拟 30s 节流窗口已过）。
+// resetReloginAtForTest 清空指定账号的重登节流、失败计数与进行中标记（测试专用）。
 func (s *Scheduler) resetReloginAtForTest(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.reloginAt[acct] = time.Time{}
-	delete(s.reloginFail, acct) // 清失败计数：避免上次失败退避影响本次断言
+	delete(s.reloginFail, acct)
 	delete(s.relogging, acct)
 }
 
@@ -520,6 +522,28 @@ func TestReloginFailureRecoversNextCycle(t *testing.T) {
 		t.Fatal("30s 节流窗口过后应再次触发重登")
 	}
 	close(resetReloginDone) // 收尾：若第二次重登仍在阻塞则放行，避免 Scheduler.Stop 泄漏 goroutine
+}
+
+// TestSubmitUnauthorizedTriggersRelogin 提交链命中 token 失效（非探测路径）也触发自动重登：
+// 探测只走 order[0] 账号，其他账号的 token 失效靠报名提交命中 ErrUnauthorized 感知——
+// 这是 M1（非探测账号失效无感知）的专项回归测试。
+func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
+	fc := newFakeClient(true)                    // 窗口已开，探测正常
+	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 探测正常但提交命中失效 → 状态置 failed（教务令牌失效，自动重登中）
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+	time.Sleep(100 * time.Millisecond)
+	fc.mu.Lock()
+	relogCalls := fc.relogCalls
+	fc.mu.Unlock()
+	if relogCalls < 1 {
+		t.Fatal("提交链命中 token 失效后应触发自动重登")
+	}
 }
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：

@@ -518,6 +518,11 @@ func (s *Scheduler) submitAll() {
 	}
 	var chains []chain
 	for acct, ts := range s.acctTargets {
+		// 账号已被管理员删除（accounts.Remove）：不再为其生成提交链，
+		// 残留的目标/客户端不经此路径继续报名（删账号后彻底隔离）。
+		if _, ok := s.clients.ClientFor(acct); !ok {
+			continue
+		}
 		byPub := map[int][]Target{}
 		for _, t := range ts {
 			byPub[t.PublishID] = append(byPub[t.PublishID], t)

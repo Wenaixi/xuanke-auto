@@ -466,6 +466,9 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "删除失败: "+err.Error())
 		return
 	}
+	// 调度器与账号注册表同步隔离：清空内存目标（下个 tick 不再提交）+ 移除客户端。
+	d.Sched.SetTargetsForAccount(req.Account, nil)
+	d.Accounts.Remove(req.Account)
 	d.Store.AppendLog("admin", 0, "delete_account", "删除账号 "+req.Account, true)
 	writeJSON(w, 0, nil, "已删除账号 "+req.Account)
 }

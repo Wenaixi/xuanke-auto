@@ -111,10 +111,14 @@ type fakeAccts struct {
 	relogErr      error  // 重登错误（可编程）
 	relog         func() // 重登钩子（可编程，记录是否被调用）
 	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
-	removed       map[string]bool // 已删除账号（ClientFor/AnyClient 返回不存在）
+
+	mu      sync.Mutex   // 保护 removed（测试并发读写）
+	removed map[string]bool // 已删除账号（ClientFor 返回不存在）
 }
 
 func (f *fakeAccts) ClientFor(acct string) (Client, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.removed != nil && f.removed[acct] {
 		return nil, false
 	}
@@ -474,6 +478,41 @@ func TestWindowOpenedWithEmptyPublishes(t *testing.T) {
 	fc.mu.Unlock()
 	if calls == 0 {
 		t.Fatal("窗口到点空列表时也应尝试提交（黄金期不容浪费）")
+	}
+}
+
+// TestDeletedAccountStopsSubmitting 账号被管理员删除后，调度器不再为其生成提交链：
+// 残留内存目标不得继续真实报名（删账号 = 彻底隔离）。
+func TestDeletedAccountStopsSubmitting(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开，探测正常
+	s := New(&fakeAccts{c: fc, removed: map[string]bool{}}, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 账号未删：正常提交成功
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+	fc.mu.Lock()
+	calls := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if calls == 0 {
+		t.Fatal("账号存在时应正常提交")
+	}
+
+	// 管理员删除账号：ClientFor 返回不存在 → 调度器跳过该账号目标
+	fa := s.clients.(*fakeAccts)
+	fa.mu.Lock()
+	fa.removed["acct1"] = true
+	fa.mu.Unlock()
+	fc.mu.Lock()
+	callsBefore := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	time.Sleep(300 * time.Millisecond) // 等待若干 tick
+	fc.mu.Lock()
+	callsAfter := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if callsAfter != callsBefore {
+		t.Fatalf("删除后不应再提交：删除前 %d 次，删除后 %d 次", callsBefore, callsAfter)
 	}
 }
 

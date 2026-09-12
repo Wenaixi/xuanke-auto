@@ -109,6 +109,21 @@ func (m *Manager) ClientFor(acct string) (scheduler.Client, bool) {
 	return c, ok
 }
 
+// Remove 移除账号客户端与登录顺序（管理员删除账号后调用）。
+// 调度器据此不再为该账号生成提交链（submitAll 遍历时 ClientFor 返回不存在即跳过）。
+// 已在跑的链不会被打断（生命周期归调度器 chains 标记管理），但下个 tick 起彻底隔离。
+func (m *Manager) Remove(acct string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.clients, acct)
+	for i, a := range m.order {
+		if a == acct {
+			m.order = append(m.order[:i], m.order[i+1:]...)
+			break
+		}
+	}
+}
+
 // AnyClient 返回任一已登录账号客户端（课程数据全校共享，任一账号可探测）。
 func (m *Manager) AnyClient() (scheduler.Client, bool) {
 	m.mu.Lock()

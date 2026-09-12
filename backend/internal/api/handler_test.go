@@ -558,3 +558,33 @@ func TestLoginRateLimit(t *testing.T) {
 		t.Fatalf("期望触发限流 code=429，实际 code 序列: %v", codes)
 	}
 }
+
+// TestLoginRejectsFormContentType 登录/激活接口必须拒绝非 JSON 提交：
+// 跨站表单 POST（application/x-www-form-urlencoded）无法携带 JSON Content-Type，
+// 从源头封堵 CSRF 触发的副作用登录（攻击者借受害者 IP 分布式爆破）。
+func TestLoginRejectsFormContentType(t *testing.T) {
+	d := newTestDeps(t)
+	// 表单编码提交登录（模拟恶意跨站表单）：应被 403 拒绝
+	req := httptest.NewRequest("POST", "/api/login", strings.NewReader("account=a&password=b"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+	}
+	if j["code"].(float64) != 403 {
+		t.Fatalf("表单提交登录应被拒绝 code=403，实际 %v", j)
+	}
+	// 表单编码提交激活：同样拒绝
+	req = httptest.NewRequest("POST", "/api/activate", strings.NewReader("account=a&code=XK-123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatalf("激活响应不是 JSON: %s", rec.Body.String())
+	}
+	if j["code"].(float64) != 403 {
+		t.Fatalf("表单提交激活应被拒绝 code=403，实际 %v", j)
+	}
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/runtime"
@@ -9,6 +10,13 @@ import (
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/store"
 )
+
+// jsonContentType 检查请求体是否为 JSON（反跨站表单 POST 的 CSRF 缓解）。
+// 前端统一用 fetch+JSON，必带 application/json；跨站表单提交是
+// application/x-www-form-urlencoded，无法伪造该头 → 直接 403 拒绝副作用请求。
+func jsonContentType(r *http.Request) bool {
+	return strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json")
+}
 
 // Register 注册所有 API 路由到 mux，并返回包装了安全中间件的根 handler。
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
@@ -23,6 +31,11 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	// 登录接口限流（激活码已取代部署口令 gate；未启用激活码机制时登录即发会话）
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
+		// CSRF 缓解：仅接受 JSON 提交（跨站表单 POST 无法伪造该头）
+		if !jsonContentType(r) {
+			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			return
+		}
 		if !limiter.allow(clientIP(r)) {
 			writeJSON(w, 429, nil, "登录尝试过于频繁，请稍后再试")
 			return
@@ -31,6 +44,10 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	})
 	// 激活接口（登录后未激活才需要，未认证；机制关闭时 handler 直接拒绝）
 	mux.HandleFunc("POST /api/activate", func(w http.ResponseWriter, r *http.Request) {
+		if !jsonContentType(r) {
+			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			return
+		}
 		if !limiter.allow(clientIP(r)) {
 			writeJSON(w, 429, nil, "激活尝试过于频繁，请稍后再试")
 			return

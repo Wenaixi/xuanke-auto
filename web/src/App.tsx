@@ -77,20 +77,20 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [current])
 
-  // 桌面版壁纸“边滚边露底、触底冻结”：滚动时先一格格露出水墨图下方，
-  // 露到图片底边即停——再往下滚整张图冻住不动（用户明确要求）。
-  // 实现：把位移写进 canvas-bg 上的 --bg-shift 变量（CSS 桌面媒体查询消费），
-  // 移动端不消费该变量，fixed 贴顶钉住视口、纹丝不动，逻辑只在桌面生效。
+  // 桌面版壁纸“边滚边露底、触底冻结”：边滚边露出水墨图下方，露到底边即停——
+  // 再往下滚整张图冻住不动（用户明确要求）。位移量 --bg-shift 写在真实 <img>
+  // 的 transform 上，按“图片真实高度 - 视口高”封顶，移动端不消费恒为 0 贴顶。
   useEffect(() => {
-    const el = document.querySelector<HTMLElement>(".canvas-bg")
-    if (!el) return
+    const img = document.querySelector<HTMLElement>(".canvas-bg-img")
+    if (!img) return
     let frame = 0
     const apply = () => {
       const vh = window.innerHeight
-      const imgH = vh * 1.6 /* 桌面端 160% 放大后图片高度 = 视口高 * 1.6 */
-      const maxShift = imgH - vh /* 最多能露出的图片高度（160% 多出的 60%） */
+      /* 图片真实渲染高度：160% 宽按原比例等比放大后的实际像素高 */
+      const imgH = img.getBoundingClientRect().height
+      const maxShift = Math.max(0, imgH - vh) /* 最多可露出的高度（图片高超出视口高的部分） */
       const ratio = Math.min(1, window.scrollY / maxShift) /* 滚动进度封顶 1 */
-      el.style.setProperty("--bg-shift", `${ratio * maxShift}px`)
+      img.style.setProperty("--bg-shift", `${ratio * maxShift}px`)
       frame = 0
     }
     const onScroll = () => {
@@ -111,7 +111,12 @@ export default function App() {
       <ToastProvider>
         {/* 水墨画布背景层：固定全屏于内容之下（z-index 0），路由页面在 .app-content 层（z-index 1）上 */
         }
-        <div className="canvas-bg" aria-hidden />
+        <div className="canvas-bg" aria-hidden>
+          {/* 水墨图本体（真实 <img>，方便量测实际渲染高度） */ }
+          <img className="canvas-bg-img" src="/bg.jpg" alt="" draggable={false} />
+          {/* 深黑渐变遮罩：盖住图片但不随其位移，保证白字任意亮度可读 */ }
+          <div className="canvas-bg-mask" />
+        </div>
         <main className="app-content">
           {sessionToken ? (
             inAdmin || current === adminName ? (

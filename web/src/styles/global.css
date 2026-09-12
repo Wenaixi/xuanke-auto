@@ -73,21 +73,45 @@ body {
    挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
    注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
    避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
+/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰。
+   挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
+   注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
+   避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
 .canvas-bg {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background-image:
-    linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%),
-    url("/bg.jpg");
-  /* 默认（移动端）：fixed 钉住视口不随滚动，水墨图放大至 180% 宽，贴顶对齐；
-     桌面端经媒体查询借助 --bg-shift 变量做“边滚边露底、触底冻结” */
-  background-size: 100% 100%, 180% auto;
-  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，fixed 不随文档纵向滚动；
-     位置偏移量 --bg-shift 由 App.tsx 按滚动距离写入（移动端恒为 0，即全程贴顶） */
-  background-position: center, center var(--bg-shift, 0px);
-  background-repeat: no-repeat;
+  overflow: hidden;
+}
+
+/* 水墨图本体：真实 <img> 元素，方便 JS 直接量测真实渲染高度。
+   默认（移动端）：180% 宽 + 贴顶，fixed 容器内纹丝不动，不随滚动 */
+.canvas-bg-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 180%;
+  max-width: none;
+  height: auto;
+  display: block;
+}
+
+/* 深黑渐变遮罩：盖在图片之上（DOM 顺序在 img 后），不随图片位移，
+   保证任意亮度下白字清晰 */
+.canvas-bg-mask {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%);
+}
+
+/* 桌面端（鼠标设备）：160% 宽；纵向位移 --bg-shift 由 App.tsx 按滚动写入——
+   边滚边露出图片下方，位移到“图片高 - 视口高”即封顶冻结，再滚图片不动 */
+@media (hover: hover) and (pointer: fine) {
+  .canvas-bg-img {
+    width: 160%;
+    transform: translateY(var(--bg-shift, 0px));
+  }
 }
 
 /* 桌面端（鼠标设备）：fixed 钉住视口，图片层纵向位置由 App.tsx 按

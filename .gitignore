@@ -1,17 +1,54 @@
-# Go
-backend/xuanke.exe
-backend/*.exe
-backend/data/
-*.db
+# ============= 归档区（Python 老版逆向产物，不再参与开发） =============
+# 逆向脚本与抓包归档到 legacy/，全部忽略（README 内说明用途即可）
+legacy/
 
-# Node
+# ps1/sh/bat 本地操作脚本不入库
+*.ps1
+*.bat
+*.sh
+
+# ============= Go 构建产物 =============
+# 发布 exe（根目录），开发/测试 exe（backend/）全忽略
+*.exe
+backend/xuanke.exe
+backend/xuanke-dev.exe
+backend/xuanke-e2e.exe
+backend/xuanke-e2e.exe~
+
+# Go 构建缓存
+*.test
+*.out
+
+# ============= 数据与密钥（绝不入库） =============
+# 数据库与 WAL
+*.db
+*.db-wal
+*.db-shm
+*.db.bak
+
+# 加密主密钥（与 db 一起备份迁移，禁止进 git）
+.master_key
+
+# 数据目录整体忽略
+# 注意：backend/data 是指向根目录 data 的软连接（Junction），一并忽略
+data/
+backend/data/
+
+# ============= Node / 前端构建 =============
 web/node_modules/
 web/dist/
 backend/web/dist/
 
-# 系统与缓存
-__pycache__/
-.omc/
-data/
+# ============= 运行日志 =============
+*.log
+server.log
+server.err.log
 backend/server-dev.out.log
 backend/server-dev.err.log
+
+# ============= 系统与缓存 =============
+__pycache__/
+*.pyc
+.omc/
+.DS_Store
+Thumbs.db

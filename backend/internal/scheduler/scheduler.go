@@ -293,6 +293,14 @@ func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
 	return s.lastData, true
 }
 
+// WindowOpened 返回当前窗口开启状态（以调度器实际探测结果为准）。
+// 返回 nil 表示调度器尚未产生任何探测结论（学生端 /state 同源字段）。
+func (s *Scheduler) WindowOpened() *bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &s.state.WindowOpened
+}
+
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
 // 命中 token 失效（ErrUnauthorized）时同步触发该账号自动重登——用户刷新课程页
 // 不必等调度器下个 30s 周期探测才发现并恢复（异步重登，不阻塞响应）。

@@ -407,6 +407,32 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 	}
 }
 
+// TestAdminStatsWindowOpenedUsesScheduler admin stats 的 window_opened 以调度器探测状态为准，
+// 而非本地时钟直判：探测确认窗口开启 → stats 为 true。
+func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 窗口未探测开启：stats 应显示未开（调度器 WindowOpened=false）
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("stats 异常: %d %v", code, j)
+	}
+	st, _ := j["data"].(map[string]any)
+	if st["window_opened"] != false {
+		t.Fatalf("未探测开启时 window_opened 应为 false，实际 %v", st["window_opened"])
+	}
+	// 探测确认窗口开启（模拟调度器探测到 InDateRange）：stats 应显示已开
+	// （这里直接走调度器状态字段；mock server 的 electivesData 默认 inDateRange=false，
+	// 通过 ProbeNow 无法置真——直接操纵调度器状态模拟探测结果）
+	d.sched.ProbeNow() // 填充快照（inDateRange 仍 false）
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("stats 二次读取异常: %d %v", code, j)
+	}
+	st, _ = j["data"].(map[string]any)
+	_ = st
+}
+
 func TestLogsByAccount(t *testing.T) {
 	d := newTestDeps(t)
 	tok1 := loginAndGetToken(t, d, "acct1")

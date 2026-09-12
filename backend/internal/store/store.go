@@ -136,6 +136,12 @@ func (s *Store) SaveSuccess(acct string, classID int) error {
 	return err
 }
 
+// RemoveSuccess 删除某账号某课程的已报名成功记录（骑驴找马换课后清理旧保底课记录）。
+func (s *Store) RemoveSuccess(acct string, classID int) error {
+	_, err := s.db.Exec("DELETE FROM success WHERE account = ? AND class_id = ?", acct, classID)
+	return err
+}
+
 // LoadSuccess 读取全部成功记录（map[账号][]classID）。
 func (s *Store) LoadSuccess() (map[string][]int, error) {
 	rows, err := s.db.Query("SELECT account, class_id FROM success")

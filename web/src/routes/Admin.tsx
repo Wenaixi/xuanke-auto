@@ -683,7 +683,7 @@ function LogsTab({ sessionToken }: { sessionToken: string }) {
             </div>
           ))
         ) : (
-          <div className="py-8 text-center text-neutral-600 font-mono">NO LOGS</div>
+          <div className="py-8 text-center text-neutral-600 font-mono">暂无日志</div>
         )}
       </div>
     </Card>

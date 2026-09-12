@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -25,7 +24,6 @@ import (
 
 func main() {
 	cfg := config.Load()
-	maybeStartTerminal()
 
 	// 公网安全：管理口令必填（用于生成激活码），否则拒绝启动
 	if cfg.AdminToken == "" {
@@ -181,22 +179,4 @@ func openBrowser(url string) {
 	start := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	start.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	_ = start.Start()
-}
-
-// maybeStartTerminal 双击启动（无控制台，如 -H windowsgui 构建）时弹出独立终端显示日志；
-// 命令行运行（控制台子系统有终端）时跳过，避免重复弹窗。
-func maybeStartTerminal() {
-	// 有终端（控制台程序/命令行）→ 直接返回
-	if _, err := os.Stdout.Stat(); err == nil {
-		return
-	}
-	// 无控制台（GUI 双击）→ conhost 拉起本程序到新控制台，旧进程隐藏后退出
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	cmd := exec.Command("conhost.exe", exe)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	_ = cmd.Start()
-	os.Exit(0)
 }

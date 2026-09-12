@@ -47,19 +47,48 @@ type Config struct {
 // 数据目录固定为可执行文件同目录下的 data/（data/.env 含管理员账密/激活码开关等）。
 // 首次运行没有 data/.env 时自动写入随机管理员账密与默认配置，之后每次读取。
 func Load() Config {
+	envPath := filepath.Join(dataDir(), ".env")
+	ensureEnvFile(envPath)
+	loadDotEnv(envPath)
 	dbPath := envOr("XUANKE_DB", filepath.Join(dataDir(), "xuanke.db"))
-	ensureEnvFile(filepath.Join(dataDir(), ".env"))
 	return Config{
-		Port:       envOr("XUANKE_PORT", "3091"),
-		DBPath:     dbPath,
-		OpenTime:   envOr("XUANKE_OPEN_TIME", "2026-09-13 09:00:00"),
-		BaseURL:    "https://www.zhidao.fj.cn",
-		SFBaseURL:  envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
-		SFAPIKey:   os.Getenv("SF_API_KEY"),
-		SFModel:    envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
+		Port:     envOr("XUANKE_PORT", "3091"),
+		DBPath:   dbPath,
+		OpenTime: envOr("XUANKE_OPEN_TIME", "2026-09-13 09:00:00"),
+		BaseURL:  "https://www.zhidao.fj.cn",
+		SFBaseURL: envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
+		SFAPIKey:  os.Getenv("SF_API_KEY"),
+		SFModel:   envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
 		AdminToken: os.Getenv("XUANKE_ADMIN_TOKEN"),
 		AdminName:  os.Getenv("XUANKE_ADMIN_NAME"),
 		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") != "off",
+	}
+}
+
+// loadDotEnv 读取 data/.env 的键值对回填环境变量（真实环境变量优先，文件兜底）。
+// 这样 .env 既是“配置持久化”也是“当前生效值”，双击 exe 无需任何外部环境。
+func loadDotEnv(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if os.Getenv(key) == "" {
+			// 行内注释（#）截断，避免口令带上注释尾巴
+			if i := strings.Index(val, "#"); i >= 0 {
+				val = val[:i]
+			}
+			_ = os.Setenv(key, strings.TrimSpace(val))
+		}
 	}
 }
 

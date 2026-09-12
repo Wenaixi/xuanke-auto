@@ -11,14 +11,12 @@ import {
   BookOpen,
   CheckCircle2,
   Clock,
-  KeyRound,
   Layers,
   LogOut,
   RefreshCw,
   XCircle,
   HelpCircle,
 } from "lucide-react"
-import ActivationAdmin from "./ActivationAdmin"
 
 interface Props {
   account: Account
@@ -85,9 +83,6 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
     refetchInterval: 3000,
   })
 
-  // 激活码管理面板开关
-  const [adminOpen, setAdminOpen] = useState(false)
-
   // 本地每秒刷新倒计时，确保数字秒级平滑跳动
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -143,15 +138,6 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
               <BookOpen className="h-3.5 w-3.5 text-black" />
               <span>选课大厅</span>
               <ArrowUpRight className="h-3.5 w-3.5 text-black" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setAdminOpen(true)}
-              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
-            >
-              <KeyRound className="h-3.5 w-3.5" />
-              <span>激活码</span>
             </Button>
             <Button
               variant="outline"
@@ -475,9 +461,6 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
           </Card>
         </section>
       </div>
-
-      {/* 激活码管理面板 */}
-      <ActivationAdmin open={adminOpen} onClose={() => setAdminOpen(false)} />
 
       {/* 手机移动端底部悬浮操作栏 (纯黑白极简艺术) */}
       <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 bg-neutral-950/95 backdrop-blur-md border border-neutral-800 rounded-[var(--radius-lg)] p-3 flex items-center justify-between shadow-none">

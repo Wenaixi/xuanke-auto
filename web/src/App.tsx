@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
 import Select from "./routes/Select"
+import Admin from "./routes/Admin"
 import { ToastProvider } from "./components/ui/Toast"
 import { UNAUTHORIZED_EVENT } from "./api/client"
 import type { Account, Sessions } from "./types"
@@ -24,6 +25,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Sessions>(loadSessions)
   const [page, setPage] = useState<"dashboard" | "select">("dashboard")
   const [current, setCurrent] = useState<Account>("")
+  const [inAdmin, setInAdmin] = useState(false)
 
   const accounts = Object.keys(sessions)
   const sessionToken = current ? sessions[current] : undefined
@@ -34,6 +36,8 @@ export default function App() {
     localStorage.setItem("xk_sessions", JSON.stringify(next))
     setSessions(next)
     setCurrent(account)
+    // admin 账号登录后直接进入管理员界面
+    setInAdmin(account === "admin")
   }
 
   // 退出当前账号：仅移除该账号会话，其他账号保留
@@ -42,6 +46,7 @@ export default function App() {
     delete next[current]
     localStorage.setItem("xk_sessions", JSON.stringify(next))
     setSessions(next)
+    setInAdmin(false)
   }
 
   // 当前账号的会话被剔除后自动切到剩余账号（无账号则回登录页）
@@ -51,6 +56,8 @@ export default function App() {
     } else if (!current || !accounts.includes(current)) {
       setCurrent(accounts[0])
     }
+    // 当前账号已不是 admin 时退出管理态
+    if (current !== "admin") setInAdmin(false)
   }, [accounts, current])
 
   // 后端返回 401（会话过期）：剔除当前账号的失效令牌
@@ -68,18 +75,31 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [current])
 
-  const switchAccount = (acct: Account) => setCurrent(acct)
-
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         {sessionToken ? (
-          page === "dashboard" ? (
+          inAdmin || current === "admin" ? (
+            <Admin
+              account={current}
+              sessionToken={sessionToken}
+              onLogout={logout}
+              onBackToStudent={() => {
+                // 切回学生端：改用其他已登录账号，否则退出 admin
+                const others = accounts.filter((a) => a !== "admin")
+                setInAdmin(false)
+                if (others.length > 0) setCurrent(others[0])
+              }}
+            />
+          ) : page === "dashboard" ? (
             <Dashboard
               account={current}
               sessionToken={sessionToken}
               accounts={accounts}
-              onSwitchAccount={switchAccount}
+              onSwitchAccount={(acct) => {
+                setCurrent(acct)
+                setInAdmin(acct === "admin")
+              }}
               onLogout={logout}
               onGoSelect={() => setPage("select")}
             />

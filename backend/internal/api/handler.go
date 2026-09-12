@@ -336,11 +336,13 @@ func maskKey(v string) string {
 
 // AdminConfigView 配置响应（Vision key 脱敏回显）。
 type AdminConfigView struct {
-	ActivationEnabled bool   `json:"activation_enabled"`
-	VisionBaseURL     string `json:"vision_base_url"`
-	VisionAPIKey      string `json:"vision_api_key_masked"`
-	VisionModel       string `json:"vision_model"`
-	OpenTime          string `json:"open_time"`
+	ActivationEnabled  bool   `json:"activation_enabled"`
+	VisionBaseURL      string `json:"vision_base_url"`
+	VisionAPIKey       string `json:"vision_api_key_masked"`
+	VisionModel        string `json:"vision_model"`
+	CaptchaEngine      string `json:"captcha_engine"`
+	CaptchaConcurrency int    `json:"captcha_concurrency"`
+	OpenTime           string `json:"open_time"`
 }
 
 // handleAdminConfig GET 读取 / PUT 热更新系统配置。
@@ -350,19 +352,23 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		cfg := d.Runtime.Get()
 		writeJSON(w, 0, AdminConfigView{
-			ActivationEnabled: cfg.ActivationEnabled,
-			VisionBaseURL:     cfg.VisionBaseURL,
-			VisionAPIKey:      maskKey(cfg.VisionAPIKey),
-			VisionModel:       cfg.VisionModel,
-			OpenTime:          cfg.OpenTime,
+			ActivationEnabled:  cfg.ActivationEnabled,
+			VisionBaseURL:      cfg.VisionBaseURL,
+			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
+			VisionModel:        cfg.VisionModel,
+			CaptchaEngine:      cfg.CaptchaEngine,
+			CaptchaConcurrency: cfg.CaptchaConcurrency,
+			OpenTime:           cfg.OpenTime,
 		}, "")
 	case http.MethodPut:
 		var req struct {
-			ActivationEnabled *bool   `json:"activation_enabled"`
-			VisionBaseURL     *string `json:"vision_base_url"`
-			VisionAPIKey      *string `json:"vision_api_key"`
-			VisionModel       *string `json:"vision_model"`
-			OpenTime          *string `json:"open_time"`
+			ActivationEnabled  *bool   `json:"activation_enabled"`
+			VisionBaseURL      *string `json:"vision_base_url"`
+			VisionAPIKey       *string `json:"vision_api_key"`
+			VisionModel        *string `json:"vision_model"`
+			CaptchaEngine      *string `json:"captcha_engine"`
+			CaptchaConcurrency *int    `json:"captcha_concurrency"`
+			OpenTime           *string `json:"open_time"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -388,6 +394,17 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				c.VisionModel = *req.VisionModel
 				changed = append(changed, "vision_model")
 			}
+			if req.CaptchaEngine != nil {
+				c.CaptchaEngine = *req.CaptchaEngine
+				changed = append(changed, "captcha_engine")
+			}
+			if req.CaptchaConcurrency != nil {
+				if *req.CaptchaConcurrency < 1 {
+					*req.CaptchaConcurrency = 1
+				}
+				c.CaptchaConcurrency = *req.CaptchaConcurrency
+				changed = append(changed, "captcha_concurrency")
+			}
 			if req.OpenTime != nil {
 				if _, err := scheduler.FormatOpenTime(*req.OpenTime); err == nil {
 					c.OpenTime = *req.OpenTime
@@ -408,6 +425,8 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"vision_base_url":    cfg.VisionBaseURL,
 			"vision_key":         visionKey,
 			"vision_model":       cfg.VisionModel,
+			"captcha_engine":     cfg.CaptchaEngine,
+			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
 			"open_time":          cfg.OpenTime,
 		}); sErr != nil {
 			log.Printf("[api] 配置落库失败: %v", sErr)
@@ -417,17 +436,21 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		d.Accounts.SetVision(zhidao.VisionConfig{
 			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
 		})
+		// 识别引擎热切换（ddddocr 本地 / Vision 二选一）+ 并发限流信号量热收敛
+		applyCaptchaRecognizerFor(d.Runtime, d.Accounts)
 		if len(changed) == 0 {
 			writeJSON(w, 1, nil, "没有可应用的有效配置项")
 			return
 		}
 		d.Store.AppendLog("admin", 0, "config", "更新配置: "+strings.Join(changed, ", "), true)
 		writeJSON(w, 0, AdminConfigView{
-			ActivationEnabled: cfg.ActivationEnabled,
-			VisionBaseURL:     cfg.VisionBaseURL,
-			VisionAPIKey:      maskKey(cfg.VisionAPIKey),
-			VisionModel:       cfg.VisionModel,
-			OpenTime:          cfg.OpenTime,
+			ActivationEnabled:  cfg.ActivationEnabled,
+			VisionBaseURL:      cfg.VisionBaseURL,
+			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
+			VisionModel:        cfg.VisionModel,
+			CaptchaEngine:      cfg.CaptchaEngine,
+			CaptchaConcurrency: cfg.CaptchaConcurrency,
+			OpenTime:           cfg.OpenTime,
 		}, "配置已更新并生效")
 	default:
 		writeJSON(w, 405, nil, "方法不允许")

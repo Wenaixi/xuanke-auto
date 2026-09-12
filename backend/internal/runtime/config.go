@@ -15,6 +15,10 @@ type Config struct {
 	VisionAPIKey string
 	// VisionModel 验证码识别模型。
 	VisionModel string
+	// CaptchaEngine 验证码识别引擎（"vision"=硅基流动 Vision；"ddddocr"=本地 ddddocr）。
+	CaptchaEngine string
+	// CaptchaConcurrency 验证码识别并发上限（默认 1，串行识别防平台熔断）。
+	CaptchaConcurrency int
 	// OpenTime 选课开放时间（本地时区字符串，如 2026-09-13 09:00:00）。
 	OpenTime string
 	// OpenTimeParsed 解析后的开放时间（调度器直接使用）。

@@ -311,6 +311,8 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
   const [baseUrl, setBaseUrl] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
+  const [engine, setEngine] = useState("vision")
+  const [concurrency, setConcurrency] = useState(1)
   const [openTime, setOpenTime] = useState("")
   const [activationOn, setActivationOn] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -328,6 +330,8 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
       initializedRef.current = true
       setBaseUrl(loaded.vision_base_url)
       setModel(loaded.vision_model)
+      setEngine(loaded.captcha_engine || "vision")
+      setConcurrency(loaded.captcha_concurrency || 1)
       setOpenTime(loaded.open_time)
       setActivationOn(loaded.activation_enabled)
     }
@@ -340,6 +344,8 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
         activation_enabled: activationOn,
         vision_base_url: baseUrl.trim(),
         vision_model: model.trim(),
+        captcha_engine: engine,
+        captcha_concurrency: Math.max(1, concurrency || 1),
         open_time: openTime.trim(),
       }
       // 留空 = 不改动 key（脱敏回显无法完整回填）
@@ -421,6 +427,58 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
               onChange={(e) => setModel(e.target.value)}
               placeholder="Qwen/Qwen3-VL-30B-A3B-Instruct"
               className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
+        <CardHeader className="pb-2 border-b border-neutral-900">
+          <CardTitle className="text-sm font-medium tracking-wide text-white">识别引擎与并发</CardTitle>
+          <CardDescription className="text-xs text-neutral-500">
+            ddddocr 走本机 Python 识别（免 API 密钥）；并发上限默认 1（串行识别防平台熔断）
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-3 grid gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-neutral-400">识别引擎</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setEngine("vision")}
+                className={`flex-1 h-10 rounded-[var(--radius-sm)] border text-xs transition-colors ${
+                  engine === "vision"
+                    ? "border-white bg-white text-black font-medium"
+                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white"
+                }`}
+              >
+                硅基流动 Vision（云）
+              </button>
+              <button
+                onClick={() => setEngine("ddddocr")}
+                className={`flex-1 h-10 rounded-[var(--radius-sm)] border text-xs transition-colors ${
+                  engine === "ddddocr"
+                    ? "border-white bg-white text-black font-medium"
+                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white"
+                }`}
+              >
+                本地 ddddocr（离线）
+              </button>
+            </div>
+            <p className="text-[11px] text-neutral-600 mt-0.5">
+              {engine === "ddddocr"
+                ? "切换后将校验本机 Python + ddddocr 环境，缺失自动回退 Vision"
+                : "需在后台填写硅基流动接口地址、密钥与模型"}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-neutral-400">识别并发上限（默认 1，串行）</label>
+            <Input
+              type="number"
+              min={1}
+              max={16}
+              value={concurrency}
+              onChange={(e) => setConcurrency(Math.max(1, Math.min(16, Number(e.target.value) || 1)))}
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white"
             />
           </div>
         </CardContent>

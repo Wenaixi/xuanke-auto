@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,13 +62,15 @@ func main() {
 		accts.Restore(creds, decrypt)
 	}
 
-	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 开放时间）
+	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发 / 开放时间）
 	rt := runtime.New(runtime.Config{
-		ActivationEnabled: cfg.ActivationCodesEnabled,
-		VisionBaseURL:     cfg.SFBaseURL,
-		VisionAPIKey:      cfg.SFAPIKey,
-		VisionModel:       cfg.SFModel,
-		OpenTime:          cfg.OpenTime,
+		ActivationEnabled:  cfg.ActivationCodesEnabled,
+		VisionBaseURL:      cfg.SFBaseURL,
+		VisionAPIKey:       cfg.SFAPIKey,
+		VisionModel:        cfg.SFModel,
+		CaptchaEngine:      "vision",
+		CaptchaConcurrency: 1,
+		OpenTime:           cfg.OpenTime,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）
 	if kv, err := st.LoadSettings(); err != nil {
@@ -94,6 +97,14 @@ func main() {
 			}
 			if v, ok := kv["vision_model"]; ok {
 				c.VisionModel = v
+			}
+			if v, ok := kv["captcha_engine"]; ok {
+				c.CaptchaEngine = v
+			}
+			if v, ok := kv["captcha_concurrency"]; ok {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					c.CaptchaConcurrency = n
+				}
 			}
 			if v, ok := kv["open_time"]; ok {
 				c.OpenTime = v

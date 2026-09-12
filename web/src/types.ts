@@ -93,6 +93,8 @@ export interface AdminConfig {
   vision_base_url: string
   vision_api_key_masked: string
   vision_model: string
+  captcha_engine: string
+  captcha_concurrency: number
   open_time: string
 }
 

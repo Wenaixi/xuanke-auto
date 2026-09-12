@@ -172,6 +172,34 @@ func TestActivationCodes(t *testing.T) {
 	}
 }
 
+func TestSettingsRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	// 空读
+	kv, err := s.LoadSettings()
+	if err != nil || len(kv) != 0 {
+		t.Fatalf("初始应无配置: %v %v", kv, err)
+	}
+	// 写入全量
+	if err := s.SaveSettings(map[string]string{
+		"activation_enabled": "true",
+		"vision_key":         "***REMOVED***",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ = s.LoadSettings()
+	if kv["activation_enabled"] != "true" || kv["vision_key"] != "***REMOVED***" {
+		t.Fatalf("配置往返失败: %v", kv)
+	}
+	// 全量替换（旧的消失）
+	if err := s.SaveSettings(map[string]string{"activation_enabled": "false"}); err != nil {
+		t.Fatal(err)
+	}
+	kv, _ = s.LoadSettings()
+	if len(kv) != 1 || kv["activation_enabled"] != "false" {
+		t.Fatalf("全量替换失败: %v", kv)
+	}
+}
+
 func TestLogs(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.AppendLog("acct1", 61115, "select", "报名成功", true); err != nil {

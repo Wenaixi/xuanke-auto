@@ -57,3 +57,10 @@ CREATE TABLE IF NOT EXISTS success (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (account, class_id)
 );
+
+-- 系统配置（管理员热重载持久化，k/v 存储）
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

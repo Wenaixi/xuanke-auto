@@ -58,6 +58,14 @@ func refuseLegacy(d *sql.DB) error {
 			return fmt.Errorf("检测到旧版数据库（%s 表缺 %s 列），本版本不兼容旧数据。请删除 %s 后重新启动", col[0], col[1], "data/xuanke.db")
 		}
 	}
+	// 旧 v3 库缺 settings 表——不兼容，提示删除重建
+	var hasSettings int
+	if err := d.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='settings'").Scan(&hasSettings); err != nil {
+		return err
+	}
+	if hasSettings == 0 {
+		return errors.New("检测到旧版数据库（缺 settings 表），本版本不兼容旧数据。请删除 data/xuanke.db 后重新启动")
+	}
 	return nil
 }
 

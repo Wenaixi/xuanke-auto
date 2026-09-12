@@ -65,6 +65,13 @@ func (c *Client) SetCookies(cookies map[string]string) {
 	}
 }
 
+// SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
+func (c *Client) SetVision(cfg VisionConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.visionCfg = cfg
+}
+
 // Token 返回当前 token。
 func (c *Client) Token() string {
 	c.mu.Lock()
@@ -123,7 +130,10 @@ func (c *Client) Login(account, password string) (string, error) {
 		}
 
 		// 3. Vision 识别
-		captchaText, err := recognizeCaptcha(c.visionCfg, img)
+		c.mu.Lock()
+		vc := c.visionCfg
+		c.mu.Unlock()
+		captchaText, err := recognizeCaptcha(vc, img)
 		if err != nil {
 			lastMsg = fmt.Sprintf("第%d次验证码识别失败: %v", attempt, err)
 			continue

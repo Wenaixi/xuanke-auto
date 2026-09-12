@@ -35,6 +35,7 @@ type CourseStatus struct {
 type SchedulerState struct {
 	OpenTime     time.Time      `json:"open_time"`
 	WindowOpened bool           `json:"window_opened"`
+	TokenValid   bool           `json:"token_valid"` // 当前账号教务 token 有效性（有效=true）
 	Courses      []CourseStatus `json:"courses"`
 }
 
@@ -66,18 +67,24 @@ type Client interface {
 	SelectClass(classID int) (string, error)
 	ClassDetail(classID int) (*zhidao.ClassDetail, error)
 	IsClassFull(classID int) (bool, error)
+	Token() string // 重登后读取新 token 落库
 }
 
 // AccountClients 多账号客户端注册表（真实实现 accounts.Manager）。
 type AccountClients interface {
 	ClientFor(acct string) (Client, bool)
 	AnyClient() (Client, bool)
+	// AnyClientWithAccount 返回任一已登录账号的客户端与账号名（失效时定位账号用）。
+	AnyClientWithAccount() (string, Client, bool)
+	// Relogin 对指定账号自动重登（返回是否已重登与错误）。
+	Relogin(acct string) (bool, error)
 }
 
 // Store 调度器依赖的最小持久化接口（由 store 包实现）。
 type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
+	UpdateIDToken(acct, idToken string) error // 自动重登后落库新 token
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -97,9 +104,12 @@ type Scheduler struct {
 	done        map[string]map[int]bool // [账号][classID] 已成功
 	full        map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	lastProbe   time.Time
-	lastSubmit  time.Time // 上次提交时间（submitAll 节流）
+	lastSubmit  time.Time  // 上次提交时间（submitAll 节流）
 	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt  time.Time
+	tokenValid  map[string]bool // [账号] token 失效标记（false=有效，缺失即有效）
+	reloginAt   map[string]time.Time // [账号] 上次重登时间（30s 节流）
+	reloginMu   sync.Mutex // 重登防重入（全局限一把，账号并发低）
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -121,6 +131,8 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		inflight:    make(map[string]map[int]bool),
 		done:        make(map[string]map[int]bool),
 		full:        make(map[string]map[int]bool),
+		tokenValid:  make(map[string]bool),
+		reloginAt:   make(map[string]time.Time),
 		chains:      make(map[string]bool),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -240,6 +252,7 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	defer s.mu.Unlock()
 	st := s.state
 	st.OpenTime = s.openTimeNow() // 运行时配置优先（热重载立即反映）
+	st.TokenValid = !s.tokenValid[acct]
 	st.Courses = nil
 	for _, c := range s.state.Courses {
 		if c.Account == acct {
@@ -247,6 +260,13 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 		}
 	}
 	return st
+}
+
+// TokenValidFor 查询指定账号教务 token 有效性（未记录失效标记即视为有效）。
+func (s *Scheduler) TokenValidFor(acct string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.tokenValid[acct]
 }
 
 // ElectivesSnapshot 返回内存课程快照（40 秒内有效）。超高性能核心：页面浏览零上游请求。
@@ -327,9 +347,14 @@ func (s *Scheduler) probe() {
 		s.mu.Lock()
 		s.lastProbe = now // 失败同样计入节流闸门，网络故障时不会每 300ms 疯狂重试
 		s.mu.Unlock()
-		if !errors.Is(err, zhidao.ErrUnauthorized) {
-			log.Printf("[scheduler] 查询课程失败: %v", err)
+		if errors.Is(err, zhidao.ErrUnauthorized) {
+			// 探测账号的 token 失效 → 自动重登（网络类失败绝不重登）
+			if acct, _, ok := s.clients.AnyClientWithAccount(); ok {
+				s.maybeRelogin(acct)
+			}
+			return
 		}
+		log.Printf("[scheduler] 查询课程失败: %v", err)
 		return
 	}
 	s.mu.Lock()
@@ -345,6 +370,52 @@ func (s *Scheduler) probe() {
 	}
 	s.state.WindowOpened = opened
 	s.mu.Unlock()
+}
+
+// reloginInterval 重登节流：30 秒内最多重登一次（与探测节流同频，避免频繁登录触发平台限流）。
+const reloginInterval = 30 * time.Second
+
+// maybeRelogin 对指定账号异步自动重登：防重入 + 30s 节流，成功后落库新 token 并补一次探测。
+func (s *Scheduler) maybeRelogin(acct string) {
+	s.reloginMu.Lock()
+	defer s.reloginMu.Unlock()
+	if s.tokenValid[acct] {
+		return // 已在失效/重登中
+	}
+	if t, ok := s.reloginAt[acct]; ok && time.Since(t) < reloginInterval {
+		return // 30s 节流
+	}
+	s.reloginAt[acct] = time.Now()
+	s.mu.Lock()
+	s.tokenValid[acct] = true // 标记失效
+	s.mu.Unlock()
+
+	go func() {
+		relogged, err := s.clients.Relogin(acct)
+		if err != nil {
+			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
+			return
+		}
+		if !relogged {
+			return
+		}
+		// 新 token 落库（持久化，重启后恢复不丢）
+		if client, ok := s.clients.ClientFor(acct); ok {
+			if tok := client.Token(); tok != "" {
+				if err := s.store.UpdateIDToken(acct, tok); err != nil {
+					log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, err)
+				}
+			}
+		}
+		s.mu.Lock()
+		s.tokenValid[acct] = false // 恢复有效
+		s.mu.Unlock()
+		log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
+		// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
+		s.mu.Lock()
+		s.lastProbe = time.Time{}
+		s.mu.Unlock()
+	}()
 }
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。

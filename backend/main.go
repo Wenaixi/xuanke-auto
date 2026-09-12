@@ -97,6 +97,8 @@ func main() {
 		log.Fatalf("开放时间配置错误: %v", err)
 	}
 	sched := scheduler.New(accts, st, openTime, 300*time.Millisecond)
+	// 打开时间走运行时配置中心：管理员热改后无需重启，调度器立即按新时间判断窗口
+	sched.SetOpenTimeFn(func() time.Time { return rt.Get().OpenTimeParsed })
 
 	if success, err := st.LoadSuccess(); err != nil {
 		log.Printf("[main] 读取成功记录失败: %v", err)

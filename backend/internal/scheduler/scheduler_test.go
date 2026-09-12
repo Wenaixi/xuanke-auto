@@ -23,6 +23,7 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 }
 
 func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
+func (f *fakeStore) UpdateIDToken(acct, idToken string) error  { return nil }
 
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
@@ -72,6 +73,8 @@ func (f *fakeClient) ClassDetail(classID int) (*zhidao.ClassDetail, error) {
 	return &zhidao.ClassDetail{ID: classID, CourseName: "健美操"}, nil
 }
 
+func (f *fakeClient) Token() string { return "new-token-999" }
+
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -107,11 +110,25 @@ func newFakeClient(open bool) *fakeClient {
 
 // fakeAccts 伪账号注册表：所有账号共享一个 fakeClient（测试用）。
 type fakeAccts struct {
-	c *fakeClient
+	c        *fakeClient
+	relogErr error  // 重登错误（可编程）
+	relog    func() // 重登钩子（可编程，记录是否被调用）
 }
 
 func (f *fakeAccts) ClientFor(acct string) (Client, bool) { return f.c, true }
 func (f *fakeAccts) AnyClient() (Client, bool)            { return f.c, true }
+func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
+	return "acct1", f.c, true
+}
+func (f *fakeAccts) Relogin(acct string) (bool, error) {
+	if f.relogErr != nil {
+		return false, f.relogErr
+	}
+	if f.relog != nil {
+		f.relog()
+	}
+	return true, nil
+}
 
 // setAllOpened 打开所有发布的选课窗口。
 func setAllOpened(fc *fakeClient) {
@@ -157,7 +174,7 @@ func waitStatusAcct(t *testing.T, s *Scheduler, acct string, classID int, want s
 func TestWindowOpenRetriesWithoutWaitingProbe(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("connection reset") // 第一次提交失败（网络类）
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
 	defer s.Stop()
@@ -175,7 +192,7 @@ func TestWindowOpenRetriesWithoutWaitingProbe(t *testing.T) {
 func TestStateMachine(t *testing.T) {
 	fc := newFakeClient(false)
 	openTime := time.Now().Add(time.Hour)
-	s := New(&fakeAccts{fc}, &fakeStore{}, openTime, 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, openTime, 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", targets())
 	s.Start()
 	defer s.Stop()
@@ -214,7 +231,7 @@ func TestStateMachine(t *testing.T) {
 func TestTargetsByAccountIsolation(t *testing.T) {
 	fc := newFakeClient(false)
 	openTime := time.Now().Add(time.Hour)
-	s := New(&fakeAccts{fc}, &fakeStore{}, openTime, 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, openTime, 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
 	s.SetTargetsForAccount("acct2", []Target{{PublishID: 2, ClassID: 61205, CourseName: "篮球"}})
 	s.Start()
@@ -238,7 +255,7 @@ func TestTargetsByAccountIsolation(t *testing.T) {
 
 func TestSameClassParallelAcrossAccounts(t *testing.T) {
 	fc := newFakeClient(false)
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	// 两账号选中同一门课程——各自独立提交，互不阻塞
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
 	s.SetTargetsForAccount("acct2", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
@@ -261,7 +278,7 @@ func TestSameClassParallelAcrossAccounts(t *testing.T) {
 func TestSubmitFailureRetries(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("网络中断")
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
 	defer s.Stop()
@@ -273,7 +290,7 @@ func TestSubmitFailureRetries(t *testing.T) {
 
 func TestRestoreDoneSkipsResubmit(t *testing.T) {
 	fc := newFakeClient(true)
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	// 重启恢复：注入 acct1 已成功的课程 id
 	s.RestoreDone(map[string][]int{"acct1": {61115}})
 	s.SetTargetsForAccount("acct1", targets())
@@ -300,7 +317,7 @@ func TestRestoreDoneSkipsResubmit(t *testing.T) {
 // TestElectivesSnapshot 快照命中与过期后刷新。
 func TestElectivesSnapshot(t *testing.T) {
 	fc := newFakeClient(false)
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
 
 	// 未探测：命中失败
 	if _, ok := s.ElectivesSnapshot(); ok {
@@ -344,7 +361,7 @@ func TestBackupFallbackOnFull(t *testing.T) {
 		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36},
 	}
 	fc.mu.Unlock()
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{
 		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
 		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
@@ -362,7 +379,7 @@ func TestBackupFallbackOnFull(t *testing.T) {
 func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("connection reset")
-	s := New(&fakeAccts{fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{
 		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
 		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
@@ -385,7 +402,7 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 // TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 5s 收紧。
 func TestProbeIntervalFor(t *testing.T) {
 	open := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)
-	s := New(&fakeAccts{&fakeClient{}}, &fakeStore{}, open, time.Second)
+	s := New(&fakeAccts{c: &fakeClient{}}, &fakeStore{}, open, time.Second)
 
 	// 平日：距开放 >5 分钟 → 30 秒
 	far := open.Add(-6 * time.Minute)
@@ -401,5 +418,39 @@ func TestProbeIntervalFor(t *testing.T) {
 	passed := open.Add(time.Minute)
 	if got := s.probeIntervalFor(passed); got != probeIntervalNear {
 		t.Fatalf("已到点应 5s，实际 %v", got)
+	}
+}
+
+// TestTokenInvalidTriggersRelogin 探测命中 ErrUnauthorized → 标记失效 → 自动重登 → 恢复有效。
+func TestTokenInvalidTriggersRelogin(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.err = zhidao.ErrUnauthorized // 探测返回失效
+	relogStart := make(chan bool)     // 重登开始信号（在标记失效后触发）
+	relogDone := make(chan bool)      // 重登完成信号
+	fa := &fakeAccts{c: fc, relog: func() {
+		relogStart <- true // 通知已进入重登（此时 token 已标记失效但尚未恢复）
+		<-relogDone        // 阻塞重登完成，让测试断言"重登中"状态
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 等探测触发重登（进入重登回调）
+	select {
+	case <-relogStart:
+	case <-time.After(2 * time.Second):
+		t.Fatal("探测命中失效后应触发自动重登")
+	}
+	// 重登进行中：token 应显示无效
+	if s.TokenValidFor("acct1") {
+		t.Fatal("重登进行中 token 应显示无效")
+	}
+	// 放行重登完成
+	close(relogDone)
+	// 等重登完成后恢复有效
+	time.Sleep(200 * time.Millisecond)
+	if !s.TokenValidFor("acct1") {
+		t.Fatal("重登成功后 token 应显示有效")
 	}
 }

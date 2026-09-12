@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -74,6 +75,28 @@ func (m *Manager) AnyClient() (scheduler.Client, bool) {
 	return m.clients[m.order[0]], true
 }
 
+// AnyClientWithAccount 返回任一已登录账号的客户端与账号名（失效时定位账号用）。
+func (m *Manager) AnyClientWithAccount() (string, scheduler.Client, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.order) == 0 {
+		return "", nil, false
+	}
+	acct := m.order[0]
+	return acct, m.clients[acct], true
+}
+
+// Relogin 对指定账号客户端执行自动重登（返回是否已重登与错误）。
+func (m *Manager) Relogin(acct string) (bool, error) {
+	m.mu.Lock()
+	c, ok := m.clients[acct]
+	m.mu.Unlock()
+	if !ok {
+		return false, fmt.Errorf("账号 %s 未注册", acct)
+	}
+	return c.ReloginIfNeeded()
+}
+
 // Registered 返回已注册账号（按登录顺序）。
 func (m *Manager) Registered() []string {
 	m.mu.Lock()
@@ -81,6 +104,16 @@ func (m *Manager) Registered() []string {
 	out := make([]string, len(m.order))
 	copy(out, m.order)
 	return out
+}
+
+// SetVision 热更新全部账号客户端的验证码识别配置（管理员运行时修改立即生效）。
+func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vision = cfg
+	for _, c := range m.clients {
+		c.SetVision(cfg)
+	}
 }
 
 // LoginByPassword 用账密登录该账号独立客户端；成功后加密密码与 token 落库。

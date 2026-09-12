@@ -97,20 +97,22 @@ type Scheduler struct {
 	// openTimeFn 运行时打开时间读取器（热重载时代替启动期固化的 openTime；nil 时用 openTime）
 	openTimeFn func() time.Time
 
-	mu          sync.Mutex
-	acctTargets map[string][]Target // 按账号隔离的目标课程
-	state       SchedulerState
-	inflight    map[string]map[int]bool // [账号][classID] 正在提交
-	done        map[string]map[int]bool // [账号][classID] 已成功
-	full        map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
-	lastProbe   time.Time
-	lastSubmit  time.Time             // 上次提交时间（submitAll 节流）
-	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
-	lastDataAt  time.Time
-	tokenValid  map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
-	reloginAt   map[string]time.Time // [账号] 上次重登时间（30s 节流）
-	relogging   map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
-	reloginMu   sync.Mutex           // 重登防重入（全局限一把，账号并发低）
+	mu               sync.Mutex
+	acctTargets      map[string][]Target // 按账号隔离的目标课程
+	state            SchedulerState
+	inflight         map[string]map[int]bool // [账号][classID] 正在提交
+	done             map[string]map[int]bool // [账号][classID] 已成功
+	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
+	lastProbe        time.Time
+	lastSubmit       time.Time             // 上次提交时间（submitAll 节流）
+	prevWindowOpened bool                  // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
+	lastData         *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
+	lastDataAt       time.Time
+	tokenValid       map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
+	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流）
+	relogging        map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
+	reloginMu        sync.Mutex           // 重登防重入（全局限一把，账号并发低）
+	reloginResults   chan reloginResult  // 重登结果回传（异步结果在 tick 主循环统一处理）
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -372,6 +374,11 @@ func (s *Scheduler) probe() {
 		}
 	}
 	s.state.WindowOpened = opened
+	// 窗口状态变化（关→开）时清空提交闸门：热改 openTime 提前/回拨后，首个 tick 立即提交而不被 1s 闸门卡掉
+	if opened && !s.prevWindowOpened {
+		s.lastSubmit = time.Time{}
+	}
+	s.prevWindowOpened = opened
 	s.mu.Unlock()
 }
 
@@ -402,35 +409,38 @@ func (s *Scheduler) maybeRelogin(acct string) {
 
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
-		defer func() {
-			delete(s.relogging, acct) // 清重登中标记（defer 保证失败也清，才能再试）
-			s.mu.Unlock()
-		}()
-
-		if err != nil {
-			s.tokenValid[acct] = false // 复位失效标记：下次探测可再触发重登
-			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
-			return
-		}
-		if !relogged {
-			// 无保存账密，无法重登：复位失效标记，等用户手动处理
-			s.tokenValid[acct] = false
-			log.Printf("[scheduler] 账号 %s 无保存账密，无法自动重登（请手动重新登录）", acct)
-			return
-		}
-		// 新 token 落库（持久化，重启后恢复不丢）
-		if client, ok := s.clients.ClientFor(acct); ok {
-			if tok := client.Token(); tok != "" {
-				if err := s.store.UpdateIDToken(acct, tok); err != nil {
-					log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, err)
+		delete(s.relogging, acct) // 清重登中标记（defer 保证失败也清，才能再试）
+		s.tokenValid[acct] = false
+		if err == nil && relogged {
+			// 新 token 落库（持久化，重启后恢复不丢）
+			if client, ok := s.clients.ClientFor(acct); ok {
+				if tok := client.Token(); tok != "" {
+					if uerr := s.store.UpdateIDToken(acct, tok); uerr != nil {
+						log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, uerr)
+					}
 				}
 			}
+			// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
+			s.lastProbe = time.Time{}
+			s.reloginResults <- reloginResult{acct: acct, relogged: true, err: nil}
+			s.mu.Unlock()
+			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
+			return
 		}
-		s.tokenValid[acct] = false // 恢复有效
-		log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
-		// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
-		s.lastProbe = time.Time{}
+		s.mu.Unlock()
+		if err != nil {
+			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
+		} else {
+			log.Printf("[scheduler] 账号 %s 无保存账密，无法自动重登（请手动重新登录）", acct)
+		}
 	}()
+}
+
+// reloginResult 重登结果（异步回传到 tick 主循环统一处理）。
+type reloginResult struct {
+	acct     string
+	relogged bool
+	err      error
 }
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。
@@ -519,6 +529,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			if errors.Is(err, zhidao.ErrUnauthorized) {
 				s.maybeRelogin(acct)
 				s.mu.Lock()
+				delete(s.inflight[acct], t.ClassID) // 清提交标记（避免残留占用）
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
 				if s.store != nil {
 					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)

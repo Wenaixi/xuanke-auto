@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -12,6 +13,23 @@ import (
 	"sync"
 	"time"
 )
+
+// sharedTransport 全局共享的高性能 HTTP 传输层：
+// 1. MaxIdleConnsPerHost 扩容至 64（默认仅 2），多账号多发布并发提交零阻塞；
+// 2. 启用 TCP KeepAlive 与 HTTP/2，闲置连接保持 120 秒，避免反复经历 1.9s TLS 握手。
+var sharedTransport = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          128,
+	MaxIdleConnsPerHost:   64,
+	IdleConnTimeout:       120 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
 
 // VisionConfig 硅基流动 Vision 验证码识别配置。
 type VisionConfig struct {
@@ -33,16 +51,64 @@ type Client struct {
 	visionCfg VisionConfig
 }
 
-// New 创建客户端。openTime 仅用于初始化默认窗口。
+// New 创建客户端。绑定全局高性能连接池 sharedTransport。
 func New(baseURL string, visionCfg VisionConfig) *Client {
 	return &Client{
 		baseURL: baseURL,
 		http: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout:   15 * time.Second,
+			Transport: sharedTransport,
 		},
 		cookies:   make(map[string]string),
 		visionCfg: visionCfg,
 	}
+}
+
+// Prewarm 静默轻量请求预热底层 TCP 与 TLS 连接池。
+// 发送一条轻量 GET /login，只为完成握手并在连接池保留热连接。
+func (c *Client) Prewarm() error {
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/login", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", loginUserAgent)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// SyncServerTime 请求服务器轻量接口并解析响应头 Date，计算服务器时钟与本地时间的偏差（serverTime - localTime）。
+func (c *Client) SyncServerTime() (time.Duration, error) {
+	start := time.Now()
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/login", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", loginUserAgent)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	dateStr := resp.Header.Get("Date")
+	if dateStr == "" {
+		return 0, fmt.Errorf("响应头缺失 Date 字段")
+	}
+	serverTime, err := http.ParseTime(dateStr)
+	if err != nil {
+		return 0, fmt.Errorf("解析服务器 Date 失败: %w", err)
+	}
+	// 中点时间近似：请求发出与响应到达的中间时刻
+	rtt := time.Since(start)
+	estimatedServerTime := serverTime.Add(rtt / 2)
+	offset := estimatedServerTime.Sub(time.Now())
+	return offset, nil
 }
 
 // SetCredentials 设置保存的账密与 token（重启恢复时调用）。

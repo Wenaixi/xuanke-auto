@@ -382,3 +382,24 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 		t.Fatalf("未确认满员时不应切备选，备选被提交 %d 次", calls)
 	}
 }
+// TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 5s 收紧。
+func TestProbeIntervalFor(t *testing.T) {
+	open := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)
+	s := New(&fakeAccts{&fakeClient{}}, &fakeStore{}, open, time.Second)
+
+	// 平日：距开放 >5 分钟 → 30 秒
+	far := open.Add(-6 * time.Minute)
+	if got := s.probeIntervalFor(far); got != probeIntervalFar {
+		t.Fatalf("平日应 30s，实际 %v", got)
+	}
+	// 临门：距开放 4 分钟 → 5 秒
+	near := open.Add(-4 * time.Minute)
+	if got := s.probeIntervalFor(near); got != probeIntervalNear {
+		t.Fatalf("临门应 5s，实际 %v", got)
+	}
+	// 已到点：开放后 1 分钟 → 5 秒盯守
+	passed := open.Add(time.Minute)
+	if got := s.probeIntervalFor(passed); got != probeIntervalNear {
+		t.Fatalf("已到点应 5s，实际 %v", got)
+	}
+}

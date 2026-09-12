@@ -28,7 +28,6 @@ import {
   ArrowDownWideNarrow,
   BookMarked,
   Check,
-  CheckCircle,
   Clock,
   Filter,
   Info,
@@ -288,7 +287,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               placeholder="搜索课程名称、教师或教室"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 text-xs sm:text-sm h-10 bg-black/25 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+              className="pl-10 text-xs sm:text-sm h-10 glass-input border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
             />
           </div>
 
@@ -509,7 +508,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   </>
                                 ) : (
                                   <>
-                                    <BookMarked className="h-3.5 w-3.5 text-black" />
+                                    <BookMarked className="h-3.5 w-3.5" />
                                     <span>设为目标</span>
                                   </>
                                 )}
@@ -532,18 +531,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           </Tabs>
         )}
 
-        {/* 底部吸底状态栏：实时展示预选总览，改动自动保存 */}
-        <footer className="fixed bottom-4 inset-x-4 max-w-6xl mx-auto z-40 p-4 rounded-[var(--radius-lg)] border border-neutral-700 glass-strong flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="text-white font-medium">
-              已选备选: {selectedCount} 门 · 发布 {Object.keys(selected).length} 个
-            </span>
-            <span className="text-neutral-500 flex items-center gap-1 text-[11px]">
-              <CheckCircle className="h-3.5 w-3.5" />
-              <span>改动自动保存</span>
-            </span>
-          </div>
-        </footer>
+        {/* 选课改动自动保存，无需手动按钮；底部留白避免内容被遮挡 */}
+        <div className="h-20 sm:h-16" aria-hidden />
 
         {/* 📱 手机端专用抽屉详情 (Bottom Sheet) */}
         <div className="sm:hidden">

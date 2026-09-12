@@ -61,6 +61,21 @@ body {
   overflow-x: hidden;
 }
 
+/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.6) 45%, rgba(0, 0, 0, 0.88) 100%),
+    url("/bg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
 /* 等宽数字排版：倒计时与容量统计严格纵向对齐 */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
@@ -77,6 +92,20 @@ body {
 
 .surface-soft-bg {
   background-color: var(--surface-soft);
+}
+
+/* 磨砂玻璃面板：半透明白底 + 背景模糊，组件透出水墨背景 */
+.glass {
+  background-color: rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+}
+
+/* 更实的玻璃：底部固定栏等需要更强可读性的面板 */
+.glass-strong {
+  background-color: rgba(18, 18, 22, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  backdrop-filter: blur(20px) saturate(1.2);
 }
 
 /* 基础交互重置 */

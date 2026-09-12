@@ -96,7 +96,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
   const cd = parseCountdown(openTimeStr)
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
+    <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
         {/* 顶部纯黑白极简控制台顶栏 */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
@@ -167,7 +167,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
         {/* 核心 Bento Grid 双翼展板 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
           {/* 左侧两大跨度：等宽秒级跳动巨幕倒计时 */}
-          <Card className="lg:col-span-2 rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] flex flex-col justify-between shadow-none">
+          <Card className="lg:col-span-2 rounded-[var(--radius-lg)] glass border border-neutral-800 flex flex-col justify-between shadow-none">
             <CardHeader className="flex flex-row items-center justify-between pb-2 border-b border-neutral-900">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-neutral-400" />
@@ -182,7 +182,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
 
             <CardContent className="py-4">
               {state?.window_opened ? (
-                <div className="py-6 flex flex-col items-center justify-center gap-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 p-6 text-center">
+                <div className="py-6 flex flex-col items-center justify-center gap-3 rounded-[var(--radius-sm)] glass border border-neutral-800 p-6 text-center">
                   <div className="flex items-center gap-2.5 text-white font-medium text-lg">
                     <span className="inline-block w-2 h-2 rounded-full bg-white animate-ping" />
                     <span>选课窗口现已开放</span>
@@ -195,7 +195,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                 <div className="flex flex-col gap-4">
                   {/* 四格等宽大字数字矩阵：纯黑白极简雕刻质感 */}
                   <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
-                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
                       <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.days}
                       </span>
@@ -203,7 +203,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                         天
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
                       <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.hours}
                       </span>
@@ -211,7 +211,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                         时
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 p-3 sm:p-5 flex flex-col items-center">
+                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
                       <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.minutes}
                       </span>
@@ -219,7 +219,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                         分
                       </span>
                     </div>
-                    <div className="rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-900 p-3 sm:p-5 flex flex-col items-center">
+                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-700 glass-strong p-3 sm:p-5 flex flex-col items-center">
                       <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
                         {cd.seconds}
                       </span>
@@ -249,7 +249,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
           </Card>
 
           {/* 右侧跨度：运行状态指标卡片 */}
-          <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] flex flex-col justify-between shadow-none">
+          <Card className="rounded-[var(--radius-lg)] glass border border-neutral-800 flex flex-col justify-between shadow-none">
             <CardHeader className="pb-2 border-b border-neutral-900">
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-neutral-400" />
@@ -294,7 +294,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                 </div>
               </div>
 
-              <div className="p-3 rounded-[var(--radius-sm)] bg-neutral-950 border border-neutral-900 flex items-center justify-between text-xs">
+              <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-800 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
                   <span className="text-white font-medium">后台就绪</span>
@@ -331,8 +331,8 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                   key={c.class_id}
                   className={`rounded-[var(--radius-lg)] border transition-all duration-200 shadow-none ${
                     isSuccess
-                      ? "border-white bg-[#111114]"
-                      : "border-neutral-900 bg-[#09090b] hover:border-neutral-800"
+                      ? "border-white glass-strong"
+                      : "glass border-neutral-800 hover:border-neutral-600"
                   }`}
                 >
                   <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
@@ -390,7 +390,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                     </div>
 
                     {c.result && (
-                      <div className="p-2.5 rounded-[var(--radius-sm)] border border-neutral-900 bg-neutral-950 text-xs text-neutral-400 font-mono break-all leading-relaxed">
+                      <div className="p-2.5 rounded-[var(--radius-sm)] glass border border-neutral-800 text-xs text-neutral-400 font-mono break-all leading-relaxed">
                         {c.result}
                       </div>
                     )}
@@ -400,7 +400,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
             })}
 
             {courses.length === 0 && (
-              <div className="col-span-full rounded-[var(--radius-lg)] border border-neutral-900 border-dashed bg-[#09090b] p-8 text-center flex flex-col items-center justify-center gap-3">
+              <div className="col-span-full rounded-[var(--radius-lg)] border border-neutral-800 border-dashed glass p-8 text-center flex flex-col items-center justify-center gap-3">
                 <HelpCircle className="h-7 w-7 text-neutral-600" />
                 <p className="text-xs text-neutral-400">
                   当前未添加任何预选课程
@@ -428,7 +428,7 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
             </div>
           </div>
 
-          <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] overflow-hidden shadow-none">
+          <Card className="rounded-[var(--radius-lg)] glass border border-neutral-800 overflow-hidden shadow-none">
             <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 flex items-center justify-between font-mono">
               <span>EVENT STREAM</span>
               <span>RECENT 50</span>
@@ -462,8 +462,8 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
         </section>
       </div>
 
-      {/* 手机移动端底部悬浮操作栏 (纯黑白极简艺术) */}
-      <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 bg-neutral-950/95 backdrop-blur-md border border-neutral-800 rounded-[var(--radius-lg)] p-3 flex items-center justify-between shadow-none">
+      {/* 手机移动端底部悬浮操作栏 */}
+      <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 glass-strong border border-neutral-700 rounded-[var(--radius-lg)] p-3 flex items-center justify-between shadow-none">
         <div className="flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-white" />
           <div className="flex flex-col">

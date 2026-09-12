@@ -26,9 +26,10 @@ type Config struct {
 }
 
 // Load 从环境变量与 data/.env 文件组装配置。
-// .env 与数据库同目录（data/.env），随 data/ 一起备份迁移；真实环境变量优先，文件仅兜底。
+// 数据库统一固定在仓库根目录 ../data（仓库根 data/，含 .env/.master_key/xuanke.db，随仓库一起备份迁移）；
+// 真实环境变量优先，data/.env 文件兜底。
 func Load() Config {
-	dbPath := envOr("XUANKE_DB", "data/xuanke.db")
+	dbPath := envOr("XUANKE_DB", "../data/xuanke.db")
 	loadDotEnv(filepath.Join(filepath.Dir(dbPath), ".env"))
 	return Config{
 		Port:       envOr("XUANKE_PORT", "3091"),
@@ -86,12 +87,12 @@ SF_API_KEY=
 # 激活码机制开关：on=启用（默认）；off=完全关闭，登录直接进入系统
 XUANKE_ACTIVATION=on
 
-# 数据加密主密钥（64 位十六进制；可选，不填自动生成 data/.master_key）
+# 数据加密主密钥（64 位十六进制；可选，不填自动生成 ../data/.master_key）
 # XUANKE_MASTER_KEY=
 
-# 服务端口与数据库路径（默认 3091 / data/xuanke.db）
+# 服务端口与数据库路径（默认 3091 / ../data/xuanke.db，仓库根目录 data/）
 # XUANKE_PORT=3091
-# XUANKE_DB=data/xuanke.db
+# XUANKE_DB=../data/xuanke.db
 `
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return

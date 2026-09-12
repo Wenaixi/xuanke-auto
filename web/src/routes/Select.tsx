@@ -48,6 +48,11 @@ function fillRate(c: ClassItem): number {
   return Math.min(100, Math.round((c.selected_count / c.max_count) * 100))
 }
 
+// 优先级序号转展示名：0=首选，1=备选 1，2=备选 2（首位不再是"备选 1"）
+function priorityName(p: number): string {
+  return p === 0 ? "首选" : `备选 ${p}`
+}
+
 export default function Select({ account, sessionToken, onDone }: Props) {
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useQuery({
@@ -99,7 +104,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     [publishes]
   )
 
-  // 备选目标挑选：同发布下最多选择 maxSlots 门，按点击顺序排优先级
+  // 备选目标挑选：同发布下按点击顺序排优先级，取消后后续自动升级
   const pick = (publishId: number, classItem: ClassItem) => {
     setSelected((prev) => {
       const arr = [...(prev[publishId] ?? [])]
@@ -108,14 +113,20 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         arr.splice(idx, 1)
         toast({
           title: "已取消目标",
-          description: `已移出【${classItem.course_name}】（优先级 ${idx + 1}）`,
+          description:
+            arr.length > 0
+              ? `已移出【${classItem.course_name}】，后续备选自动升级（当前首选：${arr[0].course_name}）`
+              : `已移出【${classItem.course_name}】，该发布已无预选目标`,
           variant: "default",
         })
         return { ...prev, [publishId]: arr }
       }
       toast({
-        title: "已选择备选目标",
-        description: `已选中【${classItem.course_name}】(优先顺序 ${arr.length + 1})，可继续添加同发布备选`,
+        title: arr.length === 0 ? "已设为首选" : "已设为备选目标",
+        description:
+          arr.length === 0
+            ? `【${classItem.course_name}】为首选，可继续添加同发布备选`
+            : `已选中【${classItem.course_name}】为备选 ${arr.length}，可继续添加同发布备选`,
         variant: "default",
       })
       return { ...prev, [publishId]: [...arr, classItem] }
@@ -323,7 +334,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               </span>
                               {isSelected ? (
                                 <Badge variant="primary" className="text-[11px] font-medium">
-                                  备选 {selIdx + 1}
+                                  {priorityName(selIdx)}
                                 </Badge>
                               ) : isFull ? (
                                 <Badge variant="outline" className="text-[11px] text-neutral-500 border-neutral-800">
@@ -407,7 +418,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                 {isSelected ? (
                                   <>
                                     <Check className="h-3.5 w-3.5 text-white" />
-                                    <span>备选 {selIdx + 1}</span>
+                                    <span>{priorityName(selIdx)}</span>
                                   </>
                                 ) : (
                                   <>

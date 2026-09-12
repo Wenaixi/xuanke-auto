@@ -62,6 +62,16 @@ function parseCountdown(target: string | null): ParsedCountdown {
   }
 }
 
+// 优先级序号转展示名：0=首选，1=备选 1，2=备选 2
+function priorityName(p: number): string {
+  return p === 0 ? "首选" : `备选 ${p}`
+}
+
+// 是否为满员退避：失败且原因明确写"已满员"（调度器 markFullLocked 文案）
+function isFullFallback(c: { status: string; result: string }): boolean {
+  return c.status === "failed" && c.result.includes("已满员")
+}
+
 export default function Dashboard({ account, sessionToken, accounts, onSwitchAccount, onLogout, onGoSelect }: Props) {
   const { data: state, isError: stateErr, isLoading: stateLoading } = useQuery({
     queryKey: ["state", account, sessionToken],
@@ -314,7 +324,8 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {courses.map((c) => {
               const isSuccess = c.status === "success"
-              const isFailed = c.status === "failed"
+              const isFull = isFullFallback(c)
+              const isFailed = c.status === "failed" && !isFull
               const isInRange = c.status === "in_range" || c.status === "submitted"
 
               return (
@@ -328,14 +339,16 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                 >
                   <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
                     <Badge variant="outline" className="text-[10px] font-mono">
-                      #{c.publish_id} · 备选 {c.priority + 1}
+                      #{c.publish_id} · {priorityName(c.priority)}
                     </Badge>
                     <Badge
-                      variant={isSuccess ? "primary" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
+                      variant={isSuccess ? "primary" : isFull ? "destructive" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
                       className="text-[11px]"
                     >
                       {isSuccess
                         ? "已确认选课"
+                        : isFull
+                        ? "已满员·退避备选"
                         : isFailed
                         ? "报名异常"
                         : isInRange
@@ -359,13 +372,16 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                       <div className="flex items-center gap-1.5">
                         {isSuccess && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
                         {isFailed && <XCircle className="h-3.5 w-3.5 text-neutral-400" />}
+                        {isFull && <XCircle className="h-3.5 w-3.5 text-white" />}
                         {isInRange && <RefreshCw className="h-3.5 w-3.5 text-white animate-spin" />}
-                        {!isSuccess && !isFailed && !isInRange && (
+                        {!isSuccess && !isFailed && !isInRange && !isFull && (
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-600" />
                         )}
                         <span className="text-neutral-400">
                           {isSuccess
                             ? "席位已确认"
+                            : isFull
+                            ? "该门已满，自动退避至下一备选"
                             : isFailed
                             ? "提交未通过"
                             : isInRange

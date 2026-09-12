@@ -74,23 +74,24 @@ body {
    注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
    避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
 .canvas-bg {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   background-image:
     linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%),
     url("/bg.jpg");
-  /* 默认（移动端）：absolute 覆盖整个文档随滚动，水墨图放大至 180% 宽，贴顶对齐 */
+  /* 默认（移动端）：fixed 钉住视口不随滚动，水墨图放大至 180% 宽，贴顶对齐 */
   background-size: 100% 100%, 180% auto;
-  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，随文档纵向滚动 */
+  /* 图片层 180% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，不随文档纵向滚动 */
   background-position: center, top 0 center;
   background-repeat: no-repeat;
 }
 
-/* 桌面端（鼠标设备）：同样随文档纵向滚动（下滑可看到水墨图下方），仅放大比例缩为 160% 宽 */
+/* 桌面端（鼠标设备）：absolute 随文档纵向滚动（下滑可看到水墨图下方），放大至 160% 宽 */
 @media (hover: hover) and (pointer: fine) {
   .canvas-bg {
+    position: absolute;
     background-size: 100% 100%, 160% auto;
   }
 }

@@ -665,3 +665,58 @@ func TestWindowOpenSubmitsWithoutProbeReset(t *testing.T) {
 	fc.mu.Unlock()
 	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
 }
+
+
+// TestRateLimitBackoff 平台返回“操作频繁”或 429 类风控文案时，自动退避 30s，后续轮次跳过该课程。
+func TestRateLimitBackoff(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开
+	fc.selectErr[61115] = errors.New("操作过于频繁，请稍后重试")
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{
+		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
+		{PublishID: 1, ClassID: 61205, CourseName: "篮球", Priority: 1},
+	})
+	s.Start()
+	defer s.Stop()
+
+	// 第一门课因风控失败
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+
+	// 验证退避生效：在退避期内该课不应被反复提交轰炸
+	fc.mu.Lock()
+	callsBefore := fc.selectCalls[61115]
+	fc.mu.Unlock()
+
+	time.Sleep(100 * time.Millisecond)
+
+	fc.mu.Lock()
+	callsAfter := fc.selectCalls[61115]
+	fc.mu.Unlock()
+
+	if callsAfter > callsBefore {
+		t.Fatalf("处于风控退避期的课程不应被重复提交: 之前 %d 次, 之后 %d 次", callsBefore, callsAfter)
+	}
+}
+
+// TestSubmitIntervalSprint 验证开窗后前 10 秒提交间隔收紧至 250ms，10 秒后恢复 1s。
+func TestSubmitIntervalSprint(t *testing.T) {
+	s := New(nil, &fakeStore{}, time.Now(), time.Second)
+	open := time.Now().Add(-2 * time.Second) // 开窗 2 秒内（处于 10s 冲刺期）
+	if d := s.submitIntervalFor(time.Now(), open); d != 250*time.Millisecond {
+		t.Fatalf("黄金期提交间隔应为 250ms, 实际: %v", d)
+	}
+	openOld := time.Now().Add(-15 * time.Second) // 开窗已过 15 秒（常规期）
+	if d := s.submitIntervalFor(time.Now(), openOld); d != time.Second {
+		t.Fatalf("常规期提交间隔应为 1s, 实际: %v", d)
+	}
+}
+
+// TestServerClockAlignment 验证服务端时钟偏移校准生效。
+func TestServerClockAlignment(t *testing.T) {
+	s := New(nil, &fakeStore{}, time.Now(), time.Second)
+	s.SetClockOffsetForTest(5 * time.Second)
+	aligned := s.nowAligned()
+	if diff := aligned.Sub(time.Now()); diff < 4*time.Second || diff > 6*time.Second {
+		t.Fatalf("校准后时间应快约 5 秒, 实际差值: %v", diff)
+	}
+}

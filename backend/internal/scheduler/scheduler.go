@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,15 +40,22 @@ type SchedulerState struct {
 	Courses      []CourseStatus `json:"courses"`
 }
 
-// 探测分阶段间隔：平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 5 秒盯守。
+// 探测分阶段间隔：平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒紧密盯守。
 const (
 	probeIntervalFar  = 30 * time.Second
-	probeIntervalNear = 5 * time.Second
+	probeIntervalNear = 2 * time.Second // 临门收紧至 2 秒，开窗探测更敏锐
 	nearWindow        = 5 * time.Minute // 临门窗口：开放前 5 分钟起收紧
 )
 
+// 黄金期高频冲刺提交间隔
+const (
+	submitIntervalSprint = 250 * time.Millisecond // 黄金期（开窗后 10 秒内）高频冲刺：250ms
+	submitIntervalNormal = time.Second            // 常规提交间隔：1 秒
+	sprintDuration       = 10 * time.Second       // 黄金冲刺期持续时长
+)
+
 // probeIntervalFor 按当前时刻与开放时间的距离选择探测间隔。
-// 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 5 秒盯守，保证平台一开立即被发现。
+// 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
 	if now.After(s.openTimeNow().Add(-nearWindow)) {
 		return probeIntervalNear
@@ -55,11 +63,18 @@ func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
 	return probeIntervalFar
 }
 
-// submitInterval 窗口开启后提交重试最小间隔：1 秒（黄金期高频但不打爆平台）。
-const submitInterval = time.Second
-
 // snapshotTTL 课程快照有效期（大于探测间隔，保证 /electives 总能有数据可读）。
 const snapshotTTL = 40 * time.Second
+
+// TimeSyncer 客户端可选实现的服务端时钟对齐能力。
+type TimeSyncer interface {
+	SyncServerTime() (time.Duration, error)
+}
+
+// Prewarmer 客户端可选实现的连接池静默预热能力。
+type Prewarmer interface {
+	Prewarm() error
+}
 
 // Client 调度器依赖的至道客户端能力（*zhidao.Client 隐式满足）。
 type Client interface {
@@ -114,6 +129,11 @@ type Scheduler struct {
 	reloginMu        sync.Mutex           // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
 	reloginResults   chan reloginResult   // 重登结果回传（异步结果在 tick 主循环统一处理）
 
+	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
+	lastSyncTime   time.Time                    // 上次时钟对齐采样时间
+	lastPrewarm    time.Time                    // 上次连接池预热时间
+	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
+
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
 
@@ -138,6 +158,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		reloginAt:   make(map[string]time.Time),
 		reloginFail: make(map[string]int),
 		relogging:   make(map[string]bool),
+		rateLimited: make(map[string]map[int]time.Time),
 		chains:      make(map[string]bool),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -145,6 +166,78 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 	s.reloginResults = make(chan reloginResult, 8)
 	s.state.OpenTime = openTime
 	return s
+}
+
+// nowAligned 返回经过教务服务端时钟校准后的当前时刻。
+func (s *Scheduler) nowAligned() time.Time {
+	s.mu.Lock()
+	offset := s.clockOffset
+	s.mu.Unlock()
+	return time.Now().Add(offset)
+}
+
+// nowAlignedLocked 在持有 s.mu 时返回校准时刻（禁止重入加锁）。
+func (s *Scheduler) nowAlignedLocked() time.Time {
+	return time.Now().Add(s.clockOffset)
+}
+
+// SetClockOffsetForTest 显式设置服务端时钟偏差（测试专用）。
+func (s *Scheduler) SetClockOffsetForTest(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clockOffset = d
+}
+
+// submitIntervalFor 按当前时刻与开窗时刻计算动态提交间隔（开窗前 10 秒 250ms 冲刺）。
+func (s *Scheduler) submitIntervalFor(now, open time.Time) time.Duration {
+	if !open.IsZero() && now.After(open) && now.Before(open.Add(sprintDuration)) {
+		return submitIntervalSprint
+	}
+	return submitIntervalNormal
+}
+
+// maybePrewarm 在临门窗口期内保持底层 HTTP 连接池热态。
+func (s *Scheduler) maybePrewarm(now, open time.Time) {
+	if open.IsZero() || now.Before(open.Add(-2*time.Minute)) || now.After(open) {
+		return
+	}
+	s.mu.Lock()
+	if !s.lastPrewarm.IsZero() && now.Sub(s.lastPrewarm) < 15*time.Second {
+		s.mu.Unlock()
+		return
+	}
+	s.lastPrewarm = now
+	s.mu.Unlock()
+
+	if client, ok := s.clients.AnyClient(); ok {
+		if pw, ok := client.(Prewarmer); ok {
+			go func() { _ = pw.Prewarm() }()
+		}
+	}
+}
+
+// maybeSyncClock 定期异步采样教务服务端时间，校准本地时钟偏差。
+func (s *Scheduler) maybeSyncClock(now time.Time) {
+	s.mu.Lock()
+	if !s.lastSyncTime.IsZero() && now.Sub(s.lastSyncTime) < time.Minute {
+		s.mu.Unlock()
+		return
+	}
+	s.lastSyncTime = now
+	s.mu.Unlock()
+
+	if client, ok := s.clients.AnyClient(); ok {
+		if syncer, ok := client.(TimeSyncer); ok {
+			go func() {
+				if offset, err := syncer.SyncServerTime(); err == nil {
+					s.mu.Lock()
+					s.clockOffset = offset
+					s.mu.Unlock()
+					log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
+				}
+			}()
+		}
+	}
 }
 
 // SetOpenTimeFn 设置运行时打开时间读取器（管理员热改配置后立即生效；传入 nil 恢复启动值）。
@@ -327,14 +420,17 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	return data, nil
 }
 
-// tick 单次轮询：先按需探测刷新窗口状态与课程快照；窗口开启后按 1 秒间隔持续提交。
-// 探测与提交解耦：窗口开启后提交重试不受探测 30 秒节流限制（黄金期高频重试）。
+// tick 单次轮询：先按需探测刷新窗口状态与课程快照；窗口开启后按动态间隔持续提交。
+// 探测与提交解耦：窗口开启后提交重试不受探测 30 秒节流限制（黄金期 250ms 高频冲刺）。
 func (s *Scheduler) tick() {
-	now := time.Now()
+	now := s.nowAligned()
 	s.mu.Lock()
 	last := s.lastProbe
 	open := s.openTimeNow()
 	s.mu.Unlock()
+
+	s.maybePrewarm(now, open)
+	s.maybeSyncClock(now)
 
 	// 探测闸门：距上次成功探测不足当前阶段间隔且非首次则跳过
 	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalFor(now)
@@ -351,17 +447,18 @@ func (s *Scheduler) tick() {
 	s.mu.Unlock()
 	// 提交触发条件（或关系）：
 	//   1) 探测已确认窗口开启（WindowOpened）；
-	//   2) 本地时间已过开窗点（openTimeNow）——兜底：平台在到点瞬间把课程列表拉空
+	//   2) 对齐后的时间已过开窗点（openTimeNow）——兜底：平台在到点瞬间把课程列表拉空
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
 	if !opened && !now.After(open) {
 		return
 	}
-	// 提交重试闸门：距上次提交不足 1 秒则跳过本轮（提交不被探测节流卡死）
+	// 提交重试闸门：开窗黄金期 250ms 高频冲刺，平时 1 秒
 	s.mu.Lock()
 	lastSubmit := s.lastSubmit
 	s.mu.Unlock()
+	submitInterval := s.submitIntervalFor(now, open)
 	if !lastSubmit.IsZero() && now.Sub(lastSubmit) < submitInterval {
 		return
 	}
@@ -575,6 +672,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
+			// 平台风控退避中：跳过本课程
+			now := s.nowAlignedLocked()
+			if s.isRateLimitedLocked(acct, t.ClassID, now) {
+				s.mu.Unlock()
+				continue
+			}
 			s.releaseFullIfFreedLocked(acct, t.ClassID)
 			if s.fullHas(acct, t.ClassID) {
 				s.mu.Unlock()
@@ -632,6 +735,16 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
+			// 平台风控退避：识别到“频繁”或 429 相关错误，为该课程设置 30s 退避，跳过轰炸
+			if isRateLimitError(err) {
+				s.markRateLimitedLocked(acct, t.ClassID, 30*time.Second)
+				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "触发平台风控退避 30 秒: "+err.Error())
+				if s.store != nil {
+					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false)
+				}
+				s.mu.Unlock()
+				return
+			}
 			// 非满员失败：改为实时人数复核确认是否真满员
 			// （用户要求：不解析平台"满"字错误文案，直接对比总数与已报数）
 			if !ok {
@@ -658,6 +771,37 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			return
 		}
 	}()
+}
+
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "频繁") || strings.Contains(msg, "429") || strings.Contains(msg, "稍后重试")
+}
+
+func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time) bool {
+	m, ok := s.rateLimited[acct]
+	if !ok {
+		return false
+	}
+	until, ok := m[classID]
+	if !ok {
+		return false
+	}
+	if now.Before(until) {
+		return true
+	}
+	delete(m, classID)
+	return false
+}
+
+func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Duration) {
+	if s.rateLimited[acct] == nil {
+		s.rateLimited[acct] = map[int]time.Time{}
+	}
+	s.rateLimited[acct][classID] = time.Now().Add(d)
 }
 
 // classFullInSnapshot 快照人数确认满员（需持锁）。

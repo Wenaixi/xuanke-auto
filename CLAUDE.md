@@ -117,7 +117,11 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
   - 极简几何圆角（4px - 8px），摒弃臃肿膨胀的大圆角与花哨阴影，保留建筑般的硬朗质感。
 
 ### 关键决策与系统化调试排错记录
+- **管理员后台（admin 账号 + 管理口令，会话级鉴权）**：`record admin` + `XUANKE_ADMIN_TOKEN` 比对（ConstantTimeCompare）→ `session.CreateAdmin` → 后续全部管理接口走 `requireAdminSession`（Bearer 会话）鉴权。入口：登录页账号填 `admin`、密码填管理口令（绕过教务登录，免平台限流）。管理接口全部挂 `/api/admin/*`：`config` GET/PUT 热改 + SaveSettings 落库、`stats` 运行状态、`codes` 激活码生成/列表/删除、`accounts` 账号管理（禁止删 admin）、`logs` 全量日志。普通用户会话访问一律 403。前端 admin 登录后进独立管理页（routes/Admin.tsx，五 Tab：激活码/配置/状态/账号/日志）
+- **运行时热配置中心（runtime.Store，全部热重载免重启）**：管理员改动立即进 `runtime.Store`（RWMutex + Get 快照拷贝 + Update 闭包）。生效链路——激活码开关（`activationEnabled()` 三处登录/激活/生成读取）、Vision url/key/model（`Accounts.SetVision` 推全部客户端）、开放时间（`sched.SetOpenTimeFn` 调度器逐 tick 读取）；PUT 同步 `SaveSettings` 全量落库（settings k/v 表），重启后 LoadSettings 覆盖环境变量恢复。敏感值回显脱敏（`maskKey` 只显 `****`+后4位）
 - **教务 token 失效自动重登（取代早期"禁止自动重登"）**：doRequest 对 code=-1 返回 `ErrUnauthorized` 本身不重登；调度器探测命中该错误时按账号标记失效并异步自动重登（防重入 + 30 秒节流，Vision 持续失败不轰炸登录接口），成功后新 token 落库（UpdateIDToken）+ 立即补一次探测。网络类失败绝不重登。前端 `/state` 只读 `token_valid` 显示有效性（有效 / 已失效·自动恢复中），不显示次数与时间
+- **教务 token 失效自动重登（取代早期"禁止自动重登"）**：doRequest 对 code=-1 返回 `ErrUnauthorized` 本身不重登；调度器探测命中该错误时按账号标记失效并异步自动重登（防重入 + 30 秒节流，Vision 持续失败不轰炸登录接口），成功后新 token 落库（UpdateIDToken）+ 立即补一次探测。网络类失败绝不重登。前端 `/state` 只读 `token_valid` 显示有效性（有效 / 已失效·自动恢复中），不显示次数与时间
+- **登录验证码重试收敛（防空炸平台限流）**：`zhidao.Login` 三层上限——识别最多 3 次（识别失败/识别结果为空/提交被拒均刷新验证码重试）、提交最多 2 次（提交被拒多为验证码过期）、初始化会话/取验证码/网络/配置错误一律立即返回。杜绝旧版"识别 10 次"引发的"登录失败次数过多，请 30 分钟后重试"平台熔断
 - **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制，避免服务端报 code=1 鉴权缺失
 - **课程探测 30 秒节流（根因修复"选课大厅突然啥都没了"）**：调度器对 `findElectivesData` 的成功探测加 30 秒最小间隔（`probeInterval` 常量），探测成功或失败均记录时间戳，网络故障时不会 300ms 疯狂重试；窗口未开启时也绝不高频轮询，从根因消除平台"访问过于频繁"1 分钟熔断导致的课程列表拉空。轮询 ticker 仍为 300ms（负责窗口开启后的**立即**探测与提交），但探测动作本身被 30 秒节流闸门挡下
 - **多账号物理隔离 + 会话级账号绑定**：每个账号独立 `zhidao.Client`（账号 A 绝不携带账号 B 的会话），认证后服务端签发随机 Bearer 会话令牌（12h TTL），所有租户接口从会话读取账号（`sessionAccount(r)`）——忽略客户端传入的账号参数，`/state`、`/targets`、`/electives/detail` 均按会话账号隔离。/electives 全校共享（同一平台同一学期数据），但读取快照不需要账号身份
@@ -146,13 +150,14 @@ XUANKE_ACTIVATION=on             # 激活码机制开关：on=启用；off=完�
 ```bash
 xuanke.exe                       # 无任何环境变量直接启动，自动读取同目录 data/.env
 ```
-- 登录只需教务账密；未激活账号返回 code=1001 由前端弹激活码模态框；激活码从控制台「激活码」面板生成/分发（需管理口令）；激活一次永久免激活
+- 登录只需教务账密；未激活账号返回 code=1001 由前端弹激活码模态框；激活码从管理员后台「配置/激活码」面板生成/分发（admin 账号 + 管理口令登录）；激活一次永久免激活
+- **管理员入口**：登录页账号填 `admin`、密码填管理口令（= `XUANKE_ADMIN_TOKEN` 值），登录后进入独立管理员界面：激活码管理、运行时配置（激活码开关 / Vision url-key-model / 开放时间，热重载免重启）、运行状态、账号管理、日志总览
 
 ### Go 接口速查（backend/internal/zhidao）
-- Login(account, password) (token, err)：完整登录链路含 Vision 验证码，10 次重试
+- Login(account, password) (token, err)：完整登录链路含 Vision 验证码，重试收敛（识别≤3 次 + 提交≤2 次，网络/配置错误立即返回）
 - FindElectives() (*ElectivesData, error)：学期列表 -> 课程数据（含 BeginTimes/Publishes/Classes）
 - ClassDetail(id) / SelectClass(id) / StudentCounts(ids)
-- SetCredentials / SetCookies / Token / ReloginIfNeeded
+- SetCredentials / SetCookies / Token / SetVision(热更新识别配置) / ReloginIfNeeded
 
 ### 测试
 cd backend && go test ./...（含 scheduler -race）；cd web && npm run build（tsc 类型检查）

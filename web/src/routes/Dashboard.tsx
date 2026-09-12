@@ -287,8 +287,20 @@ export default function Dashboard({ account, sessionToken, accounts, onSwitchAcc
                   <span className="text-white font-mono tabular-nums">{courses.length} / 3 门</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-neutral-400">认证通信链路</span>
-                  <span className="text-white">双通道会话</span>
+                  <span className="text-neutral-400">教务令牌</span>
+                  <span className="flex items-center gap-1.5">
+                    {state?.token_valid === false ? (
+                      <>
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
+                        <span className="text-white/60 font-mono">已失效 · 自动恢复中</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
+                        <span className="text-white font-mono">有效</span>
+                      </>
+                    )}
+                  </span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">频控保护策略</span>

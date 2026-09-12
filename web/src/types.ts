@@ -66,6 +66,7 @@ export interface CourseStatus {
 export interface SchedulerState {
   open_time: string
   window_opened: boolean
+  token_valid: boolean
   courses: CourseStatus[]
 }
 
@@ -96,5 +97,47 @@ export interface ActivationCode {
   code: string
   total_uses: number
   used_uses: number
+  created_at: string
+}
+
+// ---- 管理员后台类型 ----
+
+// 系统配置（GET /api/admin/config，Vision key 脱敏回显）
+export interface AdminConfig {
+  activation_enabled: boolean
+  vision_base_url: string
+  vision_api_key_masked: string
+  vision_model: string
+  open_time: string
+}
+
+// 运行状态总览（GET /api/admin/stats）
+export interface AdminStats {
+  open_time: string
+  activation_on: boolean
+  window_opened: boolean
+  account_count: number
+  targets_count: number
+  success_count: number
+  log_count: number
+  vision_model: string
+  vision_base_url: string
+}
+
+// 账号管理条目（GET /api/admin/accounts）
+export interface AdminAccount {
+  account: string
+  targets: Target[]
+  success: number[]
+}
+
+// 日志总览条目（GET /api/admin/logs，全量含账号）
+export interface AdminLog {
+  id: number
+  account: string
+  class_id: number
+  action: string
+  result: string
+  is_ok: boolean
   created_at: string
 }

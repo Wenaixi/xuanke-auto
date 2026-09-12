@@ -36,6 +36,10 @@ type VisionConfig struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+
+	// recognizer 当前生效的验证码识别引擎（ddddocr 本地 / Vision 二选一）。
+	// 由 Accounts.Manager 按运行时配置注入；nil 时识别立即报错（未配置）。
+	recognizer CaptchaRecognizer
 }
 
 // Client 至道平台 API 客户端。
@@ -52,7 +56,11 @@ type Client struct {
 }
 
 // New 创建客户端。绑定全局高性能连接池 sharedTransport。
+// 默认识别引擎为 Vision（跟随配置）；管理员可后续 SetRecognizer 热切换到 ddddocr 本地引擎。
 func New(baseURL string, visionCfg VisionConfig) *Client {
+	if visionCfg.recognizer == nil && visionCfg.APIKey != "" {
+		visionCfg.recognizer = NewVisionRecognizer(visionCfg)
+	}
 	return &Client{
 		baseURL: baseURL,
 		http: &http.Client{
@@ -132,10 +140,22 @@ func (c *Client) SetCookies(cookies map[string]string) {
 }
 
 // SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
+// 仅当当前引擎是 Vision 时才重建识别器（ddddocr 本地引擎不受 Vision 配置影响）。
 func (c *Client) SetVision(cfg VisionConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, ok := c.visionCfg.recognizer.(*VisionRecognizer); ok || c.visionCfg.recognizer == nil {
+		cfg.recognizer = NewVisionRecognizer(cfg)
+	}
 	c.visionCfg = cfg
+}
+
+// SetRecognizer 热切换验证码识别引擎（ddddocr 本地 / Vision 二选一，管理员热重载）。
+// 传入 nil 表示当前无识别引擎（登录识别立即报错，直到配置恢复）。
+func (c *Client) SetRecognizer(r CaptchaRecognizer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.visionCfg.recognizer = r
 }
 
 // Token 返回当前 token。

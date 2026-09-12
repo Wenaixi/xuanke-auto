@@ -183,6 +183,16 @@ func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 	}
 }
 
+// SetRecognizer 热切换全部账号客户端的验证码识别引擎（ddddocr 本地 / Vision 二选一）。
+// recognizer 为 nil 时表示"无引擎"（登录识别立即报错，直到管理员恢复配置）。
+func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.clients {
+		c.SetRecognizer(r)
+	}
+}
+
 // LoginByPassword 用账密登录该账号独立客户端；成功后加密密码与 token 落库。
 // 管理员入口（换绑定新账密）不受全局重登闸门约束，仍走平台登录接口。
 func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (string, error)) (string, error) {

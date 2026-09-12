@@ -17,6 +17,7 @@ export interface ClassItem {
   btn_text: string
   title: string
   apply_date: string
+  allow_swap?: boolean
 }
 
 export interface Publish {
@@ -41,6 +42,7 @@ export interface CourseStatus {
   class_id: number
   course_name: string
   priority: number
+  allow_swap?: boolean
   status: string // pending|in_range|submitted|success|failed
   result: string
 }
@@ -57,6 +59,7 @@ export interface Target {
   class_id: number
   course_name: string
   priority?: number
+  allow_swap?: boolean
 }
 
 export interface LogEntry {

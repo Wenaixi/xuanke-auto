@@ -17,6 +17,7 @@ import {
   Clock,
   Filter,
   MapPin,
+  RefreshCw,
   Search,
   User,
   Users,
@@ -101,7 +102,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         const ordered = [...stateData.courses].sort((a, b) => a.priority - b.priority)
         for (const c of ordered) {
           const item: ClassItem = { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem
-          ;(initial[c.publish_id] ??= []).push(item)
+          ;(initial[c.publish_id] ??= []).push({ ...item, allow_swap: c.allow_swap })
         }
         return initial
       })
@@ -165,6 +166,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             class_id: cls.id,
             course_name: cls.course_name,
             priority: i,
+            allow_swap: cls.allow_swap,
           })
         })
       }
@@ -468,7 +470,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                             </div>
 
                             {/* 操作按钮区 */}
-                            <div className="pt-2 border-t border-neutral-800/70 mt-0.5">
+                            <div className="pt-2 border-t border-neutral-800/70 mt-0.5 flex flex-col gap-1.5">
                               <Button
                                 variant={isSelected ? "outline" : "primary"}
                                 size="sm"
@@ -487,6 +489,38 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   </>
                                 )}
                               </Button>
+                              {isSelected && (
+                                <label
+                                  className="flex items-center justify-between gap-2 px-1 cursor-pointer select-none group"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    // 切换允许换课：更新 selected 内课程并触发自动保存
+                                    setSelected((prev) => {
+                                      const arr = (prev[t.publish_id] ?? []).map((x) =>
+                                        x.id === c.id ? { ...x, allow_swap: !x.allow_swap } : x
+                                      )
+                                      return { ...prev, [t.publish_id]: arr }
+                                    })
+                                    setRev((r) => r + 1)
+                                  }}
+                                >
+                                  <span className="text-[11px] text-neutral-500 group-hover:text-neutral-300 flex items-center gap-1.5">
+                                    <RefreshCw className="h-3 w-3" />
+                                    骑驴找马换课
+                                  </span>
+                                  <span
+                                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
+                                      c.allow_swap ? "bg-white" : "bg-neutral-700"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`inline-block h-3 w-3 rounded-full bg-black transition-transform ${
+                                        c.allow_swap ? "translate-x-3.5" : "translate-x-0.5"
+                                      }`}
+                                    />
+                                  </span>
+                                </label>
+                              )}
                             </div>
                           </CardContent>
                         </Card>

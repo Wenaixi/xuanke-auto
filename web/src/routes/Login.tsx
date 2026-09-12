@@ -69,10 +69,10 @@ export default function Login({ onLogin }: Props) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 bg-black text-white select-none">
-      {/* 纯黑白极简艺术卡片容器 */}
+    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 text-white select-none">
+      {/* 纯黑白极简艺术卡片容器（磨砂玻璃透出水墨背景） */}
       <div className="w-full max-w-sm">
-        <Card className="rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] shadow-2xl overflow-hidden">
+        <Card className="rounded-[var(--radius-lg)] glass-strong border border-neutral-700 shadow-2xl overflow-hidden">
           <CardHeader className="space-y-1.5 p-6 pb-4">
             <div className="flex items-center justify-between text-xs tracking-wider uppercase text-neutral-500 font-mono">
               <span>ZHIDAO EDU</span>
@@ -108,7 +108,7 @@ export default function Login({ onLogin }: Props) {
                   onChange={(e) => setAccount(e.target.value)}
                   autoComplete="username"
                   disabled={loading}
-                  className="h-10 text-sm bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+                  className="h-10 text-sm glass-input border-neutral-700 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
                 />
               </div>
 
@@ -128,7 +128,7 @@ export default function Login({ onLogin }: Props) {
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                     disabled={loading}
-                    className="h-10 pr-10 text-sm bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+                    className="h-10 pr-10 text-sm glass-input border-neutral-700 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
                   />
                   <button
                     type="button"
@@ -142,7 +142,7 @@ export default function Login({ onLogin }: Props) {
 
               {/* 错误提示框 */}
               {error && (
-                <div className="p-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 text-xs text-neutral-300 flex items-center gap-2">
+                <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -171,7 +171,7 @@ export default function Login({ onLogin }: Props) {
             </form>
 
             {/* 底部信息：极简纯粹 */}
-            <div className="mt-6 pt-4 border-t border-neutral-900 flex items-center justify-between text-[11px] text-neutral-500">
+            <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-500">
               <span>账号隔离</span>
               <span>实时调度</span>
             </div>
@@ -181,8 +181,8 @@ export default function Login({ onLogin }: Props) {
 
       {/* 激活码输入模态框（登录返回 1001 时弹出） */}
       {pendingAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay">
+          <div className="w-full max-w-sm rounded-[var(--radius-lg)] glass-strong border border-neutral-700 shadow-2xl">
             <div className="p-6 pb-4">
               <div className="flex items-center gap-2 text-xs tracking-wider uppercase text-neutral-500 font-mono">
                 <KeyRound className="h-3.5 w-3.5 text-neutral-500" />
@@ -209,12 +209,12 @@ export default function Login({ onLogin }: Props) {
                     placeholder="XK-XXXX-XXXX-XXXX"
                     disabled={activating}
                     autoFocus
-                    className="h-10 text-sm font-mono tracking-widest bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
+                    className="h-10 text-sm font-mono tracking-widest glass-input border-neutral-700 text-white placeholder:text-neutral-600 focus:border-white transition-colors"
                   />
                 </div>
 
                 {error && (
-                  <div className="p-3 rounded-[var(--radius-sm)] border border-neutral-800 bg-neutral-950 text-xs text-neutral-300 flex items-center gap-2">
+                  <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
                     <span>{error}</span>
                   </div>

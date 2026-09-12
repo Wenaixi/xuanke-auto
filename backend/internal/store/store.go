@@ -97,9 +97,13 @@ func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) er
 		return err
 	}
 	for _, t := range targets {
+		allowSwap := 0
+		if t.AllowSwap {
+			allowSwap = 1
+		}
 		if _, err := tx.Exec(
-			"INSERT INTO targets (account, publish_id, class_id, course_name, priority) VALUES (?, ?, ?, ?, ?)",
-			acct, t.PublishID, t.ClassID, t.CourseName, t.Priority); err != nil {
+			"INSERT INTO targets (account, publish_id, class_id, course_name, priority, allow_swap) VALUES (?, ?, ?, ?, ?, ?)",
+			acct, t.PublishID, t.ClassID, t.CourseName, t.Priority, allowSwap); err != nil {
 			return err
 		}
 	}
@@ -108,7 +112,7 @@ func (s *Store) SetTargetsForAccount(acct string, targets []scheduler.Target) er
 
 // LoadTargetsForAccount 读取指定账号的目标课程（按 priority 排序）。
 func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
-	rows, err := s.db.Query("SELECT publish_id, class_id, course_name, priority FROM targets WHERE account = ? ORDER BY priority", acct)
+	rows, err := s.db.Query("SELECT publish_id, class_id, course_name, priority, allow_swap FROM targets WHERE account = ? ORDER BY priority", acct)
 	if err != nil {
 		return nil, err
 	}
@@ -116,9 +120,11 @@ func (s *Store) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
 	var out []scheduler.Target
 	for rows.Next() {
 		var t scheduler.Target
-		if err := rows.Scan(&t.PublishID, &t.ClassID, &t.CourseName, &t.Priority); err != nil {
+		var allowSwap int
+		if err := rows.Scan(&t.PublishID, &t.ClassID, &t.CourseName, &t.Priority, &allowSwap); err != nil {
 			return nil, err
 		}
+		t.AllowSwap = allowSwap == 1
 		out = append(out, t)
 	}
 	return out, rows.Err()

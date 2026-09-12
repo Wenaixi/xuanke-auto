@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS targets (
   class_id INTEGER NOT NULL,
   course_name TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 0,
+  allow_swap INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

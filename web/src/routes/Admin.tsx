@@ -54,7 +54,7 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent }: Props
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 sm:p-6 lg:p-8 select-none">
+    <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
         {/* 顶栏 */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
@@ -195,7 +195,7 @@ function CodesTab({
   return (
     <div className="space-y-4">
       {/* 生成区 */}
-      <div className="flex flex-col sm:flex-row items-end gap-3 p-3 rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b]">
+      <div className="flex flex-col sm:flex-row items-end gap-3 p-3 rounded-[var(--radius-lg)] border border-neutral-900 glass">
         <div className="flex-1 flex flex-col gap-1.5">
           <label className="text-xs text-neutral-400">生成数量（1-100）</label>
           <Input
@@ -204,7 +204,7 @@ function CodesTab({
             max={100}
             value={count}
             onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-            className="h-10 text-sm bg-neutral-950 border-neutral-800 text-white"
+            className="h-10 text-sm glass-input border-neutral-800 text-white"
           />
         </div>
         <div className="flex-1 flex flex-col gap-1.5">
@@ -214,7 +214,7 @@ function CodesTab({
             min={1}
             value={uses}
             onChange={(e) => setUses(Math.max(1, Number(e.target.value) || 1))}
-            className="h-10 text-sm bg-neutral-950 border-neutral-800 text-white"
+            className="h-10 text-sm glass-input border-neutral-800 text-white"
           />
         </div>
         <Button
@@ -357,7 +357,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
 
   return (
     <div className="space-y-4">
-      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] shadow-none">
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
         <CardHeader className="pb-2 border-b border-neutral-900">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-neutral-400" />
@@ -372,7 +372,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
           <button
             onClick={() => setActivationOn(!activationOn)}
             className={`w-11 h-6 rounded-full border transition-colors relative ${
-              activationOn ? "bg-white border-white" : "bg-neutral-950 border-neutral-700"
+              activationOn ? "bg-white border-white" : "glass-input border-neutral-700"
             }`}
             aria-pressed={activationOn}
           >
@@ -385,7 +385,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
         </CardContent>
       </Card>
 
-      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] shadow-none">
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
         <CardHeader className="pb-2 border-b border-neutral-900">
           <CardTitle className="text-sm font-medium tracking-wide text-white">验证码识别</CardTitle>
           <CardDescription className="text-xs text-neutral-500">
@@ -399,7 +399,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder="https://api.siliconflow.cn/v1"
-              className="h-10 text-sm font-mono bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600"
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -411,7 +411,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              className="h-10 text-sm bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600"
+              className="h-10 text-sm glass-input border-neutral-800 text-white placeholder:text-neutral-600"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -420,13 +420,13 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="Qwen/Qwen3-VL-30B-A3B-Instruct"
-              className="h-10 text-sm font-mono bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600"
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
             />
           </div>
         </CardContent>
       </Card>
 
-      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] shadow-none">
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
         <CardHeader className="pb-2 border-b border-neutral-900">
           <CardTitle className="text-sm font-medium tracking-wide text-white">选课开放时间</CardTitle>
           <CardDescription className="text-xs text-neutral-500">调度器按此时间切换探测节奏并自动抢报</CardDescription>
@@ -436,7 +436,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
             value={openTime}
             onChange={(e) => setOpenTime(e.target.value)}
             placeholder="2026-09-13 09:00:00"
-            className="h-10 text-sm font-mono bg-neutral-950 border-neutral-800 text-white placeholder:text-neutral-600"
+            className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
           />
         </CardContent>
       </Card>
@@ -473,7 +473,7 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
     : []
 
   return (
-    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] shadow-none">
+    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
       <CardHeader className="pb-2 border-b border-neutral-900">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-neutral-400" />
@@ -548,7 +548,7 @@ function AccountsTab({ sessionToken }: { sessionToken: string }) {
             </thead>
             <tbody>
               {accountsQuery.data.map((a) => (
-                <tr key={a.account} className="border-b border-neutral-900 hover:bg-neutral-950/60 transition-colors">
+                <tr key={a.account} className="border-b border-neutral-900 hover:bg-white/5 transition-colors">
                   <td className="p-3 sm:p-4 align-middle text-white font-mono">{a.account}</td>
                   <td className="p-3 sm:p-4 align-middle text-neutral-300 tabular-nums">
                     {a.targets.length > 0 ? (

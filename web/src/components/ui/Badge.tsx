@@ -6,13 +6,13 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 const badgeVariants: Record<NonNullable<BadgeProps["variant"]>, string> = {
-  default: "bg-neutral-900 text-neutral-200 border-neutral-800",
+  default: "bg-white/10 text-neutral-100 border-neutral-700",
   primary: "bg-white text-black border-white font-semibold",
-  success: "bg-neutral-900 text-neutral-100 border-neutral-700",
-  warning: "bg-neutral-950 text-neutral-300 border-neutral-800",
-  destructive: "bg-neutral-950 text-neutral-400 border-neutral-800",
+  success: "bg-white/10 text-neutral-100 border-neutral-600",
+  warning: "bg-white/10 text-neutral-200 border-neutral-700",
+  destructive: "bg-white/10 text-neutral-300 border-neutral-700",
   outline: "bg-transparent text-neutral-300 border-neutral-700",
-  secondary: "bg-neutral-900 text-neutral-400 border-neutral-800",
+  secondary: "bg-white/10 text-neutral-200 border-neutral-700",
   active: "bg-white text-black border-white font-semibold",
 }
 

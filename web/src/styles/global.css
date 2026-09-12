@@ -45,12 +45,20 @@
   box-sizing: border-box;
 }
 
-html, body, #root {
+/* 画布与内容层：html 负责最底部的纯黑底色，
+   #root 完全透明，避免实色背景压住 App 内固定的水墨背景层 */
+html, body {
   min-height: 100%;
   margin: 0;
   padding: 0;
   background-color: var(--bg);
   color: var(--fg);
+}
+
+/* 挂载点外壳：透明底 + 相对定位，作为随文档滚动的背景层定位参照 */
+#root {
+  background-color: transparent;
+  position: relative;
 }
 
 body {
@@ -61,19 +69,29 @@ body {
   overflow-x: hidden;
 }
 
-/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰 */
-body::before {
-  content: "";
-  position: fixed;
+/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰。
+   挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
+   注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
+   避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
+.canvas-bg {
+  position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.6) 45%, rgba(0, 0, 0, 0.88) 100%),
+    linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%),
     url("/bg.jpg");
-  background-size: cover;
-  background-position: center;
+  /* 渐变遮罩保持全屏 100%x100%，水墨图片放大至 150% 宽，贴顶对齐保持滚动跟随 */
+  background-size: 100% 100%, 150% auto;
+  /* 图片层 150% 宽 + 顶部对齐：放大后仍把“图片最上面顶格”，随文档纵向滚动 */
+  background-position: center, top 0 center;
   background-repeat: no-repeat;
+}
+
+/* 页面内容壳层：显式置于水墨背景下但仍在所有弹层之上 */
+.app-content {
+  position: relative;
+  z-index: 1;
 }
 
 /* 等宽数字排版：倒计时与容量统计严格纵向对齐 */
@@ -106,6 +124,20 @@ body::before {
   background-color: rgba(18, 18, 22, 0.72);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   backdrop-filter: blur(20px) saturate(1.2);
+}
+
+/* 弹窗遮罩玻璃幕：足够暗保证弹窗内容可读，又保留一丝画布透出 */
+.glass-overlay {
+  background-color: rgba(0, 0, 0, 0.6);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* 输入框 / 下拉表面：暗色半透明玻璃，与卡片玻璃同源（替换原 bg-black/xx 实心黑洞） */
+.glass-input {
+  background-color: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
 }
 
 /* 基础交互重置 */

@@ -19,6 +19,7 @@ type Target struct {
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
 	Priority   int    `json:"priority"`
+	AllowSwap  bool   `json:"allow_swap"`
 }
 
 // CourseStatus 单课程任务状态。
@@ -28,6 +29,7 @@ type CourseStatus struct {
 	ClassID    int    `json:"class_id"`
 	CourseName string `json:"course_name"`
 	Priority   int    `json:"priority"`
+	AllowSwap  bool   `json:"allow_swap"`
 	Status     string `json:"status"` // pending|in_range|submitted|success|failed
 	Result     string `json:"result"`
 }

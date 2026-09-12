@@ -583,14 +583,11 @@ function AccountsTab({ sessionToken }: { sessionToken: string }) {
   }
 
   return (
-    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] shadow-none overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 font-mono flex items-center justify-between">
-        <span>ACCOUNT REGISTRY</span>
-        <button onClick={() => accountsQuery.refetch()} className="flex items-center gap-1 hover:text-white transition-colors">
-          <RefreshCw className="h-3 w-3" />
-          刷新
-        </button>
-      </div>
+    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none overflow-hidden">
+      <CardHeader className="pb-2 border-b border-neutral-900">
+        <CardTitle className="text-sm font-medium tracking-wide text-white">账号管理</CardTitle>
+        <CardDescription className="text-xs text-neutral-500">全部账号的目标课程与已选成功记录</CardDescription>
+      </CardHeader>
       {accountsQuery.isLoading ? (
         <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
       ) : accountsQuery.data && accountsQuery.data.length > 0 ? (
@@ -605,26 +602,30 @@ function AccountsTab({ sessionToken }: { sessionToken: string }) {
               </tr>
             </thead>
             <tbody>
-              {accountsQuery.data.map((a) => (
-                <tr key={a.account} className="border-b border-neutral-900 hover:bg-white/5 transition-colors">
-                  <td className="p-3 sm:p-4 align-middle text-white font-mono">{a.account}</td>
-                  <td className="p-3 sm:p-4 align-middle text-neutral-300 tabular-nums">
-                    {a.targets.length > 0 ? (
-                      <span className="flex flex-wrap gap-1.5">
-                        {a.targets.map((t) => (
-                          <Badge key={t.class_id} variant="outline" className="text-[10px] font-mono">
-                            {t.course_name || t.class_id}
-                            {(t.priority ?? 0) > 0 ? ` #${t.priority}` : ""}
-                          </Badge>
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="text-neutral-600 text-xs">未设置</span>
-                    )}
-                  </td>
-                  <td className="p-3 sm:p-4 align-middle text-white font-mono tabular-nums">
-                    {a.success.length > 0 ? a.success.join(", ") : <span className="text-neutral-600 text-xs">-</span>}
-                  </td>
+              {accountsQuery.data.map((a) => {
+                // 防御：后端 Go 切片未赋值序列化为 JSON null（非空数组），此处统一兜底
+                const targets = a.targets ?? []
+                const success = a.success ?? []
+                return (
+                  <tr key={a.account} className="border-b border-neutral-900 hover:bg-white/5 transition-colors">
+                    <td className="p-3 sm:p-4 align-middle text-white font-mono">{a.account}</td>
+                    <td className="p-3 sm:p-4 align-middle text-neutral-300 tabular-nums">
+                      {targets.length > 0 ? (
+                        <span className="flex flex-wrap gap-1.5">
+                          {targets.map((t) => (
+                            <Badge key={t.class_id} variant="outline" className="text-[10px] font-mono">
+                              {t.course_name || t.class_id}
+                              {(t.priority ?? 0) > 0 ? ` #${t.priority}` : ""}
+                            </Badge>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-600 text-xs">未设置</span>
+                      )}
+                    </td>
+                    <td className="p-3 sm:p-4 align-middle text-white font-mono tabular-nums">
+                      {success.length > 0 ? success.join(", ") : <span className="text-neutral-600 text-xs">-</span>}
+                    </td>
                   <td className="p-3 sm:p-4 align-middle text-right">
                     <Button
                       variant="outline"
@@ -636,8 +637,9 @@ function AccountsTab({ sessionToken }: { sessionToken: string }) {
                       删除
                     </Button>
                   </td>
-                </tr>
-              ))}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -659,11 +661,13 @@ function LogsTab({ sessionToken }: { sessionToken: string }) {
   const logs = logsQuery.data
 
   return (
-    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 bg-[#09090b] overflow-hidden shadow-none">
-      <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 font-mono flex items-center justify-between">
-        <span>FULL LOG STREAM</span>
-        <span>{logs ? `RECENT ${logs.length}` : "..."}</span>
-      </div>
+    <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass overflow-hidden shadow-none">
+      <CardHeader className="pb-2 border-b border-neutral-900">
+        <CardTitle className="text-sm font-medium tracking-wide text-white">日志总览</CardTitle>
+        <CardDescription className="text-xs text-neutral-500">
+          全账号调度日志流 {logs ? `（最近 ${logs.length} 条）` : ""}
+        </CardDescription>
+      </CardHeader>
       <div className="p-4 max-h-[28rem] overflow-y-auto text-xs space-y-2">
         {logs && logs.length > 0 ? (
           logs.map((l) => (

@@ -217,27 +217,26 @@ func (s *Store) IsActivated(acct string) (bool, error) {
 	return n > 0, err
 }
 
-// ConsumeActivationCode 激活账号：事务内扣减激活码次数 + 记录激活。返回是否成功。
+// ConsumeActivationCode 激活账号：原子扣减激活码次数 + 记录激活。返回是否成功。
 // 激活码不存在或次数用尽返回 (false, nil)。
+// 原子性：扣减与"次数未用尽"判定压进单条 UPDATE（used_uses < total_uses 条件），
+// 并发消费同一激活码时由数据库原子保证绝不超卖——不存在"读到旧次数再改"的读改写竞态。
 func (s *Store) ConsumeActivationCode(code, acct string) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
-	var total, used int
-	err = tx.QueryRow("SELECT total_uses, used_uses FROM activation_codes WHERE code = ?", code).Scan(&total, &used)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
+	res, err := tx.Exec("UPDATE activation_codes SET used_uses = used_uses + 1 WHERE code = ? AND used_uses < total_uses", code)
 	if err != nil {
 		return false, err
 	}
-	if used >= total {
-		return false, nil
-	}
-	if _, err := tx.Exec("UPDATE activation_codes SET used_uses = used_uses + 1 WHERE code = ?", code); err != nil {
+	n, err := res.RowsAffected()
+	if err != nil {
 		return false, err
+	}
+	if n == 0 {
+		return false, nil // 激活码不存在或次数已用尽
 	}
 	if _, err := tx.Exec("INSERT OR IGNORE INTO activations (account) VALUES (?)", acct); err != nil {
 		return false, err

@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"xuanke-auto/backend/internal/db"
@@ -15,6 +16,20 @@ func openTestStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Close() })
+	return New(d)
+}
+
+// openStoreMultiConn 打开一个多连接的 Store（不设单连接上限）。
+// 用途：复现激活码并发扣减的"读改写"竞态——生产配置单连接会串行化掩盖竞态，
+// 这里放开连接数以暴露真实的并发语义（future-proof：改连接数/跨进程即会触发）。
+func openStoreMultiConn(t *testing.T) *Store {
+	t.Helper()
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	d.SetMaxOpenConns(16) // 放开单连接：并发事务真正并行
 	return New(d)
 }
 
@@ -119,6 +134,43 @@ func TestLogsByAccount(t *testing.T) {
 	logs2, _ := s.LoadLogs("acct2", 10)
 	if len(logs2) != 1 || logs2[0].ClassID != 61205 {
 		t.Fatalf("acct2 日志异常: %+v", logs2)
+	}
+}
+
+func TestActivationCodeConcurrentConsume(t *testing.T) {
+	s := openStoreMultiConn(t) // 多连接：并发事务真正并行，竞态可复现
+	if err := s.CreateActivationCode("XK-CONC-0000-0001", 1); err != nil {
+		t.Fatal(err)
+	}
+	// 20 个账号同一时刻抢同一个"可用 1 次"的激活码：
+	// 原子扣减保证恰好 1 个成功；其余 19 个返回"无效/用尽"(false, nil)，绝不报锁错。
+	const n = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	okCount := 0
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ok, err := s.ConsumeActivationCode("XK-CONC-0000-0001", "acct"+string(rune('0'+i)))
+			if err != nil {
+				t.Errorf("激活出错（锁忙应排队而非报错）: %v", err)
+				return
+			}
+			if ok {
+				mu.Lock()
+				okCount++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if okCount != 1 {
+		t.Fatalf("uses=1 的激活码并发消费应恰好 1 个成功，实际 %d", okCount)
+	}
+	codes, _ := s.ListActivationCodes()
+	if len(codes) != 1 || codes[0].UsedUses != 1 {
+		t.Fatalf("并发后 used_uses 应精确为 1（不超卖），实际 %+v", codes)
 	}
 }
 

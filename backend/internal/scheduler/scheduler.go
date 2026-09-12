@@ -104,12 +104,13 @@ type Scheduler struct {
 	done        map[string]map[int]bool // [账号][classID] 已成功
 	full        map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	lastProbe   time.Time
-	lastSubmit  time.Time  // 上次提交时间（submitAll 节流）
+	lastSubmit  time.Time             // 上次提交时间（submitAll 节流）
 	lastData    *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt  time.Time
-	tokenValid  map[string]bool // [账号] token 失效标记（false=有效，缺失即有效）
+	tokenValid  map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
 	reloginAt   map[string]time.Time // [账号] 上次重登时间（30s 节流）
-	reloginMu   sync.Mutex // 重登防重入（全局限一把，账号并发低）
+	relogging   map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
+	reloginMu   sync.Mutex           // 重登防重入（全局限一把，账号并发低）
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -133,6 +134,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		full:        make(map[string]map[int]bool),
 		tokenValid:  make(map[string]bool),
 		reloginAt:   make(map[string]time.Time),
+		relogging:   make(map[string]bool),
 		chains:      make(map[string]bool),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -252,7 +254,7 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	defer s.mu.Unlock()
 	st := s.state
 	st.OpenTime = s.openTimeNow() // 运行时配置优先（热重载立即反映）
-	st.TokenValid = !s.tokenValid[acct]
+	st.TokenValid = !s.tokenValid[acct] && !s.relogging[acct]
 	st.Courses = nil
 	for _, c := range s.state.Courses {
 		if c.Account == acct {
@@ -263,10 +265,11 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 }
 
 // TokenValidFor 查询指定账号教务 token 有效性（未记录失效标记即视为有效）。
+// relogging（重登进行中）也视为失效——重登尚未完成时对外显示"已失效·自动恢复中"。
 func (s *Scheduler) TokenValidFor(acct string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return !s.tokenValid[acct]
+	return !s.tokenValid[acct] && !s.relogging[acct]
 }
 
 // ElectivesSnapshot 返回内存课程快照（40 秒内有效）。超高性能核心：页面浏览零上游请求。
@@ -376,27 +379,43 @@ func (s *Scheduler) probe() {
 const reloginInterval = 30 * time.Second
 
 // maybeRelogin 对指定账号异步自动重登：防重入 + 30s 节流，成功后落库新 token 并补一次探测。
+// 失败/未重登会复位失效标记，下个 30s 节流窗口后仍可再试（绝不卡死为永久失效）。
 func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
-	if s.tokenValid[acct] {
-		return // 已在失效/重登中
+	if s.relogging[acct] {
+		return // 已有重登 goroutine 在跑，绝不再开第二条
 	}
 	if t, ok := s.reloginAt[acct]; ok && time.Since(t) < reloginInterval {
 		return // 30s 节流
 	}
-	s.reloginAt[acct] = time.Now()
+	s.reloginAt[acct] = time.Now() // 节流时间戳：探测每 30s 命中一次失效，这里防的是链内高频命中
 	s.mu.Lock()
-	s.tokenValid[acct] = true // 标记失效
+	s.relogging[acct] = true // 标记重登中
 	s.mu.Unlock()
 
 	go func() {
+		// 重登期间对平台屏蔽该账号提交（无效 token 请求纯浪费 + 熔断风险）
+		s.mu.Lock()
+		s.tokenValid[acct] = true
+		s.mu.Unlock()
+
 		relogged, err := s.clients.Relogin(acct)
+		s.mu.Lock()
+		defer func() {
+			delete(s.relogging, acct) // 清重登中标记（defer 保证失败也清，才能再试）
+			s.mu.Unlock()
+		}()
+
 		if err != nil {
+			s.tokenValid[acct] = false // 复位失效标记：下次探测可再触发重登
 			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
 			return
 		}
 		if !relogged {
+			// 无保存账密，无法重登：复位失效标记，等用户手动处理
+			s.tokenValid[acct] = false
+			log.Printf("[scheduler] 账号 %s 无保存账密，无法自动重登（请手动重新登录）", acct)
 			return
 		}
 		// 新 token 落库（持久化，重启后恢复不丢）
@@ -407,14 +426,10 @@ func (s *Scheduler) maybeRelogin(acct string) {
 				}
 			}
 		}
-		s.mu.Lock()
 		s.tokenValid[acct] = false // 恢复有效
-		s.mu.Unlock()
 		log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
 		// 重登成功后立即补一次探测（换新 token 后窗口可能已开）
-		s.mu.Lock()
 		s.lastProbe = time.Time{}
-		s.mu.Unlock()
 	}()
 }
 
@@ -462,6 +477,11 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 		client, ok := s.clients.ClientFor(acct)
 		for _, t := range ts {
 			s.mu.Lock()
+			// 重登期间跳过该账号全部提交（无效 token 请求纯浪费 + 熔断风险）
+			if s.relogging[acct] {
+				s.mu.Unlock()
+				return
+			}
 			// 已成功：本发布目标完成，终止
 			if s.doneHas(acct, t.ClassID) {
 				s.mu.Unlock()
@@ -494,6 +514,17 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				err = errors.New("账号会话未建立，等待重新登录")
 			} else {
 				msg, err = client.SelectClass(t.ClassID)
+			}
+			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复
+			if errors.Is(err, zhidao.ErrUnauthorized) {
+				s.maybeRelogin(acct)
+				s.mu.Lock()
+				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
+				if s.store != nil {
+					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)
+				}
+				s.mu.Unlock()
+				return
 			}
 
 			s.mu.Lock()

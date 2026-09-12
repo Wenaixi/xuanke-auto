@@ -23,7 +23,7 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 }
 
 func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
-func (f *fakeStore) UpdateIDToken(acct, idToken string) error  { return nil }
+func (f *fakeStore) UpdateIDToken(acct, idToken string) error   { return nil }
 
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
@@ -32,6 +32,7 @@ type fakeClient struct {
 	err         error
 	selectErr   map[int]error
 	selectCalls map[int]int
+	relogCalls  int // 重登回调调用次数（测试用）
 }
 
 func (f *fakeClient) setOpen(open bool) {
@@ -110,9 +111,10 @@ func newFakeClient(open bool) *fakeClient {
 
 // fakeAccts 伪账号注册表：所有账号共享一个 fakeClient（测试用）。
 type fakeAccts struct {
-	c        *fakeClient
-	relogErr error  // 重登错误（可编程）
-	relog    func() // 重登钩子（可编程，记录是否被调用）
+	c             *fakeClient
+	relogErr      error  // 重登错误（可编程）
+	relog         func() // 重登钩子（可编程，记录是否被调用）
+	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
 }
 
 func (f *fakeAccts) ClientFor(acct string) (Client, bool) { return f.c, true }
@@ -121,7 +123,14 @@ func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
 	return "acct1", f.c, true
 }
 func (f *fakeAccts) Relogin(acct string) (bool, error) {
+	f.c.mu.Lock()
+	f.c.relogCalls++
+	f.c.mu.Unlock()
 	if f.relogErr != nil {
+		// 重登失败路径：钩子先阻塞一次（让测试断言"重登中"），随后返回错误
+		if f.relog != nil && f.relogBlocking {
+			f.relog()
+		}
 		return false, f.relogErr
 	}
 	if f.relog != nil {
@@ -140,6 +149,14 @@ func (s *Scheduler) resetProbe() {
 	s.mu.Lock()
 	s.lastProbe = time.Time{}
 	s.mu.Unlock()
+}
+
+// resetReloginAtForTest 清空指定账号的重登节流与进行中标记（测试专用：模拟 30s 节流窗口已过）。
+func (s *Scheduler) resetReloginAtForTest(acct string) {
+	s.reloginMu.Lock()
+	defer s.reloginMu.Unlock()
+	s.reloginAt[acct] = time.Time{}
+	delete(s.relogging, acct)
 }
 
 func targets() []Target {
@@ -399,6 +416,7 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 		t.Fatalf("未确认满员时不应切备选，备选被提交 %d 次", calls)
 	}
 }
+
 // TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 5s 收紧。
 func TestProbeIntervalFor(t *testing.T) {
 	open := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)
@@ -425,8 +443,8 @@ func TestProbeIntervalFor(t *testing.T) {
 func TestTokenInvalidTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.err = zhidao.ErrUnauthorized // 探测返回失效
-	relogStart := make(chan bool)     // 重登开始信号（在标记失效后触发）
-	relogDone := make(chan bool)      // 重登完成信号
+	relogStart := make(chan bool)   // 重登开始信号（在标记失效后触发）
+	relogDone := make(chan bool)    // 重登完成信号
 	fa := &fakeAccts{c: fc, relog: func() {
 		relogStart <- true // 通知已进入重登（此时 token 已标记失效但尚未恢复）
 		<-relogDone        // 阻塞重登完成，让测试断言"重登中"状态
@@ -453,4 +471,75 @@ func TestTokenInvalidTriggersRelogin(t *testing.T) {
 	if !s.TokenValidFor("acct1") {
 		t.Fatal("重登成功后 token 应显示有效")
 	}
+}
+
+// TestReloginFailureRecoversNextCycle 重登失败不卡死：复位失效标记，下个 30s 节流窗口后可再触发重登。
+func TestReloginFailureRecoversNextCycle(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.err = zhidao.ErrUnauthorized // 探测命中失效
+	relogStart := make(chan bool, 10)
+	relogDone := make(chan bool)
+	fa := &fakeAccts{c: fc, relogErr: errors.New("验证码识别失败"), relogBlocking: true, relog: func() {
+		relogStart <- true
+		<-relogDone // 阻塞重登回调，让重登 goroutine 进入"失败"路径之前测试先断言
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+	select {
+	case <-relogStart:
+	case <-time.After(2 * time.Second):
+		t.Fatal("探测命中失效后应触发重登")
+	}
+	// 重登中：token 显示失效
+	if s.TokenValidFor("acct1") {
+		t.Fatal("重登进行中 token 应显示失效")
+	}
+	// 放行：重登返回失败 → 复位失效标记
+	close(relogDone)
+	time.Sleep(200 * time.Millisecond)
+	if !s.TokenValidFor("acct1") {
+		t.Fatal("重登失败后失效标记应复位（下个节流窗口可再试）")
+	}
+	// 下个 30s 节流窗口后可再触发重登（探测仍命中失效；第二次钩子已非阻塞，重登快速返回失败）
+	resetReloginDone := make(chan bool)
+	fa.relog = func() {
+		relogStart <- true
+		<-resetReloginDone // 非阻塞：第二次重登快速通过
+	}
+	s.resetReloginAtForTest("acct1")
+	s.resetProbe() // 探测节流也复位，让探测立即再次发起、再次命中失效
+	time.Sleep(300 * time.Millisecond)
+	// 第二次重登应触发（relogCalls 累计到 2，说明失败后确实还能再试）
+	fc.mu.Lock()
+	relogCalls := fc.relogCalls
+	fc.mu.Unlock()
+	if relogCalls < 2 {
+		t.Fatal("30s 节流窗口过后应再次触发重登")
+	}
+	close(resetReloginDone) // 收尾：若第二次重登仍在阻塞则放行，避免 Scheduler.Stop 泄漏 goroutine
+}
+
+// TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
+// lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
+func TestWindowOpenSubmitsWithoutProbeReset(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.selectErr[61115] = errors.New("connection reset") // 提交失败（网络类，会走实时人数复核路径）
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 等首次探测完成（窗口未开，状态 pending，探测正常跑过一次）
+	waitStatusAcct(t, s, "acct1", 61115, "pending", 2*time.Second)
+	// 窗口开启：此时 lastProbe 仍是最新（未 resetProbe）——探测被 30s 节流挡住，但提交必须每 1 秒重试
+	setAllOpened(fc)
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+
+	// 清除错误：下一次 1 秒重试应成功（全程不 resetProbe，纯粹靠提交闸门）
+	fc.mu.Lock()
+	delete(fc.selectErr, 61115)
+	fc.mu.Unlock()
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
 }

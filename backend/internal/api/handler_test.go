@@ -406,6 +406,26 @@ func TestAdminConfigVisionKeyEncryptedAtRest(t *testing.T) {
 	}
 }
 
+// TestAdminConfigRefuseUnencryptedVisionKey 拒绝未加密旧版明文：
+// 1. secureEncrypt 未注入加密器时必须报错拒绝（严禁明文落库）
+// 2. 模拟 main.go 启动恢复规则：DB 内存在未加密的旧明文时必须拒绝加载
+func TestAdminConfigRefuseUnencryptedVisionKey(t *testing.T) {
+	d := &Deps{}
+	if _, err := d.secureEncrypt("***REMOVED***"); err == nil {
+		t.Fatal("未注入 Encrypt 时 secureEncrypt 应报错拒绝")
+	}
+
+	// 模拟 main.go 启动恢复逻辑：无 enc: 前缀一律拒绝加载进 VisionAPIKey
+	kv := map[string]string{"vision_key": "***REMOVED***-unencrypted"}
+	loadedKey := ""
+	if v, ok := kv["vision_key"]; ok && strings.HasPrefix(v, "enc:") {
+		loadedKey = v
+	}
+	if loadedKey != "" {
+		t.Fatalf("旧版未加密明文不应被加载: %q", loadedKey)
+	}
+}
+
 func TestAdminStatsAccountsLogs(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)

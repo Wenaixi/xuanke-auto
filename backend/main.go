@@ -81,15 +81,15 @@ func main() {
 				c.VisionBaseURL = v
 			}
 			if v, ok := kv["vision_key"]; ok {
-				// vision_key 加密落库（v5）：读回时解密；旧明文值（v4 及更早落库）无 enc: 前缀则原样使用
+				// vision_key 严格要求加密存储（enc: 前缀），彻底拒绝旧版未加密明文
 				if strings.HasPrefix(v, "enc:") {
 					if plain, err := decrypt(strings.TrimPrefix(v, "enc:")); err == nil {
 						c.VisionAPIKey = plain
 					} else {
-						log.Printf("[main] 解密 vision_key 失败，回退空值: %v", err)
+						log.Printf("[main] 解密 vision_key 失败，已忽略: %v", err)
 					}
 				} else {
-					c.VisionAPIKey = v
+					log.Printf("[main] 警告：发现未加密的旧版 vision_key，已彻底拒绝加载（不兼容旧数据）")
 				}
 			}
 			if v, ok := kv["vision_model"]; ok {

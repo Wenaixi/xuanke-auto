@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -42,11 +43,11 @@ type Deps struct {
 	ActivationEnabled bool
 }
 
-// secureEncrypt 用注入的 Encrypt 加密敏感值，并加 enc: 前缀标记（main 读回时据此解密）；
-// 未注入 Encrypt 时原样返回（测试环境直构），读回时按旧版明文兼容处理。
+// secureEncrypt 用注入的 Encrypt 加密敏感值，并加 enc: 前缀标记（main 读回时据此解密）。
+// 严禁未加密存储：未注入 Encrypt 时报错拒绝，杜绝明文入库。
 func (d *Deps) secureEncrypt(v string) (string, error) {
 	if d.Encrypt == nil {
-		return v, nil
+		return "", errors.New("数据加密服务未初始化，拒绝未加密存储")
 	}
 	enc, err := d.Encrypt(v)
 	if err != nil {

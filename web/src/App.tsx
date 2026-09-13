@@ -172,7 +172,13 @@ export default function App() {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
                   const others = accounts.filter((a) => a !== adminName)
                   setInAdmin(false)
-                  if (others.length > 0) setCurrent(others[0])
+                  // 第 4 轮（D4）：无其他学生账号时回登录页（避免停在 Admin 的"学生端"死路）——
+                  // 否则 current 仍是 adminName，渲染条件 `inAdmin || current === adminName` 恒真。
+                  if (others.length > 0) {
+                    setCurrent(others[0])
+                  } else {
+                    setCurrent("")
+                  }
                 }}
               />
             ) : page === "dashboard" ? (

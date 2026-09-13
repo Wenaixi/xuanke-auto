@@ -119,10 +119,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
   }
 
-  // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）
+  // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）。
+  // M-8（第 3 轮）：加 2s 自轮询——electives 的升频判定依赖 window_opened 信号，
+  // 若此查询被动等 electives invalidate 才刷新，开窗瞬间（publishes 短暂为空）会把
+  // 10s 慢轮询带进黄金期；独立轮询让 window_opened 一开窗立即升频 2s，两信号同源。
   const { data: stateData } = useQuery({
     queryKey: ["state", account, sessionToken],
     queryFn: () => api<SchedulerState>("/state?account=" + encodeURIComponent(account), { session: sessionToken }),
+    refetchInterval: 2000,
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
@@ -139,7 +143,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     return () => clearInterval(timer)
   }, [])
 
-  // 进入页面时自动回显已保存的目标课程（含多备选优先级）
+  // 进入页面时自动回显已保存的目标课程（含多备选优先级）。
+  // M-9（第 3 轮）：函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽
+  // 外部 `selected` 导致数据重取后回显永久失效的问题。
   useEffect(() => {
     if (stateData?.courses && stateData.courses.length > 0) {
       setSelected((prev) => {
@@ -201,6 +207,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 自动保存：选课一变（仅用户点击），400ms 防抖后整包 PUT 到后端；成功静默，失败仅提示
   // MAJOR-H：保存串行化——飞行中的 PUT 完成后立即补发一次最新快照，绝不出现
   // "旧 PUT 后到覆盖新数据"的乱序丢失；内存 target 与后端最终一致。
+  // C-1（第 3 轮）：body 必须包成后端 TargetsRequest 期望的 {"targets":[...]} 对象——
+  // 此前发裸数组 100% 解码失败（后端 json 解码进 struct 直接报错），目标永远存不进库。
   const lastJson = useRef("")
   const targetRef = useRef<Target[]>([])
   const savingRef = useRef(false)
@@ -213,7 +221,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
       await api("/targets?account=" + encodeURIComponent(account), {
         method: "PUT",
-        body: json,
+        body: JSON.stringify({ targets }),
         session: sessionToken,
       })
       lastJson.current = json

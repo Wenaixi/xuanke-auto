@@ -630,12 +630,11 @@ func (s *Scheduler) probe() {
 	}
 	s.state.WindowOpened = opened
 	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
-	// 且从未开过窗 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
-	s.state.WindowClosed = !opened && len(data.Publishes) == 0 && !s.prevWindowOpened
-	// 窗口状态变化（关→开）时清空提交闸门：热改 openTime 提前/回拨后，首个 tick 立即提交而不被 1s 闸门卡掉
-	if opened && !s.prevWindowOpened {
-		s.lastSubmit = time.Time{}
-	}
+	// 且开放时间已过 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
+	// C-3（第 3 轮）：去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
+	// 若只认"从未开过窗"则开过再关后 WindowClosed 恒 false，probeIntervalFor 的
+	// "开放时间已过 + WindowClosed → 降回 30s"分支永不命中，窗口关闭后仍 2s 高频探测。
+	s.state.WindowClosed = !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
 	s.prevWindowOpened = opened
 	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)
 	s.mu.Unlock()
@@ -740,10 +739,11 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			return
 		}
 		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
-		// 不再误报"有效"（安全审计 MINOR 7）。失败计数复位为 1（而非保持封顶）：
-		// Vision 故障期 5 轮封顶后一旦恢复，账号必须能在基础 30s 间隔后再次尝试重登，
-		// 绝不让 reloginFail 恒为 5 把账号永续锁死在 10 分钟退避 (评审 MAJOR 4)。
-		s.reloginFail[acct] = 1
+		// 不再误报"有效"（安全审计 MINOR 7）。
+		// C1 修复（第 3 轮）：失败后 reloginFail 保留本次发起时递增到的次数，杜绝无条件复位 1——
+		// 否则计数恒 1→2→1→2 振荡，指数退避表永不增长，Vision 持续故障时退避恒为 30s，
+		// 平台锁号防线被击穿。失败次数只会随成功清零（上面成功分支 delete），
+		// 由 maybeRelogin 的退避窗口自然隔开下一次失败尝试。
 		s.mu.Unlock()
 		if err != nil {
 			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
@@ -1048,23 +1048,39 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 
 // releaseFullIfFreedLocked 快照显示不满时解除 full 标记并回 pending（需持锁）。
 // 只要快照显示有名额空余（如其他同学退选），立即解除 full 标记，黄金期 250ms 冲刺立即捡漏 (CRITICAL C1)。
+// C-3 守卫（第 3 轮）：只有快照**明确**显示该课程名额空余才解封——
+// 空快照（窗口关闭后平台清空课程列表）或快照中查不到该课程（无法判断）一律保持 full 不解封，
+// 否则窗口关闭后 spawnChain 每个 tick 都因 full 被解封重新打报名接口（窗口关闭防轰炸残留）。
 func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	if !s.fullHas(acct, classID) {
 		return
 	}
-	// 若无任何快照数据，无法判断，保持原状
-	if (s.acctData == nil || s.acctData[acct] == nil) && s.lastData == nil {
+	data := s.acctData[acct]
+	if data == nil {
+		data = s.lastData
+	}
+	if data == nil || len(data.Publishes) == 0 {
+		// 无快照或快照为空（窗口关闭特征）：无法确认余量，保持 full 不解封
 		return
 	}
-	if s.classFullInSnapshot(acct, classID) {
-		return
+	for _, p := range data.Publishes {
+		for _, c := range p.Classes {
+			if c.ID == classID {
+				// 明确有余量才解封；课程不在快照中（未知）也保持 full
+				if c.MaxCount > 0 && c.SelectedCount >= c.MaxCount {
+					return
+				}
+				delete(s.full[acct], classID)
+				idx := s.statusIndexLocked(acct, classID)
+				if idx >= 0 {
+					s.state.Courses[idx].Status = "pending"
+					s.state.Courses[idx].Result = ""
+				}
+				return
+			}
+		}
 	}
-	delete(s.full[acct], classID)
-	idx := s.statusIndexLocked(acct, classID)
-	if idx >= 0 {
-		s.state.Courses[idx].Status = "pending"
-		s.state.Courses[idx].Result = ""
-	}
+	// 课程不在快照中：无法判断，保持 full（保守不解封）
 }
 
 func (s *Scheduler) fullHas(acct string, classID int) bool {

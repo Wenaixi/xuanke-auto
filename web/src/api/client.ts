@@ -21,11 +21,13 @@ export async function api<T>(
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (session) headers.Authorization = `Bearer ${session}`
   Object.assign(headers, extraHeaders ?? {})
-  // 2 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不无限转圈（MAJOR-H 配套）
+  // 2 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不无限转圈（MAJOR-H 配套）。
+  // M-10（第 3 轮）：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
+  // 否则用兜底超时信号；此前 `...rest` 会把 ctrl.signal 被调用方 signal 静默覆盖。
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
   try {
-    const r = await fetch(BASE + path, { headers, ...rest, signal: ctrl.signal })
+    const r = await fetch(BASE + path, { headers, ...rest, signal: rest.signal ?? ctrl.signal })
     let j: { code: number; data: T; msg: string }
     try {
       j = await r.json()

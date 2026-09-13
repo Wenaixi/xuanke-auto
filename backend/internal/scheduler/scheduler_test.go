@@ -203,7 +203,7 @@ func (s *Scheduler) resetProbe() {
 	s.mu.Unlock()
 }
 
-// resetReloginAtForTest 清空指定账号的重登节流、失败计数与进行中标记（测试专用）。
+// resetReloginAtForTest 仅清空重登节流闸门，保留失败计数与进行中标记（测试专用）。
 // 锁序与 maybeRelogin 决策段一致（reloginMu 外层 + s.mu 内层），避免测试与调度器并发死锁。
 func (s *Scheduler) resetReloginAtForTest(acct string) {
 	s.reloginMu.Lock()
@@ -211,8 +211,6 @@ func (s *Scheduler) resetReloginAtForTest(acct string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloginAt[acct] = time.Time{}
-	delete(s.reloginFail, acct)
-	delete(s.relogging, acct)
 }
 
 func targets() []Target {
@@ -995,16 +993,16 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 // TestWindowClosedState 选课窗口关闭（探测返回空快照）时，状态应暴露 window_closed=true
 // 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
 func TestWindowClosedState(t *testing.T) {
-	// 窗口关闭特征：快照为空（平台选课窗口关闭后 findElectivesData 返回 code:0 空 publishes）
+	// 第 3 轮 C-3：空快照 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
 	fcEmpty := newFakeClient(false)
 	fcEmpty.mu.Lock()
 	fcEmpty.data.Publishes = nil
 	fcEmpty.mu.Unlock()
-	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
-		t.Fatal("空快照探测后 window_closed 应为 true")
+		t.Fatal("空快照 + 开放时间已过探测后 window_closed 应为 true")
 	}
 
 	// 正常数据但窗口未开：window_closed 必须为 false
@@ -1347,6 +1345,151 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	st2 := s.StateForAccount(acct)
 	if len(st2.Courses) == 0 || st2.Courses[0].Status != "pending" {
 		t.Fatalf("RemoveDone 后状态应重置为 pending 以便自动引擎重新接管，实际: %+v", st2.Courses)
+	}
+}
+
+// TestWindowClosedReleasesNoFull 窗口关闭后（空快照）绝不能把 full 标记解封：
+// releaseFullIfFreedLocked 对空快照（无课程可比对）必须保持 full 不解封，
+// 否则 spawnChain 每个 tick 都会重新打报名接口（C-3 窗口关闭防轰炸残留）。
+func TestWindowClosedReleasesNoFull(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+
+	s.mu.Lock()
+	if s.full[acct] == nil {
+		s.full[acct] = make(map[int]bool)
+	}
+	s.full[acct][classID] = true
+	// 窗口关闭特征：快照存在但 Publishes 为空（平台 findElectivesData 返回 code:0 空 publishes）
+	s.acctData[acct] = &zhidao.ElectivesData{Publishes: nil}
+	s.lastData = &zhidao.ElectivesData{Publishes: nil}
+	s.mu.Unlock()
+
+	s.releaseFullIfFreedLocked(acct, classID)
+	s.mu.Lock()
+	isFull := s.full[acct][classID]
+	s.mu.Unlock()
+	if !isFull {
+		t.Fatal("窗口关闭空快照绝不能解封 full 标记，否则每 tick 每链轰炸报名接口")
+	}
+}
+
+// TestReleaseFullIfFreedKeepsFullOnUnknown 快照未知（课程不在快照中）时同样不能解封：
+// 只有快照明确显示该课程有余量才解封，未知状态一律保守保持 full（C-3 守卫）。
+func TestReleaseFullIfFreedKeepsFullOnUnknown(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+
+	s.mu.Lock()
+	if s.full[acct] == nil {
+		s.full[acct] = make(map[int]bool)
+	}
+	s.full[acct][classID] = true
+	// 快照存在但课程 61115 不在其中（只有 61116）：未知状态
+	s.acctData[acct] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
+		{Classes: []zhidao.Class{{ID: 61116, SelectedCount: 0, MaxCount: 30}}},
+	}}
+	s.mu.Unlock()
+
+	s.releaseFullIfFreedLocked(acct, classID)
+	s.mu.Lock()
+	isFull := s.full[acct][classID]
+	s.mu.Unlock()
+	if !isFull {
+		t.Fatal("快照无法确认该课程有余量时必须保持 full，绝不解封导致重复轰炸报名接口")
+	}
+}
+
+// TestWindowClosedProbeDropsToFar 窗口开过再关（开放时间已过 + 空快照）后，探测间隔必须
+// 降回 30s（C-3 C2a 残留）：此前 WindowClosed 带 !prevWindowOpened 判定导致"开过再关"恒 false，
+// 窗口关闭后仍 2s 高频探测——修复后以"开放时间已过 + 空快照"为关闭判定。
+func TestWindowClosedProbeDropsToFar(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil // 窗口关闭特征：空快照
+	fc.mu.Unlock()
+	// 开放时间已过 1 小时：符合"开放时间已过 + 空快照"的关闭判定
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.probe() // 探测落地 WindowClosed 状态
+
+	if !s.WindowClosed() {
+		t.Fatal("开放时间已过 + 空快照应判定窗口已关闭")
+	}
+	got := s.probeIntervalFor(time.Now())
+	if got != probeIntervalFar {
+		t.Fatalf("窗口开过再关后探测间隔应降回 30s，实际 %v", got)
+	}
+}
+
+// TestReloginFailureKeepsBackoff 重登失败后 reloginFail 计数必须保留增长（不无条件复位为 1），
+// 指数退避表才能逐次拉长，Vision 持续故障时登录频率越来越低（C1）。
+// 修复前：发起时 1→2，失败后无条件复位 1，计数恒 1→2→1→2 振荡，退避表永不增长。
+func TestReloginFailureKeepsBackoff(t *testing.T) {
+	fc := newFakeClient(false)
+	fa := &fakeAccts{c: fc}
+	fa.relogErr = errors.New("vision down")
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	acct := "acct1"
+
+	// 模拟连续 3 次失败，每次失败后计数必须保留增长
+	for i := 0; i < 3; i++ {
+		s.resetReloginAtForTest(acct)
+		s.maybeRelogin(acct)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			s.mu.Lock()
+			relogging := s.relogging[acct]
+			s.mu.Unlock()
+			if !relogging {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	s.mu.Lock()
+	n := s.reloginFail[acct]
+	s.mu.Unlock()
+	if n < 3 {
+		t.Fatalf("连续 3 次失败后 reloginFail 应保留为 3（退避表增长），实际 %d——无条件复位 1 会击穿指数退避", n)
+	}
+	if wait := s.reloginBackoff(n); wait < 60*time.Second {
+		t.Fatalf("失败 %d 次后的退避应 ≥60s，实际 %v", n, wait)
+	}
+}
+
+// TestWindowClosedSelectStopsBombing 窗口关闭后（SelectClass 返回"已结束/无效"错误）的
+// spawnChain 完整路径：课程第一次命中 isWindowClosedError 记入 full，之后每 tick 不得
+// 再次调用 SelectClass（C-3 防轰炸主路径回归）。
+func TestWindowClosedSelectStopsBombing(t *testing.T) {
+	fc := newFakeClient(true)
+	// 窗口关闭特征错误：平台对已关闭窗口的报名返回 code=1 "该课程已结束"
+	fc.selectErr[61115] = errors.New("该课程已结束，无法报名")
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 首轮：SelectClass 调用 ≥1 次并记入 full
+	time.Sleep(80 * time.Millisecond)
+	fc.mu.Lock()
+	calls := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if calls < 1 {
+		t.Fatalf("首轮应至少调用 1 次 SelectClass，实际 %d", calls)
+	}
+
+	// 再等 300ms（多个 tick）：full 已记入，后续必须 0 次新增调用
+	time.Sleep(300 * time.Millisecond)
+	fc.mu.Lock()
+	callsAfter := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if callsAfter > calls {
+		t.Fatalf("窗口关闭后 full 应阻止后续提交，调用从 %d 增长到 %d——防轰炸失效", calls, callsAfter)
 	}
 }
 

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,43 +30,78 @@ func normalizeCaptchaText(s string) string {
 	return b.String()
 }
 
-// captchaSemaphore 全局验证码识别并发限流信号量（默认并发 1）。
-// 多个账号同时失效重登时，识别请求严格串行——平台验证码接口与登录接口
-// 对高并发敏感，串行识别从根因杜绝"登录失败次数过多"熔断。
-var captchaSemaphore chan struct{}
+// captchaLimiter 动态线程安全验证码识别并发限流器（使用 Mutex + Cond 协同，彻底杜绝 channel 替换引发的死锁与竞态）。
+type captchaLimiter struct {
+	mu      sync.Mutex
+	cond    *sync.Cond
+	limit   int
+	running int
+}
 
-// SetCaptchaConcurrency 动态调整识别并发上限（管理员热重载，默认 1）。
-// 并发只能收敛到更小（信号量无法扩容），扩容需重启服务。
-func SetCaptchaConcurrency(n int) {
+var (
+	globalLimiter     *captchaLimiter
+	globalLimiterOnce sync.Once
+)
+
+func getGlobalLimiter() *captchaLimiter {
+	globalLimiterOnce.Do(func() {
+		globalLimiter = newCaptchaLimiter(1)
+	})
+	return globalLimiter
+}
+
+func newCaptchaLimiter(limit int) *captchaLimiter {
+	if limit < 1 {
+		limit = 1
+	}
+	l := &captchaLimiter{limit: limit}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+func (l *captchaLimiter) Acquire() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for l.running >= l.limit {
+		l.cond.Wait()
+	}
+	l.running++
+}
+
+func (l *captchaLimiter) Release() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.running > 0 {
+		l.running--
+	}
+	l.cond.Broadcast()
+}
+
+func (l *captchaLimiter) SetLimit(n int) {
 	if n < 1 {
 		n = 1
 	}
-	cur := cap(captchaSemaphore)
-	if cur == n {
-		return
-	}
-	if cur < n {
-		// 扩容需重建信号量，但重建无法等待在飞请求——这里保守不做（重启后生效）
-		log.Printf("[captcha] 识别并发扩容至 %d 需重启服务生效，当前保持 %d", n, cur)
-		return
-	}
-	// 收敛：用局部信号量逐步替换，直到容量降至目标（并发请求可在旧信号量上继续）
-	down := make(chan struct{}, n)
-	captchaSemaphore = down
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.limit = n
+	l.cond.Broadcast()
+}
+
+// SetCaptchaConcurrency 动态调整识别并发上限（管理员热重载，默认 1）。
+func SetCaptchaConcurrency(n int) {
+	getGlobalLimiter().SetLimit(n)
 }
 
 // NewCaptchaSemaphore 初始化识别并发信号量（默认并发 1，启动时调用一次）。
 func NewCaptchaSemaphore(concurrency int) {
-	if concurrency < 1 {
-		concurrency = 1
-	}
-	captchaSemaphore = make(chan struct{}, concurrency)
+	getGlobalLimiter().SetLimit(concurrency)
 }
 
 // withConcurrency 在信号量许可下执行识别（串行化识别请求，返回识别结果）。
 func withConcurrency(fn func() (string, error)) (string, error) {
-	captchaSemaphore <- struct{}{}
-	defer func() { <-captchaSemaphore }()
+	limiter := getGlobalLimiter()
+	limiter.Acquire()
+	defer limiter.Release()
 	return fn()
 }
 

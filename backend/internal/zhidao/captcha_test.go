@@ -86,3 +86,51 @@ func TestCaptchaConcurrency(t *testing.T) {
 		}
 	}
 }
+
+// TestSetCaptchaConcurrencyConcurrent 验证高并发下动态热调整并发度不会导致死锁或竞态 (CRITICAL 验证码 C1)。
+func TestSetCaptchaConcurrencyConcurrent(t *testing.T) {
+	NewCaptchaSemaphore(2)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// 启动多个协程持续执行 withConcurrency
+	for i := 0; i < 15; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _ = withConcurrency(func() (string, error) {
+						time.Sleep(5 * time.Millisecond)
+						return "ok", nil
+					})
+				}
+			}
+		}()
+	}
+
+	// 主协程在 200ms 内频繁动态调整并发度
+	for i := 0; i < 20; i++ {
+		SetCaptchaConcurrency((i % 4) + 1)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(stop)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// 成功退出，没有死锁
+	case <-time.After(3 * time.Second):
+		t.Fatal("SetCaptchaConcurrency 在高并发热调时发生死锁！")
+	}
+}
+

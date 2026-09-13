@@ -51,7 +51,7 @@ type Client struct {
 	password  string
 	mu        sync.Mutex // 保护 token/cookie 读写
 	token     string
-	cookies   map[string]string // 附加 Cookie（access_limit_cookie 等）
+	cookies   map[string]string // 附加 Cookie（access_limit_cookie / zd_edu_cookie 等）
 	visionCfg VisionConfig
 }
 
@@ -355,6 +355,9 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 	if err != nil {
 		return nil, err
 	}
+	// Cookie 头一律统一注入（idToken 参数与 zd_edu_cookie 双通道）。
+	// 平台接口鉴权严格按 Cookie 头的 zd_edu_cookie 比对，
+	// 缺失该 Cookie（即使 URL 带 idToken）也会被拒为"您未登录"。
 	if len(cookies) > 0 {
 		parts := make([]string, 0, len(cookies))
 		for k, v := range cookies {

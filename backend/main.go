@@ -3,10 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
@@ -172,11 +170,4 @@ func adminNameOrDefault(name string) string {
 		return "admin"
 	}
 	return name
-}
-
-// openBrowser 在服务启动后用系统默认浏览器打开前端页面。
-func openBrowser(url string) {
-	start := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	start.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	_ = start.Start()
 }

@@ -1,6 +1,10 @@
 const BASE = "/api"
 
-// 未登录（会话失效）事件：全局通知 App 移除对应账号会话
+// 未登录（会话失效）事件：全局通知 App 移除对应账号会话。
+// detail.account 为失效请求的归属账号：优先取 URL 的 ?account= 参数；
+// 无该参数（如 /state、/logs 按会话隔离的请求）时回退为发起请求时
+// 注入的会话令牌（session）——App 持有 sessions 映射可反查账号。
+// 避免 401 迟到返回时事件监听器闭包里的 current 已切到其他账号而误杀。
 export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
 export class ApiError extends Error {
@@ -35,13 +39,17 @@ export async function api<T>(
       throw new ApiError(-2, "服务器响应异常（HTTP " + r.status + "）")
     }
     if (j.code === 401) {
-      // 会话过期：广播事件，附带发生 401 的目标账号（避免代理查询时误杀管理员）
+      // 会话过期：广播事件，附带发生 401 的目标账号（避免代理查询时误杀管理员）。
+      // account 优先取 URL 参数；无参数时用发起请求的会话令牌（App 侧反查账号），
+      // 杜绝慢请求乱序返回时按闭包 current 误删其他账号（第 4 轮前端审查问题 3）。
       let account = ""
       if (path.includes("account=")) {
         const match = path.match(/[?&]account=([^&]+)/)
         if (match) account = decodeURIComponent(match[1])
       }
-      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account } }))
+      window.dispatchEvent(
+        new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account: account || session } })
+      )
       throw new ApiError(j.code, j.msg || "会话已失效")
     }
     if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")

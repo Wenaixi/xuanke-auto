@@ -75,22 +75,27 @@ export default function App() {
     if (current !== adminName) setInAdmin(false)
   }, [accounts, current, adminName])
 
-  // 后端返回 401（会话过期）：剔除目标账号的失效令牌（CRITICAL 前端 C1 防御）
+  // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。
+  // 第 4 轮：detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
+  // 不到账号时（如本地已注销）跳过，杜绝慢请求乱序返回时按闭包 current 误杀其他账号。
   useEffect(() => {
     const onUnauthorized = (e: Event) => {
       const detail = (e as CustomEvent)?.detail
-      // 局部命名避开外层 targetAccount 状态（n13：需引用该状态清理代理视图）
-      const lostAccount = detail?.account || current
-      // n13（第 3 轮）：被吊销的账号恰是管理员当前代理查看的学生账号时，先退出
-      // 代理视图——该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。
-      // （不依赖下方 setSessions：代理场景因守卫提前 return，这里必须独立清理。）
+      const lostRaw = detail?.account || current
+      // 反查归属账号：detail.account 可能是账号名也可能是会话令牌（无 ?account= 的请求）
+      const sessionsSnap = loadSessions()
+      const lostAccount =
+        sessionsSnap[lostRaw] === undefined ? Object.keys(sessionsSnap).find((k) => sessionsSnap[k] === lostRaw) : lostRaw
+      if (!lostAccount) return
+      // 被吊销的账号恰是管理员当前代理查看的学生账号时，先退出代理视图——
+      // 该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。
       setTargetAccount((prev) => (prev === lostAccount ? null : prev))
       // 管理员处于后台管理态代理查看学生大厅时，若发生 401 绝不误杀管理员自身会话
       if (current === adminName && inAdmin && lostAccount !== adminName) {
         return
       }
       setSessions((prev) => {
-        if (!lostAccount || !prev[lostAccount]) return prev
+        if (!prev[lostAccount]) return prev
         const next = { ...prev }
         delete next[lostAccount]
         saveSessions(next)

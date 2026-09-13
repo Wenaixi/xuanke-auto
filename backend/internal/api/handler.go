@@ -214,6 +214,112 @@ func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, data, "")
 }
 
+// ElectiveActionRequest 手动报名或退选请求体。
+type ElectiveActionRequest struct {
+	ClassID    int    `json:"class_id"`
+	CourseName string `json:"course_name,omitempty"`
+}
+
+// handleElectiveSelect 手动报名指定课程 (POST /api/electives/select)
+func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
+	acct := sessionAccount(r)
+	if acct == d.AdminNameValue() {
+		if q := r.URL.Query().Get("account"); q != "" {
+			acct = q
+		}
+	}
+	if acct == "" || acct == d.AdminNameValue() {
+		writeJSON(w, 1, nil, "请指定有效学生账号")
+		return
+	}
+
+	var req ElectiveActionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+		return
+	}
+	if req.ClassID <= 0 {
+		writeJSON(w, 1, nil, "无效的课程ID")
+		return
+	}
+
+	// 1. 获取单课提交排他锁，防止与后台自动抢课并发冲突
+	release, ok := d.Sched.TryAcquireSubmit(acct, req.ClassID)
+	if !ok {
+		writeJSON(w, 1, nil, "该课程正在提交中，请勿重复操作")
+		return
+	}
+	defer release()
+
+	// 2. 获取该账号独立客户端
+	client, ok := d.Accounts.ClientFor(acct)
+	if !ok {
+		writeJSON(w, 1, nil, "账号会话未建立或未登录")
+		return
+	}
+
+	// 3. 调用教务平台真实报名接口
+	msg, err := client.SelectClass(req.ClassID)
+	if err != nil {
+		writeJSON(w, 1, nil, err.Error())
+		return
+	}
+
+	// 4. 报名成功：同步调度器 done 状态并持久化
+	_ = d.Sched.MarkDone(acct, req.ClassID, req.CourseName, msg)
+	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
+}
+
+// handleElectiveExit 手动退选指定课程 (POST /api/electives/select/exit)
+func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
+	acct := sessionAccount(r)
+	if acct == d.AdminNameValue() {
+		if q := r.URL.Query().Get("account"); q != "" {
+			acct = q
+		}
+	}
+	if acct == "" || acct == d.AdminNameValue() {
+		writeJSON(w, 1, nil, "请指定有效学生账号")
+		return
+	}
+
+	var req ElectiveActionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+		return
+	}
+	if req.ClassID <= 0 {
+		writeJSON(w, 1, nil, "无效的课程ID")
+		return
+	}
+
+	// 1. 获取单课提交排他锁，防止并发冲突
+	release, ok := d.Sched.TryAcquireSubmit(acct, req.ClassID)
+	if !ok {
+		writeJSON(w, 1, nil, "该课程正在操作中，请勿重复操作")
+		return
+	}
+	defer release()
+
+	// 2. 获取该账号独立客户端
+	client, ok := d.Accounts.ClientFor(acct)
+	if !ok {
+		writeJSON(w, 1, nil, "账号会话未建立或未登录")
+		return
+	}
+
+	// 3. 调用教务平台真实退选接口
+	msg, err := client.ExitClass(req.ClassID)
+	if err != nil {
+		writeJSON(w, 1, nil, err.Error())
+		return
+	}
+
+	// 4. 退选成功：从调度器 done 移除（后台自动引擎下个 tick 可重新接管），记日志
+	_ = d.Sched.RemoveDone(acct, req.ClassID)
+	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
+}
+
 // TargetsRequest 设置目标请求体（账号由会话决定，不接收客户端传账号）。
 type TargetsRequest struct {
 	Targets []scheduler.Target `json:"targets"`

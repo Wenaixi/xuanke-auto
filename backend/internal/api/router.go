@@ -134,6 +134,12 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("GET /api/electives", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleElectives)(w, r)
 	})
+	mux.HandleFunc("POST /api/electives/select", func(w http.ResponseWriter, r *http.Request) {
+		requireAuth(d, d.handleElectiveSelect)(w, r)
+	})
+	mux.HandleFunc("POST /api/electives/select/exit", func(w http.ResponseWriter, r *http.Request) {
+		requireAuth(d, d.handleElectiveExit)(w, r)
+	})
 	mux.HandleFunc("PUT /api/targets", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleSetTargets)(w, r)
 	})

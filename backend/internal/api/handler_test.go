@@ -72,6 +72,8 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "tok-new"})
 		case strings.HasSuffix(r.URL.Path, "/selectElectivesClass"):
 			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "msg": "报名成功"})
+		case strings.HasSuffix(r.URL.Path, "/exitElectivesClass"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "msg": "退选成功"})
 		default:
 			json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "unknown " + r.URL.Path})
 		}
@@ -689,5 +691,47 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 	}
 	if j["code"].(float64) != 403 {
 		t.Fatalf("表单提交激活应被拒绝 code=403，实际 %v", j)
+	}
+}
+
+// TestHandleElectivesSelectAndExit 验证手动报名与退选 REST API 接口 (Task 4)。
+func TestHandleElectivesSelectAndExit(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	// 1. 测试手动报名 POST /api/electives/select
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("手动报名失败: %d %v", code, j)
+	}
+	// 验证调度器状态被同步为 success
+	st := d.sched.StateForAccount("acct1")
+	found := false
+	for _, c := range st.Courses {
+		if c.ClassID == 61115 && c.Status == "success" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("手动报名成功后调度器状态应被标记为 success")
+	}
+
+	// 2. 测试手动退选 POST /api/electives/select/exit
+	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select/exit", `{"class_id":61115}`, tok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("手动退选失败: %d %v", code, j)
+	}
+	// 验证调度器状态被重置为 pending
+	st = d.sched.StateForAccount("acct1")
+	foundPending := false
+	for _, c := range st.Courses {
+		if c.ClassID == 61115 && c.Status == "pending" {
+			foundPending = true
+			break
+		}
+	}
+	if !foundPending {
+		t.Fatal("手动退选成功后调度器状态应被恢复为 pending")
 	}
 }

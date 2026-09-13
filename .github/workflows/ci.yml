@@ -59,6 +59,16 @@ jobs:
           cd backend
           CGO_ENABLED=0 go build -v -ldflags="-s -w" -o xuanke-ci-check .
 
+      - name: Verify Linux Cross-Compilation
+        run: |
+          cd backend
+          GOOS=linux CGO_ENABLED=0 go build -o /dev/null .
+
+      - name: Verify macOS Cross-Compilation
+        run: |
+          cd backend
+          GOOS=darwin CGO_ENABLED=0 go build -o /dev/null .
+
   # ============ Windows：验证内嵌原生 ddddocr（CGO=1）单二进制可编译 ============
   ci-windows:
     name: Windows CGO Build Check

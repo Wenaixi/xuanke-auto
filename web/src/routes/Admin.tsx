@@ -445,12 +445,17 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
         </CardHeader>
         <CardContent className="pt-3 flex items-center justify-between">
           <span className="text-xs text-neutral-400">当前状态</span>
+          {/* n9：switch 语义化——button role=switch + aria-checked，键盘可聚焦可开关
+              （此前是裸 button 无语义，读屏不识别开关状态） */}
           <button
+            type="button"
+            role="switch"
+            aria-checked={activationOn}
+            aria-label="激活码机制"
             onClick={() => setActivationOn(!activationOn)}
-            className={`w-11 h-6 rounded-full border transition-colors relative ${
+            className={`w-11 h-6 rounded-full border transition-colors relative focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
               activationOn ? "bg-white border-white" : "glass-input border-neutral-700"
             }`}
-            aria-pressed={activationOn}
           >
             <span
               className={`absolute top-0.5 h-5 w-5 rounded-full transition-all ${

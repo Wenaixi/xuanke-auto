@@ -213,6 +213,31 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const targetRef = useRef<Target[]>([])
   const savingRef = useRef(false)
   const dirtyRef = useRef(false)
+  // n14（第 3 轮）：失败重发状态——attempt 累计连续失败次数、timer 为退避重发定时器。
+  // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
+  const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
+  // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
+  useEffect(
+    () => () => {
+      if (retryState.current.timer) clearTimeout(retryState.current.timer)
+    },
+    []
+  )
+  const resetRetry = () => {
+    if (retryState.current.timer) clearTimeout(retryState.current.timer)
+    retryState.current.timer = null
+    retryState.current.attempt = 0
+  }
+  const scheduleRetry = () => {
+    const attempt = retryState.current.attempt
+    if (attempt >= 5) return // 连续失败 5 次后停止自动重发（等用户改动触发新一轮）
+    const delay = Math.min(2 ** attempt, 16) * 2000 // 指数退避：2s / 4s / 8s / 16s / 16s
+    retryState.current.attempt = attempt + 1
+    retryState.current.timer = setTimeout(() => {
+      retryState.current.timer = null
+      void saveNow()
+    }, delay)
+  }
   const saveNow = async () => {
     savingRef.current = true
     try {
@@ -225,23 +250,32 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         session: sessionToken,
       })
       lastJson.current = json
+      resetRetry() // 保存成功：清掉退避重发状态
     } catch (e: any) {
       toast({
         title: "目标保存失败",
         description: e.message || "通信异常，请重试",
         variant: "destructive",
       })
+      //n14（第 3 轮）：失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
+      //网络抖动/瞬时故障下不再退化为"尽力而为"，直至成功或用户新改动接管。
+      dirtyRef.current = true
+      scheduleRetry()
     } finally {
       savingRef.current = false
-      if (dirtyRef.current) {
-        // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据
+      // 保存期间用户又改了目标（且非失败重试态）：立即补发一次最新快照，
+      // 避免旧 PUT 后到覆盖新数据。失败重发走上面的退避定时器，不在此紧循环。
+      if (dirtyRef.current && retryState.current.attempt === 0) {
         dirtyRef.current = false
         void saveNow()
       }
     }
   }
+  // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据
   useEffect(() => {
     if (rev === 0) return
+    // n14：用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
+    resetRetry()
     const build = (): Target[] => {
       const targets: Target[] = []
       for (const p of publishes) {

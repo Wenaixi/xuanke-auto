@@ -930,7 +930,7 @@ func recoverMiddleware(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("[api] panic recovered: %v", rec)
-				writeJSON(w, 500, nil, "内部错误: "+fmt.Sprint(rec))
+				writeJSON(w, 500, nil, "内部错误")
 			}
 		}()
 		next.ServeHTTP(w, r)

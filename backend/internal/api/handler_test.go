@@ -481,6 +481,32 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	}
 }
 
+// TestRecoverMiddlewareHidesPanicDetail n1：panic 详情绝不回显客户端——统一 500 文案，
+// 内部细节只进日志。修复前（拼接 rec）响应会泄露 panic 内容，本测试即 RED。
+func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
+	// 直构一个会 panic 的 handler，验证 recoverMiddleware 包装后对外只见"内部错误"
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("内部密钥泄露: sk-abcdef123456")
+	})
+	h := recoverMiddleware(panicHandler)
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+	}
+	if j["code"].(float64) != 500 {
+		t.Fatalf("panic 应统一 500: %v", j)
+	}
+	if msg, _ := j["msg"].(string); strings.Contains(msg, "sk-abcdef123456") {
+		t.Fatalf("panic 详情泄露给客户端: %v", j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "内部错误") {
+		t.Fatalf("应统一回显「内部错误」文案: %v", j)
+	}
+}
+
 // TestAdminConfigSaveFailStillDispatch M-4：落库失败时——配置已内存生效、下游热下发
 // 必须照常执行（识别引擎/Vision 同步新值），且响应如实区分"已生效但落库失败"（code=500）。
 func TestAdminConfigSaveFailStillDispatch(t *testing.T) {

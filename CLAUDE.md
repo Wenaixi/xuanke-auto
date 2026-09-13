@@ -101,6 +101,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **发布态（前端嵌入二进制，便携单文件交付）**：
   - 前端 `npm run build` 生成的纯静态产物（`web/dist`）通过 Go 原生 `//go:embed dist/*` 嵌入进 `backend/xuanke.exe`；
   - 最终用户无需安装 Node.js 或前端环境，双击单个 `xuanke.exe` 即可在单一端口同时提供后端抢课引擎与前端网页，开箱即用！
+- **防逆向交付（garble 混淆）**：发布态 exe 用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 构建——`-literals` 加密所有字符串字面量（选课接口路径、教务域名、课程数据、管理员提示全部不可见，strings 扫描零命中）、`-tiny` 删除源码路径信息、`-ldflags` 剥符号表；实测从 12.6MB → 24.7MB（Go 运行时无法压缩）。冒烟验证：7 账号会话恢复、服务端时钟对齐、`/` 与 `/api/electives` 200、前端 JS asset 嵌入可访问。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
 
 ### UI 设计系统规范（纯黑白极简艺术 + 瑞士国际排版规范）
 - **设计哲学**：彻底清除任何喧宾夺主、聒噪浮夸的技术宣传口号（如“毫秒级并发”、“智能Vision识别”等广告横幅），全面转向**纯黑白极简艺术风格（Monochrome Fine Art）**，致敬瑞士国际平面排版与现代高奢画廊策展美学。

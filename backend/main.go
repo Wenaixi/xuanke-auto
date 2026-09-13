@@ -147,8 +147,9 @@ func main() {
 		}
 	}()
 
-	// 会话库（12 小时过期）
+	// 会话库（12 小时过期；M-7 后台周期清扫过期会话与票据）
 	sessions := session.New(12 * time.Hour)
+	defer sessions.Close()
 
 	mux := http.NewServeMux()
 	apiHandler := api.Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, cfg.AdminToken,

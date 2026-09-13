@@ -28,6 +28,10 @@ type Store struct {
 	sessions map[string]*Session
 	tickets  map[string]*ticket
 	ttl      time.Duration
+	// sweeperStop / sweeperDone：周期清扫协程控制（M-7 会话过期后台清扫）。
+	sweeperStop  chan struct{}
+	sweeperDone  chan struct{}
+	sweeperClose sync.Once
 }
 
 // ticket 一次激活票据：绑定账号，只能使用一次。
@@ -37,9 +41,60 @@ type ticket struct {
 	used    bool
 }
 
-// New 创建会话存储，ttl 为会话有效期。
+// New 创建会话存储，ttl 为会话有效期，并启动周期清扫协程（M-7：后台定期
+// 删除过期会话与过期激活票据，杜绝令牌表无限膨胀）。ttl<=0 时不启动清扫
+// （零 TTL 测试场景——会话立即过期，清扫无意义）。
 func New(ttl time.Duration) *Store {
-	return &Store{sessions: make(map[string]*Session), tickets: make(map[string]*ticket), ttl: ttl}
+	s := &Store{sessions: make(map[string]*Session), tickets: make(map[string]*ticket), ttl: ttl}
+	if ttl > 0 {
+		s.sweeperStop = make(chan struct{})
+		s.sweeperDone = make(chan struct{})
+		go s.sweepLoop()
+	}
+	return s
+}
+
+// sweepLoop 周期清扫：每 5 分钟删除过期会话与过期票据（防令牌表无限膨胀）。
+func (s *Store) sweepLoop() {
+	defer close(s.sweeperDone)
+	tk := time.NewTicker(5 * time.Minute)
+	defer tk.Stop()
+	for {
+		select {
+		case <-tk.C:
+			s.sweepExpired()
+		case <-s.sweeperStop:
+			return
+		}
+	}
+}
+
+// sweepExpired 删除全部过期会话与过期票据（锁内线性扫描，表小可接受）。
+func (s *Store) sweepExpired() {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tok, sess := range s.sessions {
+		if now.After(sess.Expires) {
+			delete(s.sessions, tok)
+		}
+	}
+	for tok, t := range s.tickets {
+		if now.After(t.expires) {
+			delete(s.tickets, tok)
+		}
+	}
+}
+
+// Close 停止清扫协程并等待退出（进程退出时调用，测试 Cleanup 防泄漏）。
+func (s *Store) Close() {
+	s.sweeperClose.Do(func() {
+		if s.sweeperStop == nil {
+			return
+		}
+		close(s.sweeperStop)
+		<-s.sweeperDone
+	})
 }
 
 // CreateTicket 为"刚通过教务登录但尚未激活"的账号签发短期单次激活票据。

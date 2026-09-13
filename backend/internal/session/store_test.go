@@ -165,3 +165,54 @@ func TestActivationTicketExpiry(t *testing.T) {
 		t.Fatal("过期票据必须拒绝")
 	}
 }
+
+// TestSweepExpired M-7：周期清扫删除过期会话与过期票据（后台协程 5 分钟一拍；
+// 直接调 sweepExpired 验证清扫语义），且有效会话/票据不被误删。
+func TestSweepExpired(t *testing.T) {
+	s := New(time.Hour)
+	defer s.Close()
+	// 两个会话：一个已过期、一个有效
+	expiredTok := s.Create("acct-expired")
+	validTok := s.Create("acct-valid")
+	// 两个票据：一个已过期、一个有效
+	expiredTicket := s.CreateTicket("acct-expired")
+	validTicket := s.CreateTicket("acct-valid")
+	// 白盒改写过期时间
+	s.mu.Lock()
+	for tok, sess := range s.sessions {
+		if tok == expiredTok {
+			sess.Expires = time.Now().Add(-time.Minute)
+		}
+	}
+	for tok, t := range s.tickets {
+		if tok == expiredTicket {
+			t.expires = time.Now().Add(-time.Minute)
+		}
+	}
+	s.mu.Unlock()
+
+	s.sweepExpired()
+
+	// 过期项已被删除
+	if _, ok := s.Account(expiredTok); ok {
+		t.Fatal("过期会话应被清扫")
+	}
+	if err := s.ConsumeTicket(expiredTicket, "acct-expired"); err == nil {
+		t.Fatal("过期票据应被清扫")
+	}
+	// 有效项完好
+	if acct, ok := s.Account(validTok); !ok || acct != "acct-valid" {
+		t.Fatalf("有效会话不应被误删: %q %v", acct, ok)
+	}
+	if err := s.ConsumeTicket(validTicket, "acct-valid"); err != nil {
+		t.Fatalf("有效票据不应被误删: %v", err)
+	}
+}
+
+// TestSweeperLoopStopsOnClose M-7：Close 停止清扫协程且不泄漏（-race 下运行，
+// 若协程未退出会因访问已关闭 channel 报竞态/死锁）。
+func TestSweeperLoopStopsOnClose(t *testing.T) {
+	s := New(time.Hour)
+	s.Close()
+	s.Close() // 幂等
+}

@@ -1114,6 +1114,35 @@ func TestLoginLimiterGC(t *testing.T) {
 	}
 }
 
+// TestLoginActivateSeparateBuckets M-6：登录与激活各自独立限流桶——
+// 刷空登录额度后，激活接口不受影响；刷空激活额度后，登录接口不受影响。
+// 反代/学校 NAT 下二者互不锁死（选课当天并发登录不会因激活爆破被全员 429）。
+func TestLoginActivateSeparateBuckets(t *testing.T) {
+	d := newTestDeps(t)
+	// 先立刻榨干激活桶：连续 7 次激活（未携带票据，每次都被拒但消耗激活额度）
+	// 第 6 次起应触发激活限流 429
+	limited := false
+	for i := 0; i < 7; i++ {
+		_, j := doJSON(t, d.api, "POST", "/api/activate", `{"account":"x","code":"XK-NOPE","ticket":"t"}`)
+		if c, _ := j["code"].(float64); c == 429 {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("激活请求应触发激活桶限流 429")
+	}
+	// 激活额度耗尽后，登录接口仍可用（登录桶独立）
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"stdlib","password":"any"}`)
+	if c, _ := j["code"].(float64); code != 200 || c == 429 {
+		t.Fatalf("激活限流不应影响登录（登录桶独立）: %d %v", code, j)
+	}
+	// 登录走到业务层（教务登录成功→1001 未激活），证明未被打到限流层
+	if c, _ := j["code"].(float64); c != 1001 {
+		t.Fatalf("登录应正常走到业务层（教务登录成功返回 1001 未激活）: %v", j)
+	}
+}
+
 // TestLoginAdminWrongPasswordTimingFlat n4 登录时延侧信道：管理员口令错误分支必须
 // 固定延迟 loginTimingFlat 后再响应，使"管理员名（口令错立即回）"与"未知学生
 // （教务登录网络往返）"的响应时延差被拉平——管理员账号名不能靠响应快慢被枚举。

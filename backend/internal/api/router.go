@@ -83,7 +83,10 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
 		Encrypt: encrypt, Decrypt: decrypt, AdminName: adminName}
-	limiter := newLoginLimiter()
+	// M-6 修复（第 3 轮）：登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
+	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。
+	loginLim := newLoginLimiter()
+	activateLim := newLoginLimiter()
 
 	// 启动即按运行时配置初始化验证码识别引擎与并发信号量（幂等）
 	initCaptchaAtStartup(rt, accts)
@@ -96,19 +99,20 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 			writeJSON(w, 403, nil, "仅接受 JSON 提交")
 			return
 		}
-		if !limiter.allow(clientIP(r)) {
+		if !loginLim.allow(clientIP(r)) {
 			writeJSON(w, 429, nil, "登录尝试过于频繁，请稍后再试")
 			return
 		}
 		d.handleLogin(w, r)
 	})
 	// 激活接口（登录后未激活才需要，未认证；机制关闭时 handler 直接拒绝）
+	// M-6：激活用独立限流桶——攻击者刷激活码不会消耗他人登录额度，反之亦然
 	mux.HandleFunc("POST /api/activate", func(w http.ResponseWriter, r *http.Request) {
 		if !jsonContentType(r) {
 			writeJSON(w, 403, nil, "仅接受 JSON 提交")
 			return
 		}
-		if !limiter.allow(clientIP(r)) {
+		if !activateLim.allow(clientIP(r)) {
 			writeJSON(w, 429, nil, "激活尝试过于频繁，请稍后再试")
 			return
 		}

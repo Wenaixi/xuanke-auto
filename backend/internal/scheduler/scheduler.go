@@ -808,13 +808,21 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			// 平台风控退避：识别到“频繁”或 429 相关错误，为该课程设置 30s 退避，跳过轰炸
+			// 平台风控退避：识别到"频繁"或 429 相关错误，为该课程设置 30s 退避，跳过轰炸
 			if isRateLimitError(err) {
 				s.markRateLimitedLocked(acct, t.ClassID, 30*time.Second)
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "触发平台风控退避 30 秒: "+err.Error())
 				if s.store != nil {
 					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false)
 				}
+				s.mu.Unlock()
+				return
+			}
+			// 平台对"选课窗口已关闭"的报名请求返回 code=1 错误（窗口关闭后课程列表已清空）。
+			// 此时课程已无法再报，直接按满员处理记入 full 集合，
+			// 避免每个 tick 都带着失败状态反复刷平台报名接口（窗口关闭后的最后一层防线）。
+			if isWindowClosedError(err) {
+				s.markFullLocked(acct, t)
 				s.mu.Unlock()
 				return
 			}
@@ -852,6 +860,17 @@ func isRateLimitError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "频繁") || strings.Contains(msg, "429") || strings.Contains(msg, "稍后重试")
+}
+
+// isWindowClosedError 平台在选课窗口关闭后对报名请求的返回特征（code=1 且提示已关闭/未开启）。
+// 与"课程满员"同样不可再报，调度器按满员记录避免窗口关闭后无限轰炸报名接口。
+func isWindowClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "关闭") || strings.Contains(msg, "未开启") ||
+		strings.Contains(msg, "报名时间") || strings.Contains(msg, "已结束")
 }
 
 func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time) bool {

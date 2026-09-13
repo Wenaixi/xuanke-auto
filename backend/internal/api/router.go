@@ -34,11 +34,14 @@ func applyCaptchaRecognizerFor(rt *runtime.Store, accts *accounts.Manager) {
 	cfg := rt.Get()
 	switch cfg.CaptchaEngine {
 	case "ddddocr":
-		if zhidao.LocalDdddOcrAvailable("") {
+		if zhidao.NativeDdddOcrAvailable() {
+			accts.SetRecognizer(zhidao.NewNativeDdddOcrRecognizer())
+			log.Printf("[api] 验证码识别引擎：单二进制内置原生 ddddocr（免 Python / 免 API 密钥，5~10ms 极速推理）")
+		} else if zhidao.LocalDdddOcrAvailable("") {
 			accts.SetRecognizer(zhidao.NewLocalDdddOcrRecognizer(""))
-			log.Printf("[api] 验证码识别引擎：本地 ddddocr（无 API 密钥）")
+			log.Printf("[api] 验证码识别引擎：本地 Python ddddocr（无 API 密钥）")
 		} else {
-			log.Printf("[api] 配置为 ddddocr 但本机无 Python/ddddocr，回退 Vision")
+			log.Printf("[api] 配置为 ddddocr 但无内置模型且本机无 Python/ddddocr，回退 Vision")
 			accts.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{
 				BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
 			}))

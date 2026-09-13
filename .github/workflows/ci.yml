@@ -58,3 +58,23 @@ jobs:
         run: |
           cd backend
           CGO_ENABLED=0 go build -v -ldflags="-s -w" -o xuanke-ci-check .
+
+  # ============ Windows：验证内嵌原生 ddddocr（CGO=1）单二进制可编译 ============
+  ci-windows:
+    name: Windows CGO Build Check
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+          cache-dependency-path: 'backend/go.sum'
+
+      - name: Verify Windows Single-Binary with Embedded ddddocr (CGO=1)
+        shell: pwsh
+        run: |
+          cd backend
+          CGO_ENABLED=1 go build -v -ldflags="-s -w -H windowsgui" -o xuanke-ci-check.exe .

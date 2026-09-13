@@ -474,19 +474,19 @@ type ElectivesData struct {
 }
 
 // FindElectives 查询当前学期课程数据。
-// FindElectives 查询当前学期课程数据。
 // 根据真实浏览器抓包分析：直接以空 POST 请求请求 findElectivesData，平台会自动返回当前激活学期的全量课程数据。
 func (c *Client) FindElectives() (*ElectivesData, error) {
 	// 1. 优先采用真实浏览器原生行为：直接 POST 空请求体，获取当前默认学期课程数据
 	body, err := c.doRequest(http.MethodPost, "/electives/select/findElectivesData", nil, "")
 	if err == nil {
 		data, parseErr := parseElectives(body)
-		if parseErr == nil && len(data.Publishes) > 0 {
+		if parseErr == nil {
+			// 空快照（选课窗口关闭后平台返回 code:0 空 publishes）也直接返回，
+			// 不必再走学期列表兜底重试——兜底重试本质是拿不到更多课程的。
 			return data, nil
 		}
 	}
-
-	// 2. 备选重试方案：尝试从学期列表获取当前选中学年学期后携带参数请求
+	// 2. 解析失败或网络请求失败时，备选重试方案：从学期列表获取当前选中学年学期后携带参数请求
 	// 真实浏览器（select.js）下拉切换学期时由 jQuery $.ajax 将对象编码为
 	// application/x-www-form-urlencoded，这里完全对齐该格式（而非 JSON body）。
 	terms, termErr := c.YearTerms()
@@ -515,6 +515,8 @@ func (c *Client) FindElectives() (*ElectivesData, error) {
 // parseElectives 解析 findElectivesData 原始响应。
 func parseElectives(body []byte) (*ElectivesData, error) {
 	var raw struct {
+		Code                int    `json:"code"`
+		Msg                 string `json:"msg"`
 		BeginTimes          []int64 `json:"beginTimes"`
 		SelectElectivesData []struct {
 			PublishID   int    `json:"publishId"`
@@ -530,6 +532,12 @@ func parseElectives(body []byte) (*ElectivesData, error) {
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err
+	}
+	// 平台在选课窗口关闭后对 findElectivesData 返回 code:0 但空 publishes。
+	// 这不是 token 失效也非错误——按业务"无课可报"处理，返回空快照即可，
+	// 避免上层 FindElectives 因快照为空落后陷入学期列表兜底重试。
+	if raw.Code == 0 && len(raw.SelectElectivesData) == 0 {
+		return &ElectivesData{}, nil
 	}
 	out := &ElectivesData{BeginTimes: raw.BeginTimes}
 	for _, p := range raw.SelectElectivesData {

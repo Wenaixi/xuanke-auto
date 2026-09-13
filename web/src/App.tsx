@@ -13,11 +13,20 @@ const queryClient = new QueryClient({
 })
 
 // 本地会话映射存取：账号名 -> 服务端签发令牌（多账号互不干扰）
+// N4：localStorage 在隐私模式/配额受限时可读不可写，try/catch 静默降级为内存态
 function loadSessions(): Sessions {
   try {
     return JSON.parse(localStorage.getItem("xk_sessions") || "{}")
   } catch {
     return {}
+  }
+}
+
+function saveSessions(next: Sessions) {
+  try {
+    localStorage.setItem("xk_sessions", JSON.stringify(next))
+  } catch {
+    // N4：存储不可用（隐私模式/配额受限）时静默降级——会话仅存内存，刷新即需重新登录
   }
 }
 
@@ -37,7 +46,7 @@ export default function App() {
   const login = (token: string, account: Account, adminName?: string) => {
     if (adminName) setAdminName(adminName)
     const next = { ...loadSessions(), [account]: token }
-    localStorage.setItem("xk_sessions", JSON.stringify(next))
+    saveSessions(next)
     setSessions(next)
     setCurrent(account)
     // 管理员账号登录后直接进入管理员界面（账号名与后端管理员名一致即管理员）
@@ -47,7 +56,7 @@ export default function App() {
   const logout = () => {
     const next = { ...loadSessions() }
     delete next[current]
-    localStorage.setItem("xk_sessions", JSON.stringify(next))
+    saveSessions(next)
     setSessions(next)
     setInAdmin(false)
   }
@@ -76,7 +85,7 @@ export default function App() {
         if (!targetAccount || !prev[targetAccount]) return prev
         const next = { ...prev }
         delete next[targetAccount]
-        localStorage.setItem("xk_sessions", JSON.stringify(next))
+        saveSessions(next)
         return next
       })
     }

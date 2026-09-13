@@ -76,10 +76,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     queryKey: ["electives", account, sessionToken],
     queryFn: () => api<ElectivesData>("/electives?account=" + encodeURIComponent(account), { session: sessionToken }),
     refetchInterval: (query) => {
-      // 选课窗口开启时（任何发布处于 in_date_range 或调度器标记 window_opened），2s 高频轮询；平日 10s
+      // 轮询判定来源：in_date_range 与 window_opened 双信号合并（MAJOR-G）。
+      // 窗口即将开启的瞬间平台会短暂返回空 publishes，此时仅凭 in_date_range 会把
+      // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
       const pubs = query.state.data?.publishes ?? []
       const inRange = pubs.some((p) => p.in_date_range)
-      return inRange ? 2000 : 10000
+      return inRange || stateData?.window_opened ? 2000 : 10000
     },
   })
 
@@ -89,11 +91,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     try {
       const res = await selectElective(c.id, sessionToken, account, c.course_name)
       toast({ title: "报名成功", description: res.msg || "已成功选报该课程", variant: "success" })
-      queryClient.invalidateQueries({ queryKey: ["electives"] })
-      queryClient.invalidateQueries({ queryKey: ["state"] })
     } catch (err: any) {
       toast({ title: "报名失败", description: err.message || "请求被拒绝", variant: "destructive" })
     } finally {
+      // N2：无论成功失败都强制失效 electives/state 缓存——
+      // 报名失败（满员/窗口关闭）后名额与按钮状态同样已变化，必须立即刷新，
+      // 否则前端显示"还可报名"实则已满，用户看到的是过期数据。
+      queryClient.invalidateQueries({ queryKey: ["electives"] })
+      queryClient.invalidateQueries({ queryKey: ["state"] })
       setActionLoading(null)
     }
   }
@@ -105,11 +110,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       const res = await exitElective(c.id, sessionToken, account)
       toast({ title: "退选成功", description: res.msg || "已成功退选该课程", variant: "success" })
       setExitModalClass(null)
-      queryClient.invalidateQueries({ queryKey: ["electives"] })
-      queryClient.invalidateQueries({ queryKey: ["state"] })
     } catch (err: any) {
       toast({ title: "退选失败", description: err.message || "请求被拒绝", variant: "destructive" })
     } finally {
+      queryClient.invalidateQueries({ queryKey: ["electives"] })
+      queryClient.invalidateQueries({ queryKey: ["state"] })
       setActionLoading(null)
     }
   }
@@ -194,7 +199,39 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   }
 
   // 自动保存：选课一变（仅用户点击），400ms 防抖后整包 PUT 到后端；成功静默，失败仅提示
+  // MAJOR-H：保存串行化——飞行中的 PUT 完成后立即补发一次最新快照，绝不出现
+  // "旧 PUT 后到覆盖新数据"的乱序丢失；内存 target 与后端最终一致。
   const lastJson = useRef("")
+  const targetRef = useRef<Target[]>([])
+  const savingRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const saveNow = async () => {
+    savingRef.current = true
+    try {
+      const targets = targetRef.current
+      const json = JSON.stringify(targets)
+      if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
+      await api("/targets?account=" + encodeURIComponent(account), {
+        method: "PUT",
+        body: json,
+        session: sessionToken,
+      })
+      lastJson.current = json
+    } catch (e: any) {
+      toast({
+        title: "目标保存失败",
+        description: e.message || "通信异常，请重试",
+        variant: "destructive",
+      })
+    } finally {
+      savingRef.current = false
+      if (dirtyRef.current) {
+        // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据
+        dirtyRef.current = false
+        void saveNow()
+      }
+    }
+  }
   useEffect(() => {
     if (rev === 0) return
     const build = (): Target[] => {
@@ -213,23 +250,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return targets
     }
     const timer = setTimeout(async () => {
-      const targets = build()
-      const json = JSON.stringify(targets)
-      if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
-      try {
-        await api("/targets?account=" + encodeURIComponent(account), {
-          method: "PUT",
-          body: json,
-          session: sessionToken,
-        })
-        lastJson.current = json
-      } catch (e: any) {
-        toast({
-          title: "目标保存失败",
-          description: e.message || "通信异常，请重试",
-          variant: "destructive",
-        })
+      targetRef.current = build()
+      if (savingRef.current) {
+        dirtyRef.current = true // 保存进行中：标记脏，完成后补发
+        return
       }
+      void saveNow()
     }, 400)
     return () => clearTimeout(timer)
   }, [rev, selected, publishes, sessionToken, toast])
@@ -282,9 +308,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         <div className="glass rounded-[var(--radius-lg)] border border-neutral-800 px-4 py-2.5 flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 text-neutral-400 min-w-0">
             <Clock className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
+            {/* N8：已开放状态以调度器 window_opened 为准（服务端有 ~640ms 校准偏差，
+                本地倒计时到点 ≠ 平台开窗）；window_opened 才显示"已开放"高亮 */}
             {!stateData || !openTimeStr ? (
               <span>正在同步选课开放时间...</span>
-            ) : cd.isExpired ? (
+            ) : stateData.window_opened || cd.isExpired ? (
               <span className="text-white font-medium flex items-center gap-1.5 whitespace-nowrap">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 选课窗口已开放

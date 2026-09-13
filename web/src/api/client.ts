@@ -21,25 +21,32 @@ export async function api<T>(
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (session) headers.Authorization = `Bearer ${session}`
   Object.assign(headers, extraHeaders ?? {})
-  const r = await fetch(BASE + path, { headers, ...rest })
-  let j: { code: number; data: T; msg: string }
+  // 2 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不无限转圈（MAJOR-H 配套）
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 20000)
   try {
-    j = await r.json()
-  } catch {
-    throw new ApiError(-2, "服务器响应异常（HTTP " + r.status + "）")
-  }
-  if (j.code === 401) {
-    // 会话过期：广播事件，附带发生 401 的目标账号（避免代理查询时误杀管理员）
-    let account = ""
-    if (path.includes("account=")) {
-      const match = path.match(/[?&]account=([^&]+)/)
-      if (match) account = decodeURIComponent(match[1])
+    const r = await fetch(BASE + path, { headers, ...rest, signal: ctrl.signal })
+    let j: { code: number; data: T; msg: string }
+    try {
+      j = await r.json()
+    } catch {
+      throw new ApiError(-2, "服务器响应异常（HTTP " + r.status + "）")
     }
-    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account } }))
-    throw new ApiError(j.code, j.msg || "会话已失效")
+    if (j.code === 401) {
+      // 会话过期：广播事件，附带发生 401 的目标账号（避免代理查询时误杀管理员）
+      let account = ""
+      if (path.includes("account=")) {
+        const match = path.match(/[?&]account=([^&]+)/)
+        if (match) account = decodeURIComponent(match[1])
+      }
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account } }))
+      throw new ApiError(j.code, j.msg || "会话已失效")
+    }
+    if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
+    return j.data
+  } finally {
+    clearTimeout(timer)
   }
-  if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
-  return j.data
 }
 
 // selectElective 手动报名指定选修课 (POST /api/electives/select)

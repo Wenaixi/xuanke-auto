@@ -31,6 +31,7 @@ import {
   Users,
   FileText,
   ArrowLeft,
+  AlertTriangle,
 } from "lucide-react"
 
 interface Props {
@@ -44,6 +45,9 @@ interface Props {
 export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
   const { toast } = useToast()
+  // N3：删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const copy = async (code: string) => {
     try {
@@ -129,12 +133,72 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelec
             <StatsTab sessionToken={sessionToken} />
           </TabsContent>
           <TabsContent value="accounts">
-            <AccountsTab sessionToken={sessionToken} onSelectAccount={onSelectAccount} />
+            <AccountsTab
+              sessionToken={sessionToken}
+              onSelectAccount={onSelectAccount}
+              onAskDelete={(acct) => setPendingDelete(acct)}
+            />
           </TabsContent>
           <TabsContent value="logs">
             <LogsTab sessionToken={sessionToken} />
           </TabsContent>
         </Tabs>
+
+        {/* N3：删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
+        {pendingDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
+                  <AlertTriangle className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-white tracking-wide">确认删除该账号？</h3>
+                  <p className="text-xs text-neutral-400 leading-relaxed break-all">
+                    账号：<span className="text-white font-mono">{pendingDelete}</span>
+                    <br />
+                    将清空其凭据、目标与成功记录（日志保留），操作不可撤销。
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-900">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingDelete(null)}
+                  disabled={deleting}
+                  className="text-xs h-8"
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={deleting}
+                  onClick={async () => {
+                    setDeleting(true)
+                    try {
+                      await api("/admin/accounts", {
+                        method: "DELETE",
+                        session: sessionToken,
+                        body: JSON.stringify({ account: pendingDelete }),
+                      })
+                      setPendingDelete(null)
+                      toast({ title: "已删除", description: `账号 ${pendingDelete} 已移除` })
+                    } catch (e: any) {
+                      toast({ title: "删除失败", description: e.message || "通信异常", variant: "destructive" })
+                    } finally {
+                      setDeleting(false)
+                    }
+                  }}
+                  className="text-xs h-8 bg-red-600 hover:bg-red-500 text-white border-none"
+                >
+                  {deleting ? "删除中..." : "确认删除"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -554,6 +618,23 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
                 <span className="text-white font-mono tabular-nums">{r.value}</span>
               </div>
             ))}
+            {/* N5：教务令牌有效性可视化——管理员一眼看到各账号 token 是否失效/恢复中 */}
+            <div className="py-2.5 flex items-center justify-between text-xs">
+              <span className="text-neutral-400">教务令牌</span>
+              <span className="flex items-center gap-1.5">
+                {Object.values(s.token_valid ?? {}).some((v) => v === false) ? (
+                  <>
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
+                    <span className="text-white/60 font-mono">部分失效 · 自动恢复中</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
+                    <span className="text-white font-mono">全部有效</span>
+                  </>
+                )}
+              </span>
+            </div>
           </div>
         )}
       </CardContent>
@@ -563,28 +644,20 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
 
 // ---- 账号管理 ----
 
-function AccountsTab({ sessionToken, onSelectAccount }: { sessionToken: string; onSelectAccount?: (acct: string) => void }) {
-  const { toast } = useToast()
+function AccountsTab({
+  sessionToken,
+  onSelectAccount,
+  onAskDelete,
+}: {
+  sessionToken: string
+  onSelectAccount?: (acct: string) => void
+  onAskDelete: (acct: string) => void
+}) {
   const accountsQuery = useQuery({
     queryKey: ["admin-accounts", sessionToken],
     queryFn: () => api<AdminAccount[]>("/admin/accounts", { session: sessionToken }),
     refetchInterval: 10000,
   })
-
-  const remove = async (acct: string) => {
-    if (!window.confirm(`删除账号 ${acct}？将清空其凭据、目标与成功记录（日志保留）`)) return
-    try {
-      await api("/admin/accounts", {
-        method: "DELETE",
-        session: sessionToken,
-        body: JSON.stringify({ account: acct }),
-      })
-      accountsQuery.refetch()
-      toast({ title: "已删除", description: `账号 ${acct} 已移除` })
-    } catch (e: any) {
-      toast({ title: "删除失败", description: e.message || "通信异常", variant: "destructive" })
-    }
-  }
 
   return (
     <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none overflow-hidden">
@@ -644,7 +717,7 @@ function AccountsTab({ sessionToken, onSelectAccount }: { sessionToken: string; 
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => remove(a.account)}
+                        onClick={() => onAskDelete(a.account)}
                         className="text-xs text-neutral-400 hover:text-white hover:border-white"
                       >
                         <Trash2 className="h-3.5 w-3.5" />

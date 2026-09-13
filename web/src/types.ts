@@ -109,6 +109,8 @@ export interface AdminStats {
   captcha_engine?: string
   captcha_concurrency?: number
   open_time_set?: boolean
+  // N5：各账号教务 token 有效性（账号名 -> 是否有效），缺省视作全部有效
+  token_valid?: Record<string, boolean>
 }
 
 // 账号管理条目（GET /api/admin/accounts）

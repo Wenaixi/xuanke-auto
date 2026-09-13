@@ -658,6 +658,12 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if eng == "" {
 		eng = "ddddocr"
 	}
+	// N5：各账号教务 token 有效性汇总（管理员后台一眼看到哪些账号 token 失效/恢复中）。
+	// 用调度器对外方法逐一查询（含 relogining 半态），不直接读内部 map。
+	tokValid := map[string]bool{}
+	for _, a := range accounts {
+		tokValid[a] = d.Sched.TokenValidFor(a)
+	}
 	writeJSON(w, 0, map[string]any{
 		"open_time":           open.Format("2006-01-02 15:04:05"),
 		"activation_on":       cfg.ActivationEnabled,
@@ -670,7 +676,10 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"vision_base_url":     cfg.VisionBaseURL,
 		"captcha_engine":      eng,
 		"captcha_concurrency": cfg.CaptchaConcurrency,
-		"open_time_set":       true,
+		"token_valid":         tokValid,
+		// N6：open_time_set 按开放时间是否真被配置输出，不再恒 true——
+		// 管理员未设置开放时间时前端如实显示"未设置"，避免误导
+		"open_time_set": !open.IsZero(),
 	}, "")
 }
 

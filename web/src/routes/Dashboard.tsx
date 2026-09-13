@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { api } from "../api/client"
+import { ApiError, api } from "../api/client"
 import type { Account, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
@@ -66,6 +66,12 @@ function priorityName(p: number): string {
 // 是否为满员退避：失败且原因明确写"已满员"（调度器 markFullLocked 文案）
 function isFullFallback(c: { status: string; result: string }): boolean {
   return c.status === "failed" && c.result.includes("已满员")
+}
+
+// N10：错误条只在会话真正失效（业务码 401）时显示"请重新登录"。
+// 网络错误/服务端 5xx 会被 react-query 重试，误判为会话失效会让用户无谓重登。
+function isSessionError(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 401
 }
 
 export default function Dashboard({ account, sessionToken, onLogout, onGoSelect }: Props) {
@@ -136,7 +142,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
         </header>
 
         {/* 错误提示条 */}
-        {!stateLoading && stateErr && (
+        {!stateLoading && stateErr && isSessionError(stateErr) && (
           <div className="rounded-[var(--radius-sm)] border border-neutral-800 glass-strong p-4 text-xs flex items-center justify-between text-neutral-300">
             <div className="flex items-center gap-2">
               <XCircle className="h-4 w-4 shrink-0 text-white" />

@@ -79,15 +79,20 @@ export default function App() {
   useEffect(() => {
     const onUnauthorized = (e: Event) => {
       const detail = (e as CustomEvent)?.detail
-      const targetAccount = detail?.account || current
+      // 局部命名避开外层 targetAccount 状态（n13：需引用该状态清理代理视图）
+      const lostAccount = detail?.account || current
+      // n13（第 3 轮）：被吊销的账号恰是管理员当前代理查看的学生账号时，先退出
+      // 代理视图——该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。
+      // （不依赖下方 setSessions：代理场景因守卫提前 return，这里必须独立清理。）
+      setTargetAccount((prev) => (prev === lostAccount ? null : prev))
       // 管理员处于后台管理态代理查看学生大厅时，若发生 401 绝不误杀管理员自身会话
-      if (current === adminName && inAdmin && targetAccount !== adminName) {
+      if (current === adminName && inAdmin && lostAccount !== adminName) {
         return
       }
       setSessions((prev) => {
-        if (!targetAccount || !prev[targetAccount]) return prev
+        if (!lostAccount || !prev[lostAccount]) return prev
         const next = { ...prev }
-        delete next[targetAccount]
+        delete next[lostAccount]
         saveSessions(next)
         return next
       })

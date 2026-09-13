@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { api } from "../api/client"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { api, selectElective, exitElective } from "../api/client"
 import type { Account, ClassItem, ElectivesData, Target, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
@@ -16,10 +16,12 @@ import {
   Check,
   Clock,
   Filter,
+  LogOut,
   MapPin,
   Search,
   User,
   Users,
+  AlertTriangle,
 } from "lucide-react"
 
 interface Props {
@@ -65,12 +67,52 @@ function parseCountdown(target: string | null): {
 }
 
 export default function Select({ account, sessionToken, onDone }: Props) {
+  const queryClient = useQueryClient()
   const { toast } = useToast()
+  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [exitModalClass, setExitModalClass] = useState<ClassItem | null>(null)
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["electives", account, sessionToken],
     queryFn: () => api<ElectivesData>("/electives?account=" + encodeURIComponent(account), { session: sessionToken }),
-    refetchInterval: 10000,
+    refetchInterval: (query) => {
+      // 选课窗口开启时（任何发布处于 in_date_range 或调度器标记 window_opened），2s 高频轮询；平日 10s
+      const pubs = query.state.data?.publishes ?? []
+      const inRange = pubs.some((p) => p.in_date_range)
+      return inRange ? 2000 : 10000
+    },
   })
+
+  // 手动报名指定课程
+  const handleSelectClass = async (c: ClassItem) => {
+    setActionLoading(c.id)
+    try {
+      const res = await selectElective(c.id, sessionToken, account, c.course_name)
+      toast({ title: "报名成功", description: res.msg || "已成功选报该课程", variant: "success" })
+      queryClient.invalidateQueries({ queryKey: ["electives"] })
+      queryClient.invalidateQueries({ queryKey: ["state"] })
+    } catch (err: any) {
+      toast({ title: "报名失败", description: err.message || "请求被拒绝", variant: "destructive" })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // 手动退选指定课程二次确认提交
+  const handleConfirmExit = async (c: ClassItem) => {
+    setActionLoading(c.id)
+    try {
+      const res = await exitElective(c.id, sessionToken, account)
+      toast({ title: "退选成功", description: res.msg || "已成功退选该课程", variant: "success" })
+      setExitModalClass(null)
+      queryClient.invalidateQueries({ queryKey: ["electives"] })
+      queryClient.invalidateQueries({ queryKey: ["state"] })
+    } catch (err: any) {
+      toast({ title: "退选失败", description: err.message || "请求被拒绝", variant: "destructive" })
+    } finally {
+      setActionLoading(null)
+    }
+  }
 
   // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）
   const { data: stateData } = useQuery({
@@ -469,26 +511,64 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
                             {/* 操作按钮区 */}
                             <div className="pt-2 border-t border-neutral-800/70 mt-0.5 flex flex-col gap-1.5">
-                              <Button
-                                variant={isSelected ? "outline" : "primary"}
-                                size="sm"
-                                onClick={() => pick(t.publish_id, c)}
-                                className="w-full flex items-center justify-center gap-1.5 text-xs h-8"
-                              >
-                                {isSelected ? (
-                                  <>
-                                    <Check className="h-3.5 w-3.5 text-white" />
-                                    <span>{priorityName(selIdx)}</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <BookMarked className="h-3.5 w-3.5" />
-                                    <span>设为目标</span>
-                                  </>
-                                )}
-                              </Button>
-                              {isSelected && (
-                                <div className="px-1" />
+                              {/* 窗口开启后呈现官网同款【报名】或【退选】主操作按钮 */}
+                              {t.in_date_range || stateData?.window_opened ? (
+                                <>
+                                  {c.btn_type === 1 ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={actionLoading === c.id || !c.can_select}
+                                      onClick={() => setExitModalClass(c)}
+                                      title={c.title || (c.can_select ? "点击退选此课程" : "当前无法退选")}
+                                      className="w-full flex items-center justify-center gap-1.5 text-xs h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 transition-colors"
+                                    >
+                                      <LogOut className="h-3.5 w-3.5" />
+                                      <span>{actionLoading === c.id ? "退选中..." : (c.btn_text || "退选")}</span>
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      disabled={actionLoading === c.id || !c.can_select}
+                                      onClick={() => handleSelectClass(c)}
+                                      title={c.title || (c.can_select ? "点击立即报名" : "不在选修报名时间范围内，无法选课！")}
+                                      className="w-full flex items-center justify-center gap-1.5 text-xs h-8 disabled:opacity-40"
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                      <span>{actionLoading === c.id ? "报名中..." : (c.btn_text || "报名")}</span>
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant={isSelected ? "outline" : "ghost"}
+                                    size="sm"
+                                    onClick={() => pick(t.publish_id, c)}
+                                    className="w-full flex items-center justify-center gap-1 text-[11px] h-7 text-neutral-400 hover:text-white"
+                                  >
+                                    <BookMarked className="h-3 w-3" />
+                                    <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>
+                                  </Button>
+                                </>
+                              ) : (
+                                /* 窗口开启前：标准自动预选设置 */
+                                <Button
+                                  variant={isSelected ? "outline" : "primary"}
+                                  size="sm"
+                                  onClick={() => pick(t.publish_id, c)}
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8"
+                                >
+                                  {isSelected ? (
+                                    <>
+                                      <Check className="h-3.5 w-3.5 text-white" />
+                                      <span>{priorityName(selIdx)}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <BookMarked className="h-3.5 w-3.5" />
+                                      <span>设为预选目标</span>
+                                    </>
+                                  )}
+                                </Button>
                               )}
                             </div>
                           </CardContent>
@@ -510,6 +590,47 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
         {/* 选课改动自动保存，无需手动按钮；底部留白避免内容被遮挡 */}
         <div className="h-20 sm:h-16" aria-hidden />
+
+        {/* 退选二次确认极简黑白 Modal (复刻官网 layer.confirm("确认退选该选修课?")) */}
+        {exitModalClass && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
+                  <AlertTriangle className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-white tracking-wide">确认退选该选修课？</h3>
+                  <p className="text-xs text-neutral-400 leading-relaxed">
+                    课程：<span className="text-white font-mono">{exitModalClass.course_name}</span>
+                    <br />
+                    退选后名额将被立即释放，您可以重新选择其他空余课程。
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-900">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setExitModalClass(null)}
+                  disabled={actionLoading === exitModalClass.id}
+                  className="text-xs h-8"
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleConfirmExit(exitModalClass)}
+                  disabled={actionLoading === exitModalClass.id}
+                  className="text-xs h-8 bg-red-600 hover:bg-red-500 text-white border-none"
+                >
+                  {actionLoading === exitModalClass.id ? "退选中..." : "确认退选"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

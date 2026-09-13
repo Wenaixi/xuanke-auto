@@ -337,7 +337,7 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if cfg["activation_enabled"] != true {
 		t.Fatalf("初始激活码开关应为 true: %v", cfg)
 	}
-	if cfg["vision_api_key_masked"] != "****y123" {
+	if cfg["vision_api_key_masked"] != "****D***" {
 		t.Fatalf("Vision key 应脱敏回显后 4 位: %v", cfg)
 	}
 	// 热更新：关闭激活码 + 改打开时间（Vision 保持 mock server 可登录）

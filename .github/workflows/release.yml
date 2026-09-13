@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release Binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Build Frontend Web App
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+          cache-dependency-path: 'backend/go.sum'
+
+      - name: Install Garble (Obfuscation Compiler)
+        run: |
+          go install mvdan.cc/garble@latest || true
+
+      - name: Build Multi-Platform Binaries
+        run: |
+          cd backend
+          mkdir -p ../dist-release
+
+          TAG_NAME="${{ github.ref_name }}"
+          echo "Building release for tag: ${TAG_NAME}"
+
+          # 1. Windows x64 GUI 模式（默认版：无黑框控制台后台运行）
+          echo "Compiling Windows AMD64 (GUI mode)..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H windowsgui" -o ../dist-release/xuanke-windows-amd64.exe .
+
+          # 2. Windows x64 控制台版（输出日志，便于运维排错）
+          echo "Compiling Windows AMD64 (Console mode)..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-windows-amd64-console.exe .
+
+          # 3. Windows x64 Garble 混淆防逆向版（若 garble 可用则生成）
+          if command -v garble >/dev/null 2>&1; then
+            echo "Compiling Windows AMD64 with Garble obfuscation..."
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 garble -literals -tiny build -ldflags="-s -w -H windowsgui" -o ../dist-release/xuanke-windows-amd64-garbled.exe . || true
+          fi
+
+          # 4. Linux x64 服务器部署版（免 CGO，单二进制开箱即用）
+          echo "Compiling Linux AMD64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-amd64 .
+
+          # 5. macOS ARM64 (Apple Silicon M1/M2/M3/M4)
+          echo "Compiling macOS ARM64..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
+
+          # 6. macOS x64 (Intel)
+          echo "Compiling macOS AMD64..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-amd64 .
+
+      - name: Package Release Archives
+        run: |
+          cd dist-release
+          TAG_NAME="${{ github.ref_name }}"
+
+          # 准备纯净的配置说明模板
+          cat << 'EOF' > .env.example
+          # 抢课系统数据配置文件模板（生产部署时请放入 data/.env）
+          # 1. 必填项：管理员访问口令（用于进入管理后台、生成与分发激活码）
+          XUANKE_ADMIN_TOKEN=your_secure_admin_token_here
+
+          # 2. 可选项：硅基流动 Vision API Key（用于教务登录验证码自动识别；若使用本地 ddddocr 则免填）
+          # SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+          # 3. 可选项：激活码机制开关（on=启用，未激活账号需输入激活码；off=完全关闭，教务账密登录直接进入）
+          XUANKE_ACTIVATION=on
+
+          # 4. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
+          # XUANKE_PORT=3091
+          # XUANKE_DB=data/xuanke.db
+          EOF
+
+          # 打包 Windows GUI 默认版
+          mkdir -p win-pkg
+          cp xuanke-windows-amd64.exe win-pkg/xuanke.exe
+          cp .env.example win-pkg/.env.example
+          (cd win-pkg && zip -r ../xuanke-${TAG_NAME}-windows-amd64.zip .)
+
+          # 打包 Windows 控制台版
+          mkdir -p win-console-pkg
+          cp xuanke-windows-amd64-console.exe win-console-pkg/xuanke.exe
+          cp .env.example win-console-pkg/.env.example
+          (cd win-console-pkg && zip -r ../xuanke-${TAG_NAME}-windows-amd64-console.zip .)
+
+          # 打包 Windows 混淆版（如果编译成功）
+          if [ -f xuanke-windows-amd64-garbled.exe ]; then
+            mkdir -p win-garbled-pkg
+            cp xuanke-windows-amd64-garbled.exe win-garbled-pkg/xuanke.exe
+            cp .env.example win-garbled-pkg/.env.example
+            (cd win-garbled-pkg && zip -r ../xuanke-${TAG_NAME}-windows-amd64-garbled.zip .)
+          fi
+
+          # 打包 Linux 版
+          mkdir -p linux-pkg
+          cp xuanke-linux-amd64 linux-pkg/xuanke
+          chmod +x linux-pkg/xuanke
+          cp .env.example linux-pkg/.env.example
+          tar -czvf xuanke-${TAG_NAME}-linux-amd64.tar.gz -C linux-pkg .
+
+          # 打包 macOS ARM64 版
+          mkdir -p darwin-arm-pkg
+          cp xuanke-darwin-arm64 darwin-arm-pkg/xuanke
+          chmod +x darwin-arm-pkg/xuanke
+          cp .env.example darwin-arm-pkg/.env.example
+          tar -czvf xuanke-${TAG_NAME}-darwin-arm64.tar.gz -C darwin-arm-pkg .
+
+          # 打包 macOS x64 版
+          mkdir -p darwin-amd-pkg
+          cp xuanke-darwin-amd64 darwin-amd-pkg/xuanke
+          chmod +x darwin-amd-pkg/xuanke
+          cp .env.example darwin-amd-pkg/.env.example
+          tar -czvf xuanke-${TAG_NAME}-darwin-amd64.tar.gz -C darwin-amd-pkg .
+
+          # 生成所有压缩产物的 SHA256 校验和清单
+          sha256sum xuanke-${TAG_NAME}-*.zip xuanke-${TAG_NAME}-*.tar.gz > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-release/xuanke-*.zip
+            dist-release/xuanke-*.tar.gz
+            dist-release/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

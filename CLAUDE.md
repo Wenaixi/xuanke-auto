@@ -161,3 +161,27 @@ xuanke.exe                       # 无任何环境变量直接启动，自动读
 
 ### 测试
 cd backend && go test ./...（含 scheduler -race）；cd web && npm run build（tsc 类型检查）
+
+### CI/CD 自动化工作流与 Release 发布规范（.github/workflows/）
+项目建立了完备的 GitHub Actions 持续集成与自动化发布流水线，分为 Push 质检流与 Tag 自动化多架构发布流：
+
+1. **分支自动化质量检测（.github/workflows/ci.yml）**：
+   - 触发时机：代码推送（push）至 `master` 或 `main` 分支，以及针对该分支的 Pull Request；自动忽略纯文档（.md）改动；支持并发任务自动取消旧运行（concurrency）。
+   - 前端质检：基于 Node.js 22 + npm 缓存，执行 `npm ci` 与 `npm run build`（tsc 类型检查与 Vite 打包），验证前端编译完整性并将静态资产产物自动落盘至 `backend/web/dist`。
+   - 后端质检：基于 Go 稳定版 + go.sum 依赖缓存，执行全量单元测试（`go test -v ./...`），并进行单二进制可执行文件打包编译验证（`CGO_ENABLED=0 go build`），确保 `//go:embed` 静态资产正确内嵌。
+
+2. **Tag 自动化多架构打包与发布（.github/workflows/release.yml）**：
+   - 触发时机：推送版本标签 `git push origin v*`（例如 `v1.0.0`）；支持 `workflow_dispatch` 手动触发。
+   - 前置构建：先由 Node.js 构建前端最新生产级静态资产。
+   - 多架构并行交叉编译（纯 Go 免 CGO，全平台开箱即用）：
+     - Windows x64 GUI 模式（`xuanke-windows-amd64.exe`）：注入 `-ldflags="-s -w -H windowsgui"`，消除控制台黑框；
+     - Windows x64 控制台模式（`xuanke-windows-amd64-console.exe`）：注入 `-ldflags="-s -w"`，保留终端日志输出，便于运维排错；
+     - Windows x64 混淆防逆向版（`xuanke-windows-amd64-garbled.exe`）：自动化安装 garble 工具链，启用 `-literals -tiny` 加密字符串字面量与剥除源码路径；
+     - Linux x64 服务端部署版（`xuanke-linux-amd64`）：兼容主流 Linux 服务器系统；
+     - macOS 双架构（`xuanke-darwin-arm64` / `xuanke-darwin-amd64`）：支持 Apple Silicon M系列与 Intel 芯片。
+   - 交付物打包规范：
+     - 自动为各平台注入脱敏无害的生产配置模板 `.env.example`，避免敏感凭据外泄同时降低用户配置门槛；
+     - Windows 打包为 `.zip`，Linux/macOS 打包为 `.tar.gz`；
+     - 自动计算所有发布资产的 SHA256 哈希清单写入 `checksums.txt`，防篡改校验。
+   - 发布托管：通过 `softprops/action-gh-release@v2` 自动创建 GitHub Release，自动根据 commit 提交历史生成 Release Notes，并自动上传全部构件资产。
+

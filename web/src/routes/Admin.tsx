@@ -44,6 +44,9 @@ interface Props {
 
 export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
+  // n8：复制反馈定时器句柄——连续复制不同码时先 clearTimeout 旧定时器，
+  // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toast } = useToast()
   // N3：删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -53,7 +56,8 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelec
     try {
       await navigator.clipboard.writeText(code)
       setCopied(code)
-      setTimeout(() => setCopied(""), 1500)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(""), 1500)
     } catch {
       toast({ title: "复制失败", description: "浏览器未授权剪贴板", variant: "destructive" })
     }

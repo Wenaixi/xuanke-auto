@@ -77,31 +77,44 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [current])
 
-  // 桌面版壁纸“边滚边露底、触底冻结”：边滚边露出水墨图下方，露到底边即停——
-  // 再往下滚整张图冻住不动（用户明确要求）。位移量 --bg-shift 写在真实 <img>
-  // 的 transform 上，按“图片真实高度 - 视口高”封顶，移动端不消费恒为 0 贴顶。
+  // 壁纸滚动统一机制（手机 + 电脑同一套，仅放大比例不同）：
+  //   背景随下滑“往上走”：滚动页面时图片以 1:1 速度上移（露出图片下方），
+  //   当图片底边(图顶+图高)到达屏幕底边(视口高)即冻结，继续下滑图片不动、
+  //   底边恰贴屏幕底绝不越出底部；上滑则 1:1 回落。
+  // 数学表达（唯一公式）：shift = −clamp(scrollY, 0, 图片高 − 视口高)（负值=上移）
+  //   移动端 180% / 桌面 160% 仅 CSS 宽度不同，JS 直接量 img 真实高度，无需区分设备。
+  // 性能：图片高度纯 mount/resize/图片加载时量测一次缓存，滚动回调零布局读取；
+  //   位移直接写 transform 具体像素（GPU 合成轨道），滚动全程流畅无抖动。
   useEffect(() => {
     const img = document.querySelector<HTMLElement>(".canvas-bg-img")
     if (!img) return
+    let maxShift = 0
     let frame = 0
+    /* 量测图片真实渲染高度 − 视口高（仅装载/窗口变化/图片加载时执行，绝不进滚动路径） */
+    const measure = () => {
+      maxShift = Math.max(0, img.getBoundingClientRect().height - window.innerHeight)
+      apply()
+    }
     const apply = () => {
-      const vh = window.innerHeight
-      /* 图片真实渲染高度：160% 宽按原比例等比放大后的实际像素高 */
-      const imgH = img.getBoundingClientRect().height
-      const maxShift = Math.max(0, imgH - vh) /* 最多可露出的高度（图片高超出视口高的部分） */
-      const ratio = Math.min(1, window.scrollY / maxShift) /* 滚动进度封顶 1 */
-      img.style.setProperty("--bg-shift", `${ratio * maxShift}px`)
+      /* 取整：浏览器滚动本质整数像素，消除亚像素插值导致的抖动 */
+      const y = Math.round(window.scrollY)
+      /* shift = −clamp(y, 0, maxShift)：负值上移，未触底前 1:1 跟随，触底冻结 */
+      const shift = -Math.min(Math.max(0, y), maxShift)
+      img.style.transform = `translateY(${shift}px)`
       frame = 0
     }
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(apply)
     }
-    apply()
+    measure()
+    /* 图片未加载完前 height 可能为 0，加载完成后重新量测一次 */
+    img.addEventListener("load", measure)
     window.addEventListener("scroll", onScroll, { passive: true })
-    window.addEventListener("resize", onScroll)
+    window.addEventListener("resize", measure)
     return () => {
+      img.removeEventListener("load", measure)
       window.removeEventListener("scroll", onScroll)
-      window.removeEventListener("resize", onScroll)
+      window.removeEventListener("resize", measure)
       if (frame) cancelAnimationFrame(frame)
     }
   }, [])

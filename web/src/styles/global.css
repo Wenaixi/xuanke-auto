@@ -12,8 +12,8 @@
   --border-invert: #ffffff;
 
   --fg: #ffffff;
-  --fg-muted: #a1a1aa;
-  --fg-dim: #71717a;
+  --fg-muted: #ffffff;
+  --fg-dim: #b4b4c0;
 
   /* 单色语义灰阶映射（纯黑白极简，剔除所有高饱和彩色杂质） */
   --emerald: #ffffff;
@@ -73,10 +73,6 @@ body {
    挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
    注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
    避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
-/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰。
-   挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
-   注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
-   避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
 .canvas-bg {
   position: fixed;
   inset: 0;
@@ -86,7 +82,10 @@ body {
 }
 
 /* 水墨图本体：真实 <img> 元素，方便 JS 直接量测真实渲染高度。
-   默认（移动端）：180% 宽 + 贴顶，fixed 容器内纹丝不动，不随滚动 */
+   全端共用同一条滚动冻结逻辑：位移 --bg-shift 由 App.tsx 按
+   shift = −clamp(scrollY, 0, 图片高−视口高)（负值上移）写入 transform——
+   未触底前 1:1 跟随滚动，图片底部到屏幕底边即冻住、绝不越出底部。
+   默认（移动端）：180% 宽 */
 .canvas-bg-img {
   position: absolute;
   top: 0;
@@ -95,6 +94,7 @@ body {
   max-width: none;
   height: auto;
   display: block;
+  transform: translateY(var(--bg-shift, 0px));
 }
 
 /* 深黑渐变遮罩：盖在图片之上（DOM 顺序在 img 后），不随图片位移，
@@ -105,21 +105,10 @@ body {
   background: linear-gradient(rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0.72) 100%);
 }
 
-/* 桌面端（鼠标设备）：160% 宽；纵向位移 --bg-shift 由 App.tsx 按滚动写入——
-   边滚边露出图片下方，位移到“图片高 - 视口高”即封顶冻结，再滚图片不动 */
+/* 桌面端（鼠标设备）：宽度缩为 160%（逻辑与移动端完全一致，仅放大比例不同） */
 @media (hover: hover) and (pointer: fine) {
   .canvas-bg-img {
     width: 160%;
-    transform: translateY(var(--bg-shift, 0px));
-  }
-}
-
-/* 桌面端（鼠标设备）：fixed 钉住视口，图片层纵向位置由 App.tsx 按
-   “边滚动边露下方、图片底边触到视口底部后冻结”写入 --bg-shift 位移；
-   移动端不消费该变量，仍保持贴顶纹丝不动 */
-@media (hover: hover) and (pointer: fine) {
-  .canvas-bg {
-    background-size: 100% 100%, 160% auto;
   }
 }
 

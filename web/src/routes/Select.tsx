@@ -322,7 +322,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   value={String(t.publish_id)}
                   className="flex items-center gap-2 py-2 px-4 text-xs sm:text-sm font-medium"
                 >
-                  <span>{t.label}</span>
+                  <span className="font-semibold text-white">{t.label}</span>
                   <span
                     className={`inline-block w-2 h-2 rounded-full ${
                       t.open ? "bg-[var(--emerald)]" : "bg-[var(--fg-dim)]"

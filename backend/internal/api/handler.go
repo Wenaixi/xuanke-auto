@@ -93,6 +93,9 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
+	// A7（第 4 轮）：账号统一 TrimSpace——与 handleActivate 同策略，杜绝"前导/尾随空格
+	// 拼进账号名"导致管理员名匹配失败、或学生大概率教务也登录失败但仍吃一次网络往返。
+	req.Account = strings.TrimSpace(req.Account)
 	if req.Account == "" || req.Password == "" {
 		writeJSON(w, 1, nil, "账号与密码不能为空")
 		return
@@ -102,12 +105,16 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if req.Account == adminName {
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
 			// 口令错误：恒定时间比对已抹平字节级差异（时序安全）。
-			// n4（第 3 轮）：固定延迟 loginTimingFlat 抹平"管理员口令错（立即回）vs
-			// 教务登录（网络往返）"的时延差——管理员账号名不再能靠响应快慢被侧信道枚举。
+			// n4 + A5（第 4 轮）：错误分支固定延迟 loginTimingFlat；正确分支同一延迟——
+			// 统一"管理员名（口令对/错）vs 未知学生（教务登录网络往返）"三者的响应时延差，
+			// 管理员账号名不再能靠响应快慢（快=对、慢=错）被侧信道枚举出口令正确性。
 			time.Sleep(loginTimingFlat)
 			writeJSON(w, 1, nil, "管理口令错误")
 			return
 		}
+		// A5：正确口令分支与错误分支等时——延迟后再签发会话，抹平"口令对错"时延差。
+		// 管理员登录低频操作，300ms 无感；撞库者无法再靠"这个账号返回快=口令对"定位管理员口令。
+		time.Sleep(loginTimingFlat)
 		sess := d.Sessions.CreateAdmin(adminName)
 		d.Store.AppendLog(adminName, 0, "login", "管理员登录成功", true)
 		writeJSON(w, 0, map[string]string{"token": sess, "account": adminName, "adminName": adminName}, "管理员登录成功")
@@ -439,9 +446,12 @@ func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 // handleLogout 注销当前会话（M-7）：立即吊销服务端令牌。
 // 会话已由 requireAuth 验证通过——Delete 后该令牌在服务端即刻失效，
 // 即使被复制/窃取的 localStorage 令牌也无法再发起任何请求。
+// A7（第 4 轮）：先取值再 Delete，避免 Delete 后 context 语义不清时重复读取。
 func (d *Deps) handleLogout(w http.ResponseWriter, r *http.Request) {
-	d.Sessions.Delete(sessionToken(r))
-	d.Store.AppendLog(sessionAccount(r), 0, "logout", "账号 "+sessionAccount(r)+" 注销会话", false)
+	acct := sessionAccount(r)
+	tok := sessionToken(r)
+	d.Sessions.Delete(tok)
+	d.Store.AppendLog(acct, 0, "logout", "账号 "+acct+" 注销会话", false)
 	writeJSON(w, 0, nil, "已注销")
 }
 
@@ -509,13 +519,17 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		codes := make([]string, 0, req.Count)
+		// A8（第 4 轮）：先全量生成再一起落库——避免循环中途落库，rand 失败 panic（recover 500）
+		// 时前 N-1 个码已入库但响应被吞，产生无人知晓、可被分发的"隐身码"滞留激活码表。
+		// 全部生成成功后再入库：任何失败都不产生半批滞留。
 		for i := 0; i < req.Count; i++ {
-			code := newActivationCode()
+			codes = append(codes, newActivationCode())
+		}
+		for _, code := range codes {
 			if err := d.Store.CreateActivationCode(code, req.Uses); err != nil {
 				writeJSON(w, 1, nil, "生成激活码失败: "+err.Error())
 				return
 			}
-			codes = append(codes, code)
 		}
 		writeJSON(w, 0, codes, "生成成功")
 	case http.MethodDelete:
@@ -551,10 +565,15 @@ func newActivationCode() string {
 
 // ---- 管理员后台接口（会话级鉴权，见 requireAdminSession） ----
 
-// maskKey 敏感值脱敏：仅回显后 4 位，其余掩码（空值返回空串）。
+// maskKey 敏感值脱敏：恒显掩码 + 后 4 位（空值恒显 ****，杜绝"未设置"歧义）。
+// A4（第 4 轮）：key ≤4 位时旧逻辑返回空串，管理端 input 呈现空、与"未配置"无法区分
+// （误以为丢失、保存无效果）；统一恒显 **** 语义最清晰——设置了就有掩码，没设置才为空。
 func maskKey(v string) string {
-	if len(v) <= 4 {
+	if v == "" {
 		return ""
+	}
+	if len(v) <= 4 {
+		return "****"
 	}
 	return "****" + v[len(v)-4:]
 }
@@ -723,11 +742,25 @@ func (d *Deps) saveSettings(kv map[string]string) error {
 }
 
 // handleAdminStats 系统运行状态总览。
+// A3（第 4 轮）：不再静默吞 DB 错误——任一数据源读取失败时如实返回 500（管理员看到的是
+// 明确报错，而非一堆 0/空值误导），绝不假装"数据没问题"。
 func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	cfg := d.Runtime.Get()
-	accounts, _ := d.Store.ListAccounts()
-	success, _ := d.Store.LoadSuccess()
-	allLogs, _ := d.Store.LoadAllLogs(1000)
+	accounts, aErr := d.Store.ListAccounts()
+	if aErr != nil {
+		writeJSON(w, 1, nil, "读取账号列表失败: "+aErr.Error())
+		return
+	}
+	success, sErr := d.Store.LoadSuccess()
+	if sErr != nil {
+		writeJSON(w, 1, nil, "读取成功记录失败: "+sErr.Error())
+		return
+	}
+	allLogs, lErr := d.Store.LoadAllLogs(1000)
+	if lErr != nil {
+		writeJSON(w, 1, nil, "读取日志失败: "+lErr.Error())
+		return
+	}
 	open := time.Time{}
 	if !cfg.OpenTimeParsed.IsZero() {
 		open = cfg.OpenTimeParsed

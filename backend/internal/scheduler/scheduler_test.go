@@ -720,3 +720,28 @@ func TestServerClockAlignment(t *testing.T) {
 		t.Fatalf("校准后时间应快约 5 秒, 实际差值: %v", diff)
 	}
 }
+
+// TestWindowClosedState 选课窗口关闭（探测返回空快照）时，状态应暴露 window_closed=true
+// 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
+func TestWindowClosedState(t *testing.T) {
+	// 窗口关闭特征：快照为空（平台选课窗口关闭后 findElectivesData 返回 code:0 空 publishes）
+	fcEmpty := newFakeClient(false)
+	fcEmpty.mu.Lock()
+	fcEmpty.data.Publishes = nil
+	fcEmpty.mu.Unlock()
+	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.probe()
+	if !s.StateForAccount("acct1").WindowClosed {
+		t.Fatal("空快照探测后 window_closed 应为 true")
+	}
+
+	// 正常数据但窗口未开：window_closed 必须为 false
+	fcOpen := newFakeClient(false)
+	s2 := New(&fakeAccts{c: fcOpen}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s2.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s2.probe()
+	if s2.StateForAccount("acct1").WindowClosed {
+		t.Fatal("正常未开窗探测后 window_closed 应为 false")
+	}
+}

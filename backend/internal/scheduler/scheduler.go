@@ -36,7 +36,8 @@ type CourseStatus struct {
 type SchedulerState struct {
 	OpenTime     time.Time      `json:"open_time"`
 	WindowOpened bool           `json:"window_opened"`
-	TokenValid   bool           `json:"token_valid"` // 当前账号教务 token 有效性（有效=true）
+	WindowClosed bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
+	TokenValid   bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
 	Courses      []CourseStatus `json:"courses"`
 }
 
@@ -428,6 +429,9 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 		}
 		return nil, err
 	}
+	if data != nil && len(data.Publishes) == 0 {
+		log.Printf("[scheduler] 账号 %s 探测返回空课程快照（选课窗口关闭或学期无发布），按空数据处理", acct)
+	}
 	now := time.Now()
 	s.mu.Lock()
 	if s.acctData == nil {
@@ -576,11 +580,15 @@ func (s *Scheduler) probe() {
 		}
 	}
 	s.state.WindowOpened = opened
+	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
+	// 且从未开过窗 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
+	s.state.WindowClosed = !opened && len(data.Publishes) == 0 && !s.prevWindowOpened
 	// 窗口状态变化（关→开）时清空提交闸门：热改 openTime 提前/回拨后，首个 tick 立即提交而不被 1s 闸门卡掉
 	if opened && !s.prevWindowOpened {
 		s.lastSubmit = time.Time{}
 	}
 	s.prevWindowOpened = opened
+	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)
 	s.mu.Unlock()
 }
 

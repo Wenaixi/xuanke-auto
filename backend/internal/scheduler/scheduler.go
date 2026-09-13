@@ -122,6 +122,8 @@ type Scheduler struct {
 	prevWindowOpened bool                  // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
 	lastData         *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
+	acctData         map[string]*zhidao.ElectivesData // [账号] 专属课程快照（年级物理隔离）
+	acctDataAt       map[string]time.Time            // [账号] 专属快照时间戳
 	tokenValid       map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
 	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流 + 退避计时基准）
 	reloginFail      map[string]int       // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
@@ -160,6 +162,8 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		relogging:   make(map[string]bool),
 		rateLimited: make(map[string]map[int]time.Time),
 		chains:      make(map[string]bool),
+		acctData:    make(map[string]*zhidao.ElectivesData),
+		acctDataAt:  make(map[string]time.Time),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -374,6 +378,56 @@ func (s *Scheduler) TokenValidFor(acct string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.tokenValid[acct] && !s.relogging[acct]
+}
+
+// ElectivesSnapshotFor 返回指定账号的内存课程快照（40 秒内有效）。
+// 若该账号暂无专属快照或已过期，则回退全局快照。
+func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if acct != "" && s.acctData != nil {
+		if data, ok := s.acctData[acct]; ok && data != nil {
+			if time.Since(s.acctDataAt[acct]) <= snapshotTTL {
+				return data, true
+			}
+		}
+	}
+	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+		return nil, false
+	}
+	return s.lastData, true
+}
+
+// ProbeForAccount 使用指定账号的专属客户端执行课程探测并刷新该账号快照。
+// 命中 token 失效（ErrUnauthorized）时触发该账号自动重登。
+func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) {
+	if s.clients == nil {
+		return nil, errors.New("没有任何已登录账号")
+	}
+	client, ok := s.clients.ClientFor(acct)
+	if !ok || client == nil {
+		return s.ProbeNow()
+	}
+	data, err := client.FindElectives()
+	if err != nil {
+		if errors.Is(err, zhidao.ErrUnauthorized) {
+			s.maybeRelogin(acct)
+		}
+		return nil, err
+	}
+	now := time.Now()
+	s.mu.Lock()
+	if s.acctData == nil {
+		s.acctData = make(map[string]*zhidao.ElectivesData)
+		s.acctDataAt = make(map[string]time.Time)
+	}
+	s.acctData[acct] = data
+	s.acctDataAt[acct] = now
+	s.lastProbe = now
+	s.lastData = data
+	s.lastDataAt = now
+	s.mu.Unlock()
+	return data, nil
 }
 
 // ElectivesSnapshot 返回内存课程快照（40 秒内有效）。超高性能核心：页面浏览零上游请求。
@@ -684,7 +738,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				continue
 			}
 			// 快照人数确认满员（selected >= max）→ 记入 full，跳过本备选
-			if s.classFullInSnapshot(t.ClassID) {
+			if s.classFullInSnapshot(acct, t.ClassID) {
 				s.markFullLocked(acct, t)
 				s.mu.Unlock()
 				continue
@@ -804,8 +858,19 @@ func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Durat
 	s.rateLimited[acct][classID] = time.Now().Add(d)
 }
 
-// classFullInSnapshot 快照人数确认满员（需持锁）。
-func (s *Scheduler) classFullInSnapshot(classID int) bool {
+// classFullInSnapshot 快照人数确认满员（需持锁）。优先匹配该账号专属快照，无快照时回退全局快照。
+func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
+	if acct != "" && s.acctData != nil {
+		if d, ok := s.acctData[acct]; ok && d != nil {
+			for _, p := range d.Publishes {
+				for _, c := range p.Classes {
+					if c.ID == classID {
+						return c.MaxCount > 0 && c.SelectedCount >= c.MaxCount
+					}
+				}
+			}
+		}
+	}
 	if s.lastData == nil {
 		return false
 	}
@@ -848,10 +913,16 @@ func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	if !s.fullHas(acct, classID) {
 		return
 	}
-	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+	fresh := false
+	if acct != "" && s.acctData != nil {
+		if _, ok := s.acctData[acct]; ok && time.Since(s.acctDataAt[acct]) <= snapshotTTL {
+			fresh = true
+		}
+	}
+	if !fresh && (s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL) {
 		return // 快照过期，等下一次有效快照再判断
 	}
-	if s.classFullInSnapshot(classID) {
+	if s.classFullInSnapshot(acct, classID) {
 		return
 	}
 	delete(s.full[acct], classID)

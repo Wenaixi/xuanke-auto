@@ -180,6 +180,20 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 
 // handleElectives 课程列表：直读调度器内存快照（超高性能），快照过期才触发探测。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
+	acct := sessionAccount(r)
+	if acct != "" && acct != d.AdminNameValue() {
+		if data, ok := d.Sched.ElectivesSnapshotFor(acct); ok {
+			writeJSON(w, 0, data, "")
+		return
+		}
+		data, err := d.Sched.ProbeForAccount(acct)
+		if err != nil {
+			writeJSON(w, 1, nil, "查询课程失败: "+err.Error())
+			return
+		}
+		writeJSON(w, 0, data, "")
+		return
+	}
 	if data, ok := d.Sched.ElectivesSnapshot(); ok {
 		writeJSON(w, 0, data, "")
 		return

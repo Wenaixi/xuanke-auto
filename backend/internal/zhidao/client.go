@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -214,8 +215,10 @@ func (c *Client) Login(account, password string) (string, error) {
 				err = fmt.Errorf("识别结果为空")
 			}
 			lastErr = fmt.Errorf("第%d次验证码识别失败: %w", attempt, err)
+			log.Printf("[login] 账号 %s 第%d次验证码识别失败（引擎 %T）：%v", account, attempt, vc.recognizer, err)
 			continue
 		}
+		log.Printf("[login] 账号 %s 第%d次验证码识别成功（引擎 %T，识别 %d 位字符）", account, attempt, vc.recognizer, len(captchaText))
 
 		// 4. 提交登录（提交被拒多为验证码过期，最多 maxSubmitAttempts 次）
 		for submit := 1; submit <= maxSubmitAttempts; submit++ {
@@ -226,12 +229,14 @@ func (c *Client) Login(account, password string) (string, error) {
 			token, err := c.submitLogin(sess, ua, captchaText, identification)
 			if err != nil {
 				lastErr = fmt.Errorf("第%d次验证码提交被拒: %w", attempt, err)
+				log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, err)
 				break // 验证码可能已失效：刷新重识别
 			}
 			return token, nil
 		}
 	}
 	if lastErr != nil {
+		log.Printf("[login] 账号 %s 登录失败（共 %d 次识别尝试）：%v", account, maxCaptchaAttempts, lastErr)
 		return "", fmt.Errorf("登录失败：验证码识别 %d 次均未通过（%s）", maxCaptchaAttempts, lastErr)
 	}
 	return "", fmt.Errorf("登录失败")

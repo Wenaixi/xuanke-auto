@@ -1,9 +1,11 @@
 package zhidao
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -193,6 +195,55 @@ func TestReloginIfNeeded(t *testing.T) {
 	}
 	if atomic.LoadInt32(&reloginCalls) != 1 {
 		t.Fatalf("最多重登 1 次，实际 %d", reloginCalls)
+	}
+}
+
+// TestLoginLogsAttempts 登录链路的尝试日志：识别成功（引擎+位数）、提交被拒、失败收尾均可见。
+func TestLoginLogsAttempts(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	srv, _, _ := loginMockServer(t, 1, 1) // 识别 1 次失败 + 提交 1 次被拒后成功
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+
+	if _, err := c.Login("acct", "pwd"); err != nil {
+		t.Fatalf("登录应成功: %v", err)
+	}
+	logs := buf.String()
+	for _, want := range []string{
+		"[login] 账号 acct 第1次验证码识别失败",
+		"[login] 账号 acct 第2次验证码识别成功",
+		"第2次验证码提交被拒", // 第 2 次识别（attempt 2）提交被拒
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("日志缺少 %q，实际输出：\n%s", want, logs)
+		}
+	}
+}
+
+// TestLoginLogsFailureSummary 登录全部失败时输出收尾日志（总尝试次数 + 最后原因）。
+func TestLoginLogsFailureSummary(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	srv, captchas, _ := loginMockServer(t, 99, 99) // 永远失败
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+
+	if _, err := c.Login("acct", "pwd"); err == nil {
+		t.Fatal("登录应失败")
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "[login] 账号 acct 登录失败（共 3 次识别尝试）") {
+		t.Fatalf("日志缺少失败收尾，实际输出：\n%s", logs)
+	}
+	if got := atomic.LoadInt32(captchas); got != 3 {
+		t.Fatalf("识别应 3 次，实际 %d", got)
 	}
 }
 

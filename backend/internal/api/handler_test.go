@@ -1107,6 +1107,8 @@ func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
 		t.Fatalf("管理员口令错误分支必须延迟 ≥ loginTimingFlat(%v) 再响应，实际 %v——响应过快会让管理员账号名被侧信道枚举", loginTimingFlat, elapsed)
 	}
 }
+
+// TestLoginRejectsFormContentType 登录/激活接口必须拒绝非 JSON 提交：
 // 跨站表单 POST（application/x-www-form-urlencoded）无法携带 JSON Content-Type，
 // 从源头封堵 CSRF 触发的副作用登录（攻击者借受害者 IP 分布式爆破）。
 func TestLoginRejectsFormContentType(t *testing.T) {

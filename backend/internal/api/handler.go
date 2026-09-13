@@ -36,7 +36,7 @@ type Deps struct {
 	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；管理员账号的密码）。
 	Encrypt func(string) (string, error)
 	// Decrypt 数据解密函数（main 注入：secure.Decrypt，vision_key 读回时解密）。
-	Decrypt func(string) (string, error)
+	Decrypt    func(string) (string, error)
 	AdminToken string
 	// AdminName 管理员登录账号名（默认 admin，可用 XUANKE_ADMIN_NAME 改名）。
 	AdminName string
@@ -83,12 +83,9 @@ type LoginRequest struct {
 }
 
 // handleLogin 登录：
-//   - admin 账号 + 管理口令 → 签发管理员会话（绕过教务登录，避免平台登录限流）
-//   - 其他账号 → 教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
-// 激活码机制关闭（ActivationEnabled=false）时跳过激活检查，登录即签发会话。
-// handleLogin 登录：
 //   - 管理员账号（默认 admin，可在 data/.env 用 XUANKE_ADMIN_NAME 改名）+ 管理口令 → 签发管理员会话（绕过教务登录，避免平台登录限流）
 //   - 其他账号 → 教务登录 -> 检查激活状态 -> 已激活签发会话，未激活提示输激活码。
+//
 // 激活码机制关闭（ActivationEnabled=false）时跳过激活检查，登录即签发会话。
 func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
@@ -641,13 +638,13 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// 先落库、后内存生效与下游下发（M-4：落库失败也要完成下发，杜绝半生效误导）。
 		if sErr := d.saveSettings(map[string]string{
-			"activation_enabled": strconv.FormatBool(cfg.ActivationEnabled),
-			"vision_base_url":    cfg.VisionBaseURL,
-			"vision_key":         visionKey,
-			"vision_model":       cfg.VisionModel,
-			"captcha_engine":     cfg.CaptchaEngine,
+			"activation_enabled":  strconv.FormatBool(cfg.ActivationEnabled),
+			"vision_base_url":     cfg.VisionBaseURL,
+			"vision_key":          visionKey,
+			"vision_model":        cfg.VisionModel,
+			"captcha_engine":      cfg.CaptchaEngine,
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
-			"open_time":          cfg.OpenTime,
+			"open_time":           cfg.OpenTime,
 		}); sErr != nil {
 			// M-4 修复（第 3 轮）：落库失败绝不静默——配置已内存生效，但重启即回退。
 			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，

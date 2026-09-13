@@ -104,6 +104,13 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **防逆向交付（garble 混淆）**：发布态 exe 用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 构建——`-literals` 加密所有字符串字面量（选课接口路径、教务域名、课程数据、管理员提示全部不可见，strings 扫描零命中）、`-tiny` 删除源码路径信息、`-ldflags` 剥符号表；实测从 12.6MB → 24.7MB（Go 运行时无法压缩）。冒烟验证：7 账号会话恢复、服务端时钟对齐、`/` 与 `/api/electives` 200、前端 JS asset 嵌入可访问。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
 - **单二进制内嵌原生 ddddocr（彻底摆脱 Python 运行时依赖）**：ONNX 模型（common_old.onnx 13MB）+ 字符集（charsets_old.json 56KB）+ ONNX Runtime（onnxruntime.dll 16MB）经 `//go:embed` 编译进单个 exe；运行时懒加载把资源释出到 `%TEMP%\xuanke_ddddocr_assets`（dumpIfDiff 对比大小，无变化不重写），调用 `github.com/yangbin1322/go-ddddocr` 的 `Classification` 直接在进程内推理，单次识别 5~10ms。**构建双轨（build-tag）**：`native_ocr.go`（`//go:build windows && cgo`）走内嵌实现，`native_ocr_stub.go`（`!windows || !cgo`）返回 false/nil 自动回退本地 Python 桥接或 Vision——Linux/macOS 与 CGO=0 交叉编译不受影响。**引擎优先级**：router 对 `XUANKE_CAPTCHA_ENGINE=ddddocr` 先试 `NativeDdddOcrAvailable()` → 回退本地 Python → 再回退 Vision。**注意**：CGO=1 与 garble 混淆不兼容（garble 需 CGO=0），Windows 发布版必须用 CGO=1 原样构建，Linux/macOS 才走 garble。
 - **选课窗口关闭后平台行为（实测）**：窗口结束后 `findElectivesData` 返回 `code:0` 但 `publishes`/`electivesData` 全空（并非 token 失效 code=-1）；`parseElectives` 对此直接返回空快照，`FindElectives` 不再因空快照落后陷入学期列表兜底重试（兜底拿不到更多课程，纯浪费时间）；`selectElectivesClass` 对已关闭窗口返回 `code:1` 报名错误，调度器新增 `isWindowClosedError`（匹配"关闭/未开启/报名时间/已结束"）按满员记入 `full` 集合，窗口关闭后不再每个 tick 反复轰炸报名接口。
+- **日志系统与窗口关闭防御（2026-09-13 全链路补齐）**：
+  - **探测日志**：`probe()` 每次成功输出"探测成功：%d 个发布，窗口状态 %v（已关闭 %v）"；`ProbeForAccount` 空快照输出"探测返回空课程快照（选课窗口关闭或学期无发布）"——"课程为什么为空"从日志一眼可查。
+  - **窗口关闭状态暴露**：`SchedulerState.WindowClosed`（json `window_closed`）——快照为空且从未开过窗=已关闭，随 `/state` 下发；`handleState` 已透传。
+  - **窗口关闭后探测降频**：`probeIntervalFor` 对"开放时间已过 + WindowClosed"降回 30s，窗口结束后 2 秒高频盯守浪费请求且刷屏日志；管理员热改开放时间到未来（新一轮）时临门 2s 盯守不受影响。
+  - **自动重登日志**：触发输出"触发自动重登（原因：教务 token 失效，连续失败 N 次）"、成功输出"自动重登恢复（新 token 前8位...）"脱敏、失败输出原因、退避窗口过再试也有日志。
+  - **登录全链路日志**：`zhidao.Login` 每次识别成功输出"第N次验证码识别成功（引擎 %T，识别 N 位字符）"、识别失败/提交被拒输出第 N 次与原因、全部失败输出"登录失败（共 3 次识别尝试）"收尾——引擎切换、重试次数、失败原因全可见。
+  - **不打印敏感信息**：所有日志不含明文密码与完整 token（token 只显示前 8 位）。
 
 ### UI 设计系统规范（纯黑白极简艺术 + 瑞士国际排版规范）
 - **设计哲学**：彻底清除任何喧宾夺主、聒噪浮夸的技术宣传口号（如“毫秒级并发”、“智能Vision识别”等广告横幅），全面转向**纯黑白极简艺术风格（Monochrome Fine Art）**，致敬瑞士国际平面排版与现代高奢画廊策展美学。

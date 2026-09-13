@@ -39,15 +39,15 @@ func refuseLegacy(d *sql.DB) error {
 		return err
 	}
 	if n > 0 {
-		// 数据库路径提示统一引导到仓库根 data/（../data/xuanke.db）
-		return errors.New("检测到旧版数据库（account 表），本版本不兼容旧数据。请删除 data/xuanke.db（仓库根目录）后重新启动")
+		// 数据库路径提示统一引导到数据目录（发布态为 exe 同目录 data/，开发态为仓库根 data/）
+		return errors.New("检测到旧版数据库（account 表），本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动")
 	}
 	var empty int
 	if err := d.QueryRow("SELECT count(*) FROM targets WHERE account = ''").Scan(&empty); err != nil {
 		return err
 	}
 	if empty > 0 {
-		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 data/xuanke.db（仓库根目录）后重新启动")
+		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动")
 	}
 	// 旧 v2 库缺列（targets.priority / task_log.account）——不兼容，提示删除重建
 	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}} {
@@ -56,7 +56,7 @@ func refuseLegacy(d *sql.DB) error {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("检测到旧版数据库（%s 表缺 %s 列），本版本不兼容旧数据。请删除 %s 后重新启动", col[0], col[1], "data/xuanke.db（仓库根目录）")
+			return fmt.Errorf("检测到旧版数据库（%s 表缺 %s 列），本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动", col[0], col[1])
 		}
 	}
 	// 旧 v3 库缺 settings 表——不兼容，提示删除重建
@@ -65,7 +65,7 @@ func refuseLegacy(d *sql.DB) error {
 		return err
 	}
 	if hasSettings == 0 {
-		return errors.New("检测到旧版数据库（缺 settings 表），本版本不兼容旧数据。请删除 data/xuanke.db（仓库根目录）后重新启动")
+		return errors.New("检测到旧版数据库（缺 settings 表），本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动")
 	}
 	return nil
 }

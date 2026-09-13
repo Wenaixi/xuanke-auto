@@ -141,21 +141,6 @@ func (s *Store) IsAdminToken(token string) bool {
 	return sess.Admin
 }
 
-// IsAdminAccount 校验"会话绑定的账号名"（用于穿透判定；与身份无关）。
-func (s *Store) IsAdminAccount(token string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[token]
-	if !ok {
-		return false
-	}
-	if time.Now().After(sess.Expires) {
-		delete(s.sessions, token)
-		return false
-	}
-	return sess.Account == "admin"
-}
-
 // RevokeAccount 吊销指定账号签发的全部会话（管理员删除账号时调用）。
 // 锁内遍历删除，使被删账号既有的浏览器令牌立即失效，等不到 12h TTL。
 func (s *Store) RevokeAccount(account string) {

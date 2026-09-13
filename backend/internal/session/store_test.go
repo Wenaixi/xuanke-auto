@@ -103,18 +103,9 @@ func TestRevokeAccount(t *testing.T) {
 	}
 }
 
-func TestIsAdminAccount(t *testing.T) {
-	s := New(time.Hour)
-	if !s.IsAdminAccount(s.Create("admin")) {
-		t.Fatal("名为 admin 的普通会话账号应被识别为 admin 名")
-	}
-	if s.IsAdminAccount(s.Create("student")) {
-		t.Fatal("名为 student 的会话不应被识别为 admin 名")
-	}
-	if s.IsAdminAccount("bogus") {
-		t.Fatal("无效令牌不应被识别为任何账号")
-	}
-}
+// TestIsAdminAccount 已随 M-3 移除 IsAdminAccount 方法而删除：
+// 管理员判定统一走 Deps.IsAdminAccountName（配置名）与 Store.IsAdminToken（会话身份），
+// 不再有"会话账号=字面量 admin"这套陈旧判定（避免两套真相错位）。
 
 func TestRandTokenPanicsOnRandFailure(t *testing.T) {
 	// 注入失败的 crypto/rand 读取器：rand.Read 必须 panic（与 config.randomAdminToken 同策略，

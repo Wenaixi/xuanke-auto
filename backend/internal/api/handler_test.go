@@ -31,6 +31,7 @@ type testDeps struct {
 	sched    *scheduler.Scheduler
 	sessions *session.Store
 	accts    *accounts.Manager
+	rt       *runtime.Store // 运行时配置中心（测试重建 handler 用）
 	dec      func(string) (string, error) // 注入的解密函数（测试断言加密还原用）
 }
 
@@ -143,7 +144,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
 	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken, adminName,
 		rt.Get().ActivationEnabled, enc, dec, rt)
-	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, dec: dec}
+	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path, body string) (int, map[string]any) {

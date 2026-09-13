@@ -84,10 +84,9 @@ func loadDotEnv(path string) {
 		}
 		key = strings.TrimSpace(key)
 		if os.Getenv(key) == "" {
-			// 行内注释（#）截断，避免口令带上注释尾巴
-			if i := strings.Index(val, "#"); i >= 0 {
-				val = val[:i]
-			}
+			// n5 修复（第 3 轮）：不再按 # 截断值——口令/密钥中合法 # 会被截断破坏。
+			// 旧版"行内注释截断"只服务于模板注释（# 开头行已被上方整行跳过）；
+			// 真实值里出现 # 属于合法字符，宁可保留也不破坏凭据。
 			_ = os.Setenv(key, strings.TrimSpace(val))
 		}
 	}

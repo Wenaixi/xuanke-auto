@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// randReader 可注入的随机源（测试注入失败场景用；生产恒为 crypto/rand）。
+var randReader = rand.Read
+
 // Session 一次服务端会话（绑定唯一账号；Admin 标记管理员身份）。
 type Session struct {
 	Account string
@@ -104,6 +107,18 @@ func (s *Store) IsAdminAccount(token string) bool {
 	return sess.Account == "admin"
 }
 
+// RevokeAccount 吊销指定账号签发的全部会话（管理员删除账号时调用）。
+// 锁内遍历删除，使被删账号既有的浏览器令牌立即失效，等不到 12h TTL。
+func (s *Store) RevokeAccount(account string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tok, sess := range s.sessions {
+		if sess.Account == account {
+			delete(s.sessions, tok)
+		}
+	}
+}
+
 // Delete 注销会话（退出登录）。
 func (s *Store) Delete(token string) {
 	s.mu.Lock()
@@ -113,6 +128,9 @@ func (s *Store) Delete(token string) {
 
 func randToken() string {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := randReader(b); err != nil {
+		// 与 config.randomAdminToken 同策略：熵源故障拒绝签发可预测令牌。
+		panic("crypto/rand 不可用，无法签发安全会话令牌")
+	}
 	return hex.EncodeToString(b)
 }

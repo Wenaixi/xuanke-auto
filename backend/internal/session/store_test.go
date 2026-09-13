@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -76,6 +77,32 @@ func TestIsAdminToken(t *testing.T) {
 	}
 }
 
+func TestRevokeAccount(t *testing.T) {
+	s := New(time.Hour)
+	tokA := s.Create("acctA")
+	tokB := s.Create("acctB")
+	adminTok := s.CreateAdmin()
+
+	// 吊销 acctA：acctA 全部会话失效，其他账号不受影响
+	s.RevokeAccount("acctA")
+	if _, ok := s.Account(tokA); ok {
+		t.Fatal("吊销后 acctA 会话应失效")
+	}
+	if acct, ok := s.Account(tokB); !ok || acct != "acctB" {
+		t.Fatalf("吊销 acctA 不应影响 acctB: %q %v", acct, ok)
+	}
+	if !s.IsAdminToken(adminTok) {
+		t.Fatal("吊销 acctA 不应影响管理员会话")
+	}
+	// 吊销不存在的账号不报错
+	s.RevokeAccount("no-such-account")
+	// 同名账号再登录（新令牌）不受吊销影响（旧令牌已失效、新令牌有效）
+	reTok := s.Create("acctA")
+	if _, ok := s.Account(reTok); !ok {
+		t.Fatal("吊销后重新登录签发的令牌应有效")
+	}
+}
+
 func TestIsAdminAccount(t *testing.T) {
 	s := New(time.Hour)
 	if !s.IsAdminAccount(s.Create("admin")) {
@@ -87,4 +114,20 @@ func TestIsAdminAccount(t *testing.T) {
 	if s.IsAdminAccount("bogus") {
 		t.Fatal("无效令牌不应被识别为任何账号")
 	}
+}
+
+func TestRandTokenPanicsOnRandFailure(t *testing.T) {
+	// 注入失败的 crypto/rand 读取器：rand.Read 必须 panic（与 config.randomAdminToken 同策略，
+	// 绝不静默生成全零可预测令牌）。
+	old := randReader
+	randReader = func(b []byte) (int, error) { return 0, errors.New("entropy source down") }
+	defer func() { randReader = old }()
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("crypto/rand 失败时必须 panic，拒绝生成可预测令牌")
+		}
+	}()
+	randToken()
 }

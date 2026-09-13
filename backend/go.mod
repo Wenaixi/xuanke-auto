@@ -1,6 +1,6 @@
 module xuanke-auto/backend
 
-go 1.26.1
+go 1.26.8
 
 require (
 	github.com/yangbin1322/go-ddddocr v1.0.1

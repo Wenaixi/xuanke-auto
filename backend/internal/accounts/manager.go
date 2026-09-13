@@ -212,6 +212,8 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 }
 
 // Restore 重启时用持久化凭据恢复各账号客户端（密码解密后在内存中，仅用于自动重登）。
+// MAJOR-B：SetCredentials 已写入 zd_edu_cookie（token）；SetCookies 为合并语义，
+// 只补齐 access_limit_cookie，绝不覆盖登录流程收集的服务端会话 Cookie。
 func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, error)) {
 	for _, cd := range creds {
 		c := m.ensure(cd.Account)
@@ -222,9 +224,10 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 			}
 		}
 		c.SetCredentials(cd.Account, pwd, cd.IDToken)
+		// access_limit_cookie 由 login/submitLogin 动态更新；这里只做占位补充，
+		// 不写死覆盖真实会话值（合并语义由 SetCookies 保证）。
 		c.SetCookies(map[string]string{
-			"access_limit_cookie": "***REMOVED***",
-			"zd_edu_cookie":       cd.IDToken,
+			"access_limit_cookie": "1",
 		})
 		log.Printf("[accounts] 恢复账号 %s 的会话（token %s）", cd.Account, tokenShort(cd.IDToken))
 	}
@@ -232,7 +235,7 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 
 func tokenShort(s string) string {
 	if len(s) <= 8 {
-		return s
+		return "***"
 	}
 	return s[:8] + "..."
 }

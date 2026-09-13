@@ -137,6 +137,37 @@ func TestNoAutoRelogin(t *testing.T) {
 	}
 }
 
+// TestSetCookiesMergeSemantics 验证 SetCookies 合并语义（MAJOR-B）：
+// 只写入给定键、绝不删除未提及的既有 Cookie（恢复旧会话时不能清掉
+// _jfinal_captcha/_jfinal_token 等服务端会话 Cookie）。
+func TestSetCookiesMergeSemantics(t *testing.T) {
+	c := New("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "k", Model: "m"})
+	// 模拟登录流程已收集的服务端会话 Cookie
+	c.SetCookies(map[string]string{
+		"zd_edu_cookie":       "tok-1",
+		"_jfinal_captcha":     "abc",
+		"_jfinal_token":       "xyz",
+		"access_limit_cookie": "real-session-value",
+	})
+	// 恢复旧会话：只传两个键（模拟 manager.Restore）
+	c.SetCookies(map[string]string{
+		"zd_edu_cookie":       "tok-2",
+		"access_limit_cookie": "1",
+	})
+
+	c.mu.Lock()
+	ck := c.cookies
+	c.mu.Unlock()
+	// 更新键生效
+	if ck["zd_edu_cookie"] != "tok-2" || ck["access_limit_cookie"] != "1" {
+		t.Fatalf("给定键应被写入，实际 %v", ck)
+	}
+	// 未提及键必须保留（合并语义）：整体覆盖会清掉服务端会话 Cookie
+	if ck["_jfinal_captcha"] != "abc" || ck["_jfinal_token"] != "xyz" {
+		t.Fatalf("SetCookies 合并语义：未提及的既有 Cookie 必须保留，实际 %v", ck)
+	}
+}
+
 // TestSetVisionKeepsLocalRecognizer 验证 SetVision 传入的 cfg.recognizer 为零值（nil）时，
 // 绝不能清空当前生效的本地识别引擎（M6）：热更新 Vision 配置不应波及识别引擎选择。
 func TestSetVisionKeepsLocalRecognizer(t *testing.T) {

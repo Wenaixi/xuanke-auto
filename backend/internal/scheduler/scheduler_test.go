@@ -47,6 +47,12 @@ func (b *syncLogBuffer) String() string {
 	return b.buf.String()
 }
 
+func (b *syncLogBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
 	mu          sync.Mutex
@@ -55,6 +61,18 @@ type fakeClient struct {
 	selectErr   map[int]error
 	selectCalls map[int]int
 	relogCalls  int // 重登回调调用次数（测试用）
+	syncOffset  time.Duration
+	syncErr     error // 时钟对齐失败时注入的错误
+}
+
+// SyncServerTime 可控时钟对齐：返回预置偏差或错误（MAJOR-C 测试用）。
+func (f *fakeClient) SyncServerTime() (time.Duration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.syncErr != nil {
+		return 0, f.syncErr
+	}
+	return f.syncOffset, nil
 }
 
 func (f *fakeClient) setOpen(open bool) {
@@ -866,6 +884,114 @@ func TestServerClockAlignment(t *testing.T) {
 	}
 }
 
+// TestClockSyncFailureResetsOffset 验证时钟同步连续失败后回退（MAJOR-C）：
+// 连续 3 次同步失败复位 clockOffset=0 并输出警告日志，窗口判定回到本地时钟，
+// 绝不带着一个过期偏差长期误判开窗点。
+func TestClockSyncFailureResetsOffset(t *testing.T) {
+	var buf syncLogBuffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.syncOffset = 5 * time.Second
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+	s.SetClockOffsetForTest(5 * time.Second) // 先模拟一次成功校准带来的偏差
+
+	// 连续 3 次同步失败
+	for i := 0; i < 3; i++ {
+		fc.mu.Lock()
+		fc.syncErr = errors.New("网络故障")
+		fc.mu.Unlock()
+		s.maybeSyncClock(time.Now().Add(time.Duration(i) * time.Minute))
+	}
+
+	// 等待后台同步 goroutine 全部结束：第 3 次失败触发回退（offset=0）后计数被重置，
+	// 以「偏差已复位」作为完成信号
+	wait := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		off := s.clockOffset
+		s.mu.Unlock()
+		if off == 0 && strings.Contains(buf.String(), "时钟对齐连续失败已达 3 次") {
+			break
+		}
+		if time.Now().After(wait) {
+			t.Fatal("同步 goroutine 未在 5 秒内完成")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	s.mu.Lock()
+	off := s.clockOffset
+	s.mu.Unlock()
+	if off != 0 {
+		t.Fatalf("连续 3 次同步失败后 clockOffset 应复位为 0，实际 %v", off)
+	}
+	if !strings.Contains(buf.String(), "时钟对齐连续失败") {
+		t.Fatalf("应输出失败回退警告日志，实际输出：\n%s", buf.String())
+	}
+	// 失败回退后窗口判定用本地时钟（差值≈0）
+	if d := time.Until(s.nowAligned()); d < -time.Second || d > time.Second {
+		t.Fatalf("复位后 nowAligned 应约等于本地时间，实际差值 %v", d)
+	}
+}
+
+// TestClockSyncSuccessClearsFailStreak 验证同步成功即清零连续失败计数（MAJOR-C）：
+// 网络抖动 1 次后恢复，不允许一次瞬断就累计成回退。
+func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.syncOffset = 5 * time.Second
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+
+	// 1 次失败 + 1 次成功；每次发起后等待对应状态落地再继续
+	fc.mu.Lock()
+	fc.syncErr = errors.New("网络故障")
+	fc.mu.Unlock()
+	s.maybeSyncClock(time.Now())
+
+	// 失败落地：等待 syncFailStreak 累计到 1
+	waitForStreak := func(want int) {
+		wait := time.Now().Add(5 * time.Second)
+		for {
+			s.mu.Lock()
+			got := s.syncFailStreak
+			s.mu.Unlock()
+			if got == want {
+				return
+			}
+			if time.Now().After(wait) {
+				t.Fatalf("失败计数应到 %d，实际 %d", want, got)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitForStreak(1)
+
+	// 同步成功：offset 更新 + 失败计数清零
+	fc.mu.Lock()
+	fc.syncErr = nil
+	fc.mu.Unlock()
+	s.maybeSyncClock(time.Now().Add(time.Minute))
+
+	wait := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		off := s.clockOffset
+		streak := s.syncFailStreak
+		s.mu.Unlock()
+		if streak == 0 && off == 5*time.Second {
+			break
+		}
+		if time.Now().After(wait) {
+			t.Fatalf("成功后应清零计数并写入 5s 偏差，实际 streak=%d offset=%v", streak, off)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestWindowClosedState 选课窗口关闭（探测返回空快照）时，状态应暴露 window_closed=true
 // 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
 func TestWindowClosedState(t *testing.T) {
@@ -983,6 +1109,73 @@ func TestReloginFailureResetsCounter(t *testing.T) {
 	// 复位后基础退避即 30s，保证 Vision 恢复后账号能较快重新尝试
 	if wait := s.reloginBackoff(s.reloginFail[acct]); wait != 30*time.Second {
 		t.Fatalf("失败 1 次后的退避应为基础 30s，实际 %v", wait)
+	}
+}
+
+// TestSubmitAllUsesAlignedClock 验证提交时刻 lastSubmit 用对齐时钟写入（MAJOR-F）：
+// 时钟偏差下提交闸门比较两端（tick 的 nowAligned 与 lastSubmit）必须同基准，
+// 否则 250ms 黄金期冲刺间隔判定在 clockOffset 达数百 ms 时失真。
+func TestSubmitAllUsesAlignedClock(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Hour)
+	// 模拟服务端时钟比本地快 5 秒
+	s.SetClockOffsetForTest(5 * time.Second)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	s.submitAll()
+
+	s.mu.Lock()
+	ls := s.lastSubmit
+	s.mu.Unlock()
+	if ls.IsZero() {
+		t.Fatal("submitAll 应写入 lastSubmit")
+	}
+	// lastSubmit 应对齐（≈ 本地时间+5s），而非本地时间
+	// lastSubmit 应对齐（本地+5s），time.Until ≈ +5s，而非本地时钟的 ≈0
+	if d := time.Until(ls); d < 3*time.Second || d > 8*time.Second {
+		t.Fatalf("lastSubmit 应使用对齐时钟（本地+5s 附近），实际距今 %v", d)
+	}
+}
+
+// TestSubmitAllWarnsOnceOnNoTargets 验证无目标空转只警告一次（M-3）：
+// 冷启动没有目标时输出一次性警告日志，第二次 submitAll 不再刷屏；
+// 设置目标后不再警告。
+func TestSubmitAllWarnsOnceOnNoTargets(t *testing.T) {
+	var buf syncLogBuffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	s := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
+	s.submitAll() // 第一次：应输出警告
+	if !strings.Contains(buf.String(), "没有任何账号目标课程") {
+		t.Fatalf("首次无目标提交应输出警告日志，实际输出：\n%s", buf.String())
+	}
+	buf.Reset()
+	s.submitAll() // 第二次：只警告一次，不再刷屏
+	if strings.Contains(buf.String(), "没有任何账号目标课程") {
+		t.Fatalf("无目标警告只应输出一次，实际重复输出：\n%s", buf.String())
+	}
+
+	// 设置目标后恢复提交，不再警告
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	buf.Reset()
+	s.submitAll()
+	if strings.Contains(buf.String(), "没有任何账号目标课程") {
+		t.Fatalf("设置目标后不应再警告无目标：\n%s", buf.String())
+	}
+}
+
+// TestMaskedTokenBoundary 验证 token 脱敏边界（m10）：长度 >8 显示前 8 位，
+// ≤8 位的短 token 不足以掩盖身份，一律返回 "***"。
+func TestMaskedTokenBoundary(t *testing.T) {
+	if got := maskedToken("abcdefgh12345"); got != "abcdefgh" {
+		t.Fatalf("长 token 应显示前 8 位，实际 %q", got)
+	}
+	for _, short := range []string{"", "a", "12345678"} {
+		if got := maskedToken(short); got != "***" {
+			t.Fatalf("≤8 位 token %q 应返回 ***，实际 %q", short, got)
+		}
 	}
 }
 

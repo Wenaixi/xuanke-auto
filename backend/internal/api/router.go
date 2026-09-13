@@ -57,8 +57,21 @@ func applyCaptchaRecognizerFor(rt *runtime.Store, accts *accounts.Manager) {
 // jsonContentType 检查请求体是否为 JSON（反跨站表单 POST 的 CSRF 缓解）。
 // 前端统一用 fetch+JSON，必带 application/json；跨站表单提交是
 // application/x-www-form-urlencoded，无法伪造该头 → 直接 403 拒绝副作用请求。
+// m8 修复：admin 的 PUT/DELETE（config 热改、codes 生成/删除、账号删除）同样复用此检查，
+// 防止管理员接口被跨站表单 POST 挟持。
 func jsonContentType(r *http.Request) bool {
 	return strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json")
+}
+
+// requireJSONBody 复用 jsonContentType 拒绝非 JSON 提交的副作用请求（m8）。
+func requireJSONBody(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !jsonContentType(r) {
+			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			return
+		}
+		next(w, r)
+	}
 }
 
 // Register 注册所有 API 路由到 mux，并返回包装了安全中间件的根 handler。
@@ -101,22 +114,22 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 		}
 		d.handleActivate(w, r)
 	})
-	// 激活码管理接口（会话级管理员鉴权）
+	// 激活码管理接口（会话级管理员鉴权）；m8：生成/删除是副作用请求，强制 JSON
 	mux.HandleFunc("GET /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
 	mux.HandleFunc("POST /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, d.handleAdminCodes)(w, r)
+		requireAdminSession(d, requireJSONBody(d.handleAdminCodes))(w, r)
 	})
 	mux.HandleFunc("DELETE /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, d.handleAdminCodes)(w, r)
+		requireAdminSession(d, requireJSONBody(d.handleAdminCodes))(w, r)
 	})
 	// 管理员后台：配置热重载 / 运行状态 / 账号管理 / 日志总览（会话级管理员鉴权）
 	mux.HandleFunc("GET /api/admin/config", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminConfig)(w, r)
 	})
 	mux.HandleFunc("PUT /api/admin/config", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, d.handleAdminConfig)(w, r)
+		requireAdminSession(d, requireJSONBody(d.handleAdminConfig))(w, r)
 	})
 	mux.HandleFunc("GET /api/admin/stats", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminStats)(w, r)
@@ -125,23 +138,23 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 		requireAdminSession(d, d.handleAdminAccounts)(w, r)
 	})
 	mux.HandleFunc("DELETE /api/admin/accounts", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, d.handleAdminDeleteAccount)(w, r)
+		requireAdminSession(d, requireJSONBody(d.handleAdminDeleteAccount))(w, r)
 	})
 	mux.HandleFunc("GET /api/admin/logs", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminLogs)(w, r)
 	})
-	// 其余接口全部要求会话认证
+	// 其余接口全部要求会话认证；m8：报名/退选/目标设置等副作用请求同样强制 JSON
 	mux.HandleFunc("GET /api/electives", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleElectives)(w, r)
 	})
 	mux.HandleFunc("POST /api/electives/select", func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(d, d.handleElectiveSelect)(w, r)
+		requireAuth(d, requireJSONBody(d.handleElectiveSelect))(w, r)
 	})
 	mux.HandleFunc("POST /api/electives/select/exit", func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(d, d.handleElectiveExit)(w, r)
+		requireAuth(d, requireJSONBody(d.handleElectiveExit))(w, r)
 	})
 	mux.HandleFunc("PUT /api/targets", func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(d, d.handleSetTargets)(w, r)
+		requireAuth(d, requireJSONBody(d.handleSetTargets))(w, r)
 	})
 	mux.HandleFunc("GET /api/accounts", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleAccounts)(w, r)

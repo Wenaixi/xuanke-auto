@@ -132,6 +132,9 @@ func (c *Client) SetCredentials(account, password, token string) {
 }
 
 // SetCookies 设置附加 Cookie（如 access_limit_cookie），用于复用现有会话。
+// 合并语义（MAJOR-B 修复）：只写入给定键，绝不删除未提及的既有 Cookie——
+// 恢复旧会话时若整体覆盖，会清掉登录流程收集的 _jfinal_captcha/_jfinal_token
+// 等服务端会话 Cookie，导致平台鉴权缺失。
 func (c *Client) SetCookies(cookies map[string]string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

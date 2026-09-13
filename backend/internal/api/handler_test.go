@@ -196,7 +196,7 @@ func loginAndGetToken(t *testing.T, d *testDeps, acct string) string {
 	if code != 200 || j["code"].(float64) != 1001 {
 		t.Fatalf("未激活账号登录应返回 1001: %d %v", code, j)
 	}
-	// 生成激活码
+		// 生成激活码
 	if err := d.store.CreateActivationCode("XK-ABCD-EF12-3456", 10); err != nil {
 		t.Fatal(err)
 	}
@@ -395,6 +395,10 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	}
 	// 用激活码激活账号，验证可用次数扣减
 	first := codes[0].(string)
+	// 生成码为 16 位 hex（XK-XXXX-XXXX-XXXX-XXXX），断言熵提升落地（m7）
+	if strings.Count(first, "-") != 4 {
+		t.Fatalf("激活码应为 16 位 hex（4 段分隔），实际 %q", first)
+	}
 	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"`+first+`"}`)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("激活失败: %d %v", code, j)
@@ -459,6 +463,25 @@ func TestAdminConfigHotReload(t *testing.T) {
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":"bad-time"}`, adminTok)
 	if j["code"].(float64) == 0 {
 		t.Fatalf("无效打开时间不应接受: %v", j)
+	}
+
+	// m8：带管理员会话 + 表单 Content-Type 的副作用请求必须被拒（CSRF 防线）。
+	// 路由层 requireJSONBody 对非 JSON 提交直接 403——跨站表单 POST 无法伪造 JSON 头。
+	// 本项目约定：业务码放 body.code，HTTP 状态恒定 200，故读 body 的 code 字段。
+	req5 := httptest.NewRequest(http.MethodPost, "/api/admin/codes", strings.NewReader("count=1"))
+	req5.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req5.Header.Set("Authorization", "Bearer "+adminTok)
+	rec5 := httptest.NewRecorder()
+	d.api.ServeHTTP(rec5, req5)
+	var j5 map[string]any
+	json.Unmarshal(rec5.Body.Bytes(), &j5)
+	if c, _ := j5["code"].(float64); c != 403 {
+		t.Fatalf("表单 Content-Type 的 admin 副作用请求应返回 code=403（m8），实际 %v", j5)
+	}
+	// 同时保证未走生成分支（激活码列表未新增）
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", adminTok)
+	if lst, _ := j["data"].([]any); len(lst) != 0 {
+		t.Fatalf("被拒请求不应生成激活码（m8），当前列表 %v", lst)
 	}
 }
 
@@ -586,6 +609,17 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 	code, j = doJSONAdmin(t, d.api, "DELETE", "/api/admin/accounts", `{"account":"acct1"}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("删除账号失败: %d %v", code, j)
+	}
+	// MAJOR-A：删除账号后其既有会话必须立即失效（吊销会话，不等 12h TTL）
+	// 会话失效由业务 code=401 表达（HTTP 200 + body code 恒为项目约定）
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok1)
+	if code != 200 || j["code"].(float64) != 401 {
+		t.Fatalf("删除账号后旧会话应立即失效 code=401，实际 %d %v", code, j)
+	}
+	// 未删除的 acct2 会话不受影响
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok2)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("未删除账号会话不应受影响: %d %v", code, j)
 	}
 	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/accounts", "", adminTok)
 	list, _ = j["data"].([]any)

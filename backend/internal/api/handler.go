@@ -407,6 +407,8 @@ func (d *Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // requireAdminSession 管理员会话校验：仅接受 admin 账号登录签发的会话令牌。
 // 管理口令只在登录时比对一次，后续一律走会话（X-Admin-Token 已废弃）。
+// 注意：仅负责鉴权，不负责 JSON Content-Type 检查——副作用请求的 CSRF 防线
+// 由 router 的 requireJSONBody 单独叠加（m8）。
 func requireAdminSession(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := ""
@@ -483,12 +485,13 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// newActivationCode 生成 XK-XXXX-XXXX-XXXX 格式激活码（12 位十六进制）。
+// newActivationCode 生成 XK-XXXX-XXXX-XXXX 格式激活码（16 位十六进制）。
+// m7 修复：原 12 位 hex（48bit 熵）对有效期长的激活码偏低，提升至 16 位 hex（64bit 熵）。
 func newActivationCode() string {
-	b := make([]byte, 6)
+	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	s := strings.ToUpper(hex.EncodeToString(b))
-	return fmt.Sprintf("XK-%s-%s-%s", s[0:4], s[4:8], s[8:12])
+	return fmt.Sprintf("XK-%s-%s-%s-%s", s[0:4], s[4:8], s[8:12], s[12:16])
 }
 
 // ---- 管理员后台接口（会话级鉴权，见 requireAdminSession） ----
@@ -596,8 +599,11 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
 			"open_time":          cfg.OpenTime,
 		}); sErr != nil {
+			// m5 修复：落库失败绝不静默——配置已内存生效，但重启即回退。
+			// 如实返回 500，让管理员立即知晓持久化失败，避免"改完以为保存了"的配置丢失。
 			log.Printf("[api] 配置落库失败: %v", sErr)
-			// 落库失败不阻塞生效（内存已改），但必须如实记录，避免重启后配置回退无感知
+			writeJSON(w, 500, nil, "配置已生效但落库失败（重启后将回退）："+sErr.Error())
+			return
 		}
 		// 热重载下游组件：验证码识别配置推给全部账号客户端；打开时间由调度器运行时读取
 		d.Accounts.SetVision(zhidao.VisionConfig{
@@ -698,6 +704,9 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 	// 调度器与账号注册表同步隔离：清空内存目标（下个 tick 不再提交）+ 移除客户端。
 	d.Sched.SetTargetsForAccount(req.Account, nil)
 	d.Accounts.Remove(req.Account)
+	// 吊销该账号签发的全部会话（MAJOR-A）：被删账号既有浏览器令牌立即失效，
+	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。
+	d.Sessions.RevokeAccount(req.Account)
 	d.Store.AppendLog("admin", 0, "delete_account", "删除账号 "+req.Account, true)
 	writeJSON(w, 0, nil, "已删除账号 "+req.Account)
 }

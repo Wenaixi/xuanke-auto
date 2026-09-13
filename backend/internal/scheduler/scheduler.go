@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -137,9 +138,11 @@ type Scheduler struct {
 	relogging        map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
 	reloginMu        sync.Mutex           // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
 	reloginResults   chan reloginResult   // 重登结果回传（异步结果在 tick 主循环统一处理）
+	warnedNoTargets  bool                 // M-3：无目标空转警告只打一次
 
 	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
 	lastSyncTime   time.Time                    // 上次时钟对齐采样时间
+	syncFailStreak int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
 	lastPrewarm    time.Time                    // 上次连接池预热时间
 	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
 
@@ -228,6 +231,8 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 }
 
 // maybeSyncClock 定期异步采样教务服务端时间，校准本地时钟偏差。
+// MAJOR-C 回退：同步连续失败 3 次即复位 clockOffset=0（窗口判定回到本地时钟），
+// 绝不带着一个过期偏差长期误判开窗点；单次成功立即清零失败计数，瞬断不累计。
 func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Lock()
 	if !s.lastSyncTime.IsZero() && now.Sub(s.lastSyncTime) < time.Minute {
@@ -240,12 +245,22 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	if client, ok := s.clients.AnyClient(); ok {
 		if syncer, ok := client.(TimeSyncer); ok {
 			go func() {
-				if offset, err := syncer.SyncServerTime(); err == nil {
-					s.mu.Lock()
-					s.clockOffset = offset
-					s.mu.Unlock()
-					log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
+				offset, err := syncer.SyncServerTime()
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if err != nil {
+					s.syncFailStreak++
+					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
+					if s.syncFailStreak >= 3 {
+						s.clockOffset = 0
+						s.syncFailStreak = 0 // 已回退并告警，重置计数等下一轮重新累计
+						log.Printf("[scheduler] 时钟对齐连续失败已达 %d 次，校准偏差已复位（回退到本地时钟）", 3)
+					}
+					return
 				}
+				s.clockOffset = offset
+				s.syncFailStreak = 0
+				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
 		}
 	}
@@ -428,13 +443,16 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 
 // ProbeForAccount 使用指定账号的专属客户端执行课程探测并刷新该账号快照。
 // 命中 token 失效（ErrUnauthorized）时触发该账号自动重登。
+//
+// MAJOR-D：账号不存在时返回明确错误，绝不回退 ProbeNow 直打教务上游——
+// 否则 ?account= 对任意不存在账号可绕过调度器 30s 探测节流 + 账号枚举。
 func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) {
 	if s.clients == nil {
 		return nil, errors.New("没有任何已登录账号")
 	}
 	client, ok := s.clients.ClientFor(acct)
 	if !ok || client == nil {
-		return s.ProbeNow()
+		return nil, fmt.Errorf("账号 %s 未登录或不存在，无法探测课程", acct)
 	}
 	data, err := client.FindElectives()
 	if err != nil {
@@ -743,17 +761,20 @@ type reloginResult struct {
 }
 
 // maskedToken 脱敏打印教务 token：只显示前 8 位，绝不输出完整值。
+// m10 修复：长度 ≤8 的短 token 不足以掩盖身份，一律输出 "***"。
 func maskedToken(tok string) string {
 	if len(tok) > 8 {
 		return tok[:8]
 	}
-	return tok
+	return "***"
 }
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。
 func (s *Scheduler) submitAll() {
+	// MAJOR-F 修复：本地时钟写 lastSubmit 会与对齐时钟判定（tick 内 submitIntervalFor）
+	// 产生基准混用——统一以对齐时钟记录提交时刻，黄金期 250ms 冲刺间隔判定不再失真。
 	s.mu.Lock()
-	s.lastSubmit = time.Now()
+	s.lastSubmit = s.nowAlignedLocked()
 	type chain struct {
 		acct string
 		ts   []Target
@@ -775,6 +796,15 @@ func (s *Scheduler) submitAll() {
 		}
 	}
 	s.mu.Unlock()
+	if len(chains) == 0 {
+		// M-3 修复：冷启动（尚无目标）时每 tick 静默空转，运维无法区分
+		// 「没目标所以没提交」与「配置丢失/加载失败」。一次性警告日志点破真相。
+		if !s.warnedNoTargets {
+			s.warnedNoTargets = true
+			log.Printf("[scheduler] 当前没有任何账号目标课程，提交链未启动（请先在选课大厅设置目标）")
+		}
+		return
+	}
 	for _, c := range chains {
 		s.spawnChain(c.acct, c.ts)
 	}

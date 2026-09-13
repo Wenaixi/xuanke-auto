@@ -74,6 +74,36 @@ func (s *Store) IsAdmin(token string) bool {
 	return sess.Admin
 }
 
+// IsAdminToken 校验令牌是否有效且为管理员会话（requireAdminSession 用）。
+func (s *Store) IsAdminToken(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(sess.Expires) {
+		delete(s.sessions, token)
+		return false
+	}
+	return sess.Admin
+}
+
+// IsAdminAccount 校验"会话绑定的账号名"（用于穿透判定；与身份无关）。
+func (s *Store) IsAdminAccount(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(sess.Expires) {
+		delete(s.sessions, token)
+		return false
+	}
+	return sess.Account == "admin"
+}
+
 // Delete 注销会话（退出登录）。
 func (s *Store) Delete(token string) {
 	s.mu.Lock()

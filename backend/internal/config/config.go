@@ -9,10 +9,11 @@ import (
 )
 
 // randomAdminToken 生成 24 位十六进制随机管理口令（首次运行自动生成，用户可在 .env 修改）。
+// crypto/rand 失败（熵源故障）时拒绝启动：宁可显式报错也不接受可预测兜底口令（评审 MINOR 4）。
 func randomAdminToken() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
-		return "xk-admin-change-me-2026"
+		panic("crypto/rand 不可用，无法生成安全的管理口令，拒绝启动")
 	}
 	return hex.EncodeToString(b)
 }

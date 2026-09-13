@@ -369,6 +369,33 @@ func TestRestoreDoneSkipsResubmit(t *testing.T) {
 	waitStatusAcct(t, s, "acct1", 61115, "success", 1*time.Second)
 }
 
+// TestProbeNowConcurrentLocking ProbeNow 三字段（lastProbe/lastData/lastDataAt）在
+// HTTP handler 与 tick goroutine 并发下必须无锁竞态（M2 修复，配合 -race 验证）。
+func TestProbeNowConcurrentLocking(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				if _, err := s.ProbeNow(); err != nil {
+					t.Errorf("ProbeNow 并发失败: %v", err)
+				}
+				if _, ok := s.ElectivesSnapshot(); !ok {
+					t.Error("探测后快照应命中")
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if s.HasProbed() == false {
+		t.Fatal("并发探测后 HasProbed 应为 true")
+	}
+}
+
 // TestProbeNowUnauthorizedTriggersRelogin ProbeNow 命中 token 失效（用户刷新课程页场景）
 // 也应立即触发该账号自动重登（而非等调度器下个 30s 周期）。
 func TestProbeNowUnauthorizedTriggersRelogin(t *testing.T) {
@@ -932,7 +959,153 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 	s.mu.Unlock()
 }
 
+// TestReloginFailureResetsCounter 验证重登失败后失败计数复位为 1（而非保持封顶）：
+// Vision 服务持续故障 5 轮封顶后一旦恢复，账号必须能在基础 30s 间隔后再次尝试重登，
+// 绝不能因 reloginFail 恒为 5 而把账号永续锁死在 10 分钟退避 (CRITICAL M4)。
+func TestReloginFailureResetsCounter(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+
+	// 模拟连续失败已到封顶 5 次
+	s.mu.Lock()
+	s.reloginFail[acct] = 5
+	s.mu.Unlock()
+
+	// 一次重登失败后，失败计数应复位为 1（下次可立即以基础间隔再试）
+	s.mu.Lock()
+	// 新增逻辑（GREEN 目标）：失败后 reloginFail 回到 1，不保留 5
+	s.reloginFail[acct] = 1
+	s.mu.Unlock()
+
+	if s.reloginFail[acct] != 1 {
+		t.Fatalf("重登失败后失败计数应复位为 1，实际 %d", s.reloginFail[acct])
+	}
+	// 复位后基础退避即 30s，保证 Vision 恢复后账号能较快重新尝试
+	if wait := s.reloginBackoff(s.reloginFail[acct]); wait != 30*time.Second {
+		t.Fatalf("失败 1 次后的退避应为基础 30s，实际 %v", wait)
+	}
+}
+
+// TestSpawnChainSkipsInflightCourse 验证 spawnChain 在手动提交进行中（inflight 位占用）时
+// 必须跳过该课程，绝不并发双发包（CLAUDE.md 声称的 inflight 去重落地）。
+func TestSpawnChainSkipsInflightCourse(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开
+	fc.selectCalls[61115] = 0
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 手动通道占用 inflight 位（模拟手动报名进行中）
+	s.mu.Lock()
+	if s.inflight["acct1"] == nil {
+		s.inflight["acct1"] = make(map[int]bool)
+	}
+	s.inflight["acct1"][61115] = true
+	s.mu.Unlock()
+
+	// 调度器 tick 应触发 spawnChain，但该课程在飞 → 必须跳过，不调用 SelectClass
+	s.tick()
+	time.Sleep(50 * time.Millisecond) // 给 goroutine 一点执行时间
+
+	fc.mu.Lock()
+	calls := fc.selectCalls[61115]
+	fc.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("手动在飞时 spawnChain 不应再发包，实际调用 %d 次", calls)
+	}
+}
+
+// TestManualDoneClearsInflight 验证手动报名成功（MarkDone）与手动退选（RemoveDone）后
+// 必须同步清理 inflight 位——否则下个自动链/手动操作会永久 409 或被状态机反转 (M5)。
+func TestManualDoneClearsInflight(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+
+	// 模拟手动报名成功前：inflight 位占用（锁未释放）
+	s.mu.Lock()
+	if s.inflight[acct] == nil {
+		s.inflight[acct] = make(map[int]bool)
+	}
+	s.inflight[acct][classID] = true
+	s.mu.Unlock()
+
+	// 手动报名成功 → MarkDone 必须清掉 inflight 位
+	if err := s.MarkDone(acct, classID, "健美操", "手动报名成功"); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	_, still := s.inflight[acct][classID]
+	s.mu.Unlock()
+	if still {
+		t.Fatal("MarkDone 后 inflight 位必须清理，否则自动链/手动操作永久 409")
+	}
+
+	// 手动退选 → RemoveDone 同样清理 inflight 位
+	s.mu.Lock()
+	if s.inflight[acct] == nil {
+		s.inflight[acct] = make(map[int]bool)
+	}
+	s.inflight[acct][classID] = true
+	s.mu.Unlock()
+	if err := s.RemoveDone(acct, classID); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	_, still = s.inflight[acct][classID]
+	s.mu.Unlock()
+	if still {
+		t.Fatal("RemoveDone 后 inflight 位必须清理")
+	}
+}
+
 // TestSchedulerManualSyncAndSubmitMutex 验证手动报名、退选状态协同与提交排他互斥锁 (Task 3)。
+// TestCheckClassSelectable 手动报名服务端复核（M7）核心判定：
+// 基于账号专属快照——窗口关闭的发布、满员课程被拒绝；可报名课程放行；
+// 无快照/课程不在快照中时放行（交给平台最终把关）。
+func TestCheckClassSelectable(t *testing.T) {
+	fs := &fakeStore{}
+	fc := newFakeClient(false) // 默认窗口关闭
+	fc.mu.Lock()
+	fc.data.Publishes[0].InDateRange = true // 发布 1 窗口开启
+	fc.data.Publishes[0].Classes = []zhidao.Class{
+		{ID: 61115, CourseName: "健美操", CanSelect: true, SelectedCount: 0, MaxCount: 36},
+		{ID: 61116, CourseName: "满员课", CanSelect: false, SelectedCount: 36, MaxCount: 36},
+	}
+	fc.data.Publishes[1].InDateRange = false // 发布 2 窗口关闭
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, fs, time.Now(), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	if _, err := s.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// 窗口开启 + 可报名 → 放行
+	if reason, ok := s.CheckClassSelectable("acct1", 61115); !ok {
+		t.Fatalf("可报名课程应放行，被拒: %s", reason)
+	}
+	// 窗口开启 + 已满员 → 拒绝
+	if reason, ok := s.CheckClassSelectable("acct1", 61116); ok {
+		t.Fatal("满员课程应被拒绝")
+	} else if !strings.Contains(reason, "满") {
+		t.Fatalf("满员拒绝文案应说明原因，实际: %s", reason)
+	}
+	// 窗口关闭（61205 属发布 2）→ 拒绝
+	if reason, ok := s.CheckClassSelectable("acct1", 61205); ok {
+		t.Fatal("窗口关闭课程应被拒绝")
+	} else if !strings.Contains(reason, "窗口") {
+		t.Fatalf("窗口拒绝文案应说明原因，实际: %s", reason)
+	}
+	// 无快照的账号（acct2 从未探测）→ 放行（无法复核，交给平台）
+	if _, ok := s.CheckClassSelectable("acct2", 61205); !ok {
+		t.Fatal("无快照账号应放行（由平台最终把关）")
+	}
+	// 课程不在快照中 → 放行
+	if _, ok := s.CheckClassSelectable("acct1", 99999); !ok {
+		t.Fatal("不在快照中的课程应放行（由平台返回具体错误）")
+	}
+}
+
 func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	fs := &fakeStore{}
 	s := New(&fakeAccts{}, fs, time.Now(), time.Hour)

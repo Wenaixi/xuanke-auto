@@ -513,9 +513,12 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 		}
 		return nil, err
 	}
-	s.lastProbe = time.Now()
+	now := time.Now()
+	s.mu.Lock()
+	s.lastProbe = now
 	s.lastData = data
-	s.lastDataAt = time.Now()
+	s.lastDataAt = now
+	s.mu.Unlock()
 	return data, nil
 }
 
@@ -632,6 +635,7 @@ const (
 	maxReloginFail = 5 // 30s * 2^5 = 960s > 10m，封顶 5 次防溢出
 )
 
+// reloginBackoff 重登失败退避：连续失败 1 次 = 基础 30s，之后每次翻倍，封顶 10 分钟。
 func (s *Scheduler) reloginBackoff(n int) time.Duration {
 	if n <= 0 {
 		return backoffMin
@@ -639,7 +643,7 @@ func (s *Scheduler) reloginBackoff(n int) time.Duration {
 	if n > maxReloginFail {
 		return backoffMax
 	}
-	d := backoffMin << n // 每次失败翻倍
+	d := backoffMin << (n - 1) // 首次失败即基础间隔，之后翻倍
 	if d > backoffMax || d <= 0 {
 		return backoffMax
 	}
@@ -718,7 +722,10 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			return
 		}
 		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
-		// 不再误报"有效"（安全审计 MINOR 7）。退避窗口过后下个探测周期会再次尝试恢复。
+		// 不再误报"有效"（安全审计 MINOR 7）。失败计数复位为 1（而非保持封顶）：
+		// Vision 故障期 5 轮封顶后一旦恢复，账号必须能在基础 30s 间隔后再次尝试重登，
+		// 绝不让 reloginFail 恒为 5 把账号永续锁死在 10 分钟退避 (评审 MAJOR 4)。
+		s.reloginFail[acct] = 1
 		s.mu.Unlock()
 		if err != nil {
 			log.Printf("[scheduler] 账号 %s 自动重登失败: %v", acct, err)
@@ -816,6 +823,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// 快照人数确认满员（selected >= max）→ 记入 full，跳过本备选
 			if s.classFullInSnapshot(acct, t.ClassID) {
 				s.markFullLocked(acct, t)
+				s.mu.Unlock()
+				continue
+			}
+			// 手动提交在飞（TryAcquireSubmit 占用 inflight 位）：自动链必须跳过，
+			// 绝不并发双发包（评审 CRITICAL：inflight 去重落地）。
+			if s.inflightHas(acct, t.ClassID) {
 				s.mu.Unlock()
 				continue
 			}
@@ -1068,6 +1081,39 @@ func FormatOpenTime(s string) (time.Time, error) {
 	return t, nil
 }
 
+// CheckClassSelectable 手动报名前的服务端复核（评审 M7）：
+// 基于该账号最近快照判定课程是否可报名——课程所在发布窗口未开放或课程已满员时
+// 提前拒绝并返回友好原因，避免无谓打教务平台拿生硬错误码。
+// 快照缺失（从未探测/过期）或课程不在快照中（无法判定）时放行，由平台最终把关。
+func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason string, selectable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var data *zhidao.ElectivesData
+	if acct != "" && s.acctData != nil {
+		if d, ok := s.acctData[acct]; ok && d != nil {
+			data = d
+		}
+	}
+	if data == nil {
+		return "", true // 无快照：无法复核，放行交给平台
+	}
+	for _, p := range data.Publishes {
+		for _, c := range p.Classes {
+			if c.ID != classID {
+				continue
+			}
+			if !p.InDateRange {
+				return "选课窗口未开放，暂不能报名", false
+			}
+			if !c.CanSelect || (c.MaxCount > 0 && c.SelectedCount >= c.MaxCount) {
+				return "该课程已满员或不可选", false
+			}
+			return "", true
+		}
+	}
+	return "", true // 课程不在快照中：交给平台返回具体业务错误
+}
+
 // TryAcquireSubmit 尝试获取对指定账号课程的提交排他锁（在飞互斥）。
 // 若当前正在提交，返回 false；若成功获取，返回安全释放函数和 true。
 func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), ok bool) {
@@ -1091,6 +1137,7 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 }
 
 // MarkDone 手动或外部操作成功后同步调度器状态：记入 done、清 full 与退避、置 success 状态并持久化。
+// 同步清理 inflight 位：手动报名成功前占用的提交锁位必须释放，否则下个自动链/手动操作永久 409。
 func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1098,6 +1145,9 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 		s.done[acct] = make(map[int]bool)
 	}
 	s.done[acct][classID] = true
+	if s.inflight[acct] != nil {
+		delete(s.inflight[acct], classID)
+	}
 	if s.full[acct] != nil {
 		delete(s.full[acct], classID)
 	}
@@ -1126,12 +1176,16 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 }
 
 // RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
+// 同步清理 inflight 位：退选进行中占用的提交锁位必须释放（M5）。
 // 移除后，后台 spawnChain 在下一个 tick 将重新接管该课程（天然支持退选后重新选择）。
 func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done[acct] != nil {
 		delete(s.done[acct], classID)
+	}
+	if s.inflight[acct] != nil {
+		delete(s.inflight[acct], classID)
 	}
 	if s.full[acct] != nil {
 		delete(s.full[acct], classID)

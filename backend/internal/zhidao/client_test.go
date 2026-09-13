@@ -137,6 +137,50 @@ func TestNoAutoRelogin(t *testing.T) {
 	}
 }
 
+// TestSetVisionKeepsLocalRecognizer 验证 SetVision 传入的 cfg.recognizer 为零值（nil）时，
+// 绝不能清空当前生效的本地识别引擎（M6）：热更新 Vision 配置不应波及识别引擎选择。
+func TestSetVisionKeepsLocalRecognizer(t *testing.T) {
+	c := New("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "k", Model: "m"})
+	c.SetRecognizer(localRecognizer{name: "ddddocr-local"})
+
+	// 热更新 Vision 配置：调用方只传 VisionConfig，recognizer 字段为零值 nil
+	c.SetVision(VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
+
+	c.mu.Lock()
+	cur := c.visionCfg.recognizer
+	c.mu.Unlock()
+	if cur == nil {
+		t.Fatal("SetVision 不得清空当前识别引擎（即便传入的 cfg.recognizer 为 nil）")
+	}
+	if l, ok := cur.(localRecognizer); !ok || l.name != "ddddocr-local" {
+		t.Fatalf("SetVision 应保留本地引擎实例，实际 %T %#v", cur, cur)
+	}
+}
+
+// localRecognizer 最小 CaptchaRecognizer 替身：区分"本地 ddddocr 引擎仍被保留"。
+type localRecognizer struct {
+	name string
+}
+
+func (l localRecognizer) Recognize(img []byte) (string, error) { return "abcd", nil }
+
+// TestSetVisionRebuildsWhenCurrentIsVisionOrNil 验证 SetVision 在"当前引擎是 Vision 或 nil"时
+// 按新配置重建 Vision 识别器（保持原有语义）。
+func TestSetVisionRebuildsWhenCurrentIsVisionOrNil(t *testing.T) {
+	c := New("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "", Model: ""})
+	// 初始为 nil（APIKey 为空不自动建识别器）
+	c.SetVision(VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
+	c.mu.Lock()
+	cur := c.visionCfg.recognizer
+	c.mu.Unlock()
+	if cur == nil {
+		t.Fatal("当前引擎为 nil 时 SetVision 应重建 Vision 识别器")
+	}
+	if v, ok := cur.(*VisionRecognizer); !ok || v.cfg.APIKey != "new-key" {
+		t.Fatalf("重建的 Vision 识别器应用新配置，实际 %#v", v)
+	}
+}
+
 // TestReloginIfNeeded 验证显式重登：一次即可，最多一次。
 func TestReloginIfNeeded(t *testing.T) {
 	var reloginCalls int32

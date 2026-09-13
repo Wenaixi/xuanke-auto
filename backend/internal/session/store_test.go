@@ -61,3 +61,30 @@ func TestAdminSession(t *testing.T) {
 		t.Fatal("无效令牌不应 IsAdmin=true")
 	}
 }
+
+func TestIsAdminToken(t *testing.T) {
+	s := New(time.Hour)
+	adminTok := s.CreateAdmin()
+	if !s.IsAdminToken(adminTok) {
+		t.Fatal("管理员令牌 IsAdminToken 应为 true")
+	}
+	if s.IsAdminToken(s.Create("acct1")) {
+		t.Fatal("普通会话 IsAdminToken 不应为 true")
+	}
+	if s.IsAdminToken("bogus") {
+		t.Fatal("无效令牌 IsAdminToken 不应为 true")
+	}
+}
+
+func TestIsAdminAccount(t *testing.T) {
+	s := New(time.Hour)
+	if !s.IsAdminAccount(s.Create("admin")) {
+		t.Fatal("名为 admin 的普通会话账号应被识别为 admin 名")
+	}
+	if s.IsAdminAccount(s.Create("student")) {
+		t.Fatal("名为 student 的会话不应被识别为 admin 名")
+	}
+	if s.IsAdminAccount("bogus") {
+		t.Fatal("无效令牌不应被识别为任何账号")
+	}
+}

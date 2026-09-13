@@ -52,6 +52,11 @@ func (d *Deps) AdminNameValue() string {
 	return d.AdminName
 }
 
+// IsAdminAccountName 判断账号名是否为管理员账号名（删除保护等硬判据）。
+func (d *Deps) IsAdminAccountName(acct string) bool {
+	return acct == d.AdminNameValue()
+}
+
 // secureEncrypt 用注入的 Encrypt 加密敏感值，并加 enc: 前缀标记（main 读回时据此解密）。
 // 严禁未加密存储：未注入 Encrypt 时报错拒绝，杜绝明文入库。
 func (d *Deps) secureEncrypt(v string) (string, error) {
@@ -179,17 +184,17 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 }
 
 // handleElectives 课程列表：直读调度器内存快照（超高性能），快照过期才触发探测。
-// 支持 ?account= 参数，允许管理员或多账号独立维护任意指定账号的专属选课大厅。
+// 支持 ?account= 参数，允许管理员任选指定账号的专属选课大厅（仅管理员会话可穿透）。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	if acct == d.AdminNameValue() {
+	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			acct = q
 		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
 			acct = targetAccts[0]
 		}
 	}
-	if acct != "" && acct != d.AdminNameValue() {
+	if acct != "" && !d.IsAdminAccountName(acct) {
 		if data, ok := d.Sched.ElectivesSnapshotFor(acct); ok {
 			writeJSON(w, 0, data, "")
 			return
@@ -223,12 +228,12 @@ type ElectiveActionRequest struct {
 // handleElectiveSelect 手动报名指定课程 (POST /api/electives/select)
 func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	if acct == d.AdminNameValue() {
+	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			acct = q
 		}
 	}
-	if acct == "" || acct == d.AdminNameValue() {
+	if acct == "" || d.IsAdminAccountName(acct) {
 		writeJSON(w, 1, nil, "请指定有效学生账号")
 		return
 	}
@@ -251,21 +256,28 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	// 2. 获取该账号独立客户端
+	// 2. 报名前按该账号最近快照复核窗口与满员状态（M7）：
+	//    窗口关闭/课程满员时返回友好错误，避免无谓打教务平台拿生硬 code=1
+	if reason, ok := d.Sched.CheckClassSelectable(acct, req.ClassID); !ok {
+		writeJSON(w, 1, nil, reason)
+		return
+	}
+
+	// 3. 获取该账号独立客户端
 	client, ok := d.Accounts.ClientFor(acct)
 	if !ok {
 		writeJSON(w, 1, nil, "账号会话未建立或未登录")
 		return
 	}
 
-	// 3. 调用教务平台真实报名接口
+	// 4. 调用教务平台真实报名接口
 	msg, err := client.SelectClass(req.ClassID)
 	if err != nil {
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}
 
-	// 4. 报名成功：同步调度器 done 状态并持久化
+	// 5. 报名成功：同步调度器 done 状态并持久化
 	_ = d.Sched.MarkDone(acct, req.ClassID, req.CourseName, msg)
 	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
 }
@@ -273,12 +285,12 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 // handleElectiveExit 手动退选指定课程 (POST /api/electives/select/exit)
 func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	if acct == d.AdminNameValue() {
+	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			acct = q
 		}
 	}
-	if acct == "" || acct == d.AdminNameValue() {
+	if acct == "" || d.IsAdminAccountName(acct) {
 		writeJSON(w, 1, nil, "请指定有效学生账号")
 		return
 	}
@@ -325,10 +337,10 @@ type TargetsRequest struct {
 	Targets []scheduler.Target `json:"targets"`
 }
 
-// handleSetTargets 设置目标课程并持久化（账号来自会话绑定）。
+// handleSetTargets 设置目标课程并持久化（账号来自会话绑定；仅管理员会话可跨账号）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	if acct == d.AdminNameValue() {
+	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			acct = q
 		}
@@ -357,10 +369,10 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, req.Targets, "目标已保存")
 }
 
-// handleState 调度器状态（按会话账号过滤目标）。
+// handleState 调度器状态（按会话账号过滤；仅管理员会话可跨账号）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	if acct == d.AdminNameValue() {
+	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			acct = q
 		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
@@ -675,7 +687,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Account) == "" || req.Account == "admin" {
+	if strings.TrimSpace(req.Account) == "" || d.IsAdminAccountName(req.Account) {
 		writeJSON(w, 1, nil, "账号无效或不可删除")
 		return
 	}
@@ -711,6 +723,7 @@ func (d *Deps) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 type ctxKey int
 
 const sessionCtxKey ctxKey = 1
+const sessionTokCtxKey ctxKey = 2
 
 // sessionAccount 从请求上下文取会话绑定的账号。
 func sessionAccount(r *http.Request) string {
@@ -718,6 +731,20 @@ func sessionAccount(r *http.Request) string {
 		return v
 	}
 	return ""
+}
+
+// sessionToken 从请求上下文取当前会话令牌（穿透判定用）。
+func sessionToken(r *http.Request) string {
+	if v, ok := r.Context().Value(sessionTokCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// allowAccountOverride 当前会话是否允许 ?account= 穿透到任意账号：
+// 仅管理员会话（会话身份 Admin:true）可穿透，普通会话一律只操作自己绑定账号。
+func (d *Deps) allowAccountOverride(r *http.Request) bool {
+	return d.Sessions.IsAdminToken(sessionToken(r))
 }
 
 // requireAuth 会话校验中间件：无/无效令牌返回 401。
@@ -734,7 +761,10 @@ func requireAuth(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, 401, nil, "会话无效或已过期，请重新登录")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), sessionCtxKey, acct)))
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, sessionCtxKey, acct)
+		ctx = context.WithValue(ctx, sessionTokCtxKey, tok)
+		next(w, r.WithContext(ctx))
 	}
 }
 

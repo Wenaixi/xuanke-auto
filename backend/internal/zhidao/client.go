@@ -142,11 +142,15 @@ func (c *Client) SetCookies(cookies map[string]string) {
 
 // SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
 // 仅当当前引擎是 Vision 时才重建识别器（ddddocr 本地引擎不受 Vision 配置影响）。
+// 传入的 cfg.recognizer 为 nil 时保留当前引擎：SetVision 只管 Vision 配置，绝不挥动引擎切换。
 func (c *Client) SetVision(cfg VisionConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.visionCfg.recognizer.(*VisionRecognizer); ok || c.visionCfg.recognizer == nil {
 		cfg.recognizer = NewVisionRecognizer(cfg)
+	} else {
+		// 当前是本地引擎且调用方未显式指定新引擎：保留本地引擎（M6 修复）
+		cfg.recognizer = c.visionCfg.recognizer
 	}
 	c.visionCfg = cfg
 }
@@ -178,15 +182,12 @@ type YearTerm struct {
 //
 // 平台限流安全设计（避免触发"登录失败次数过多"熔断）：
 //   - 识别共 maxCaptchaAttempts 次：识别失败/识别码提交被拒，刷新验证码重新识别；
-//   - 提交共 maxSubmitAttempts 次（提交被拒多为验证码过期，重试意义大）；
+//   - 验证码一次性：提交被拒（多为验证码过期）绝不带同一验证码重试，直接刷新重识别；
 //   - 任一环节网络/配置错误立即返回，绝不无谓重试；识别结果为空视为识别失败，不提交。
 //
 // 成功后将 token 写入客户端并返回。
 func (c *Client) Login(account, password string) (string, error) {
-	const (
-		maxCaptchaAttempts = 3 // 验证码识别最大次数（识别失败/提交被拒各刷新一次）
-		maxSubmitAttempts  = 2 // 提交登录最大次数
-	)
+	const maxCaptchaAttempts = 3 // 验证码识别最大次数（识别失败/提交被拒各刷新一次）
 	var lastErr error
 	for attempt := 1; attempt <= maxCaptchaAttempts; attempt++ {
 		// 每个 attempt 使用独立会话：登录页 Cookie 与验证码绑定
@@ -220,20 +221,19 @@ func (c *Client) Login(account, password string) (string, error) {
 		}
 		log.Printf("[login] 账号 %s 第%d次验证码识别成功（引擎 %T，识别 %d 位字符）", account, attempt, vc.recognizer, len(captchaText))
 
-		// 4. 提交登录（提交被拒多为验证码过期，最多 maxSubmitAttempts 次）
-		for submit := 1; submit <= maxSubmitAttempts; submit++ {
-			identification, err := encryptIdentification(account, password)
-			if err != nil {
-				return "", err
-			}
-			token, err := c.submitLogin(sess, ua, captchaText, identification)
-			if err != nil {
-				lastErr = fmt.Errorf("第%d次验证码提交被拒: %w", attempt, err)
-				log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, err)
-				break // 验证码可能已失效：刷新重识别
-			}
-			return token, nil
+		// 4. 提交登录。验证码一次性：提交被拒（多为验证码过期）绝不带同一验证码重试，
+		//    直接 continue 刷新验证码重识别（重复提交只会浪费平台限流额度）。
+		identification, identErr := encryptIdentification(account, password)
+		if identErr != nil {
+			return "", identErr
 		}
+		token, submitErr := c.submitLogin(sess, ua, captchaText, identification)
+		if submitErr != nil {
+			lastErr = fmt.Errorf("第%d次验证码提交被拒: %w", attempt, submitErr)
+			log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, submitErr)
+			continue // 验证码可能已失效：刷新验证码重识别
+		}
+		return token, nil
 	}
 	if lastErr != nil {
 		log.Printf("[login] 账号 %s 登录失败（共 %d 次识别尝试）：%v", account, maxCaptchaAttempts, lastErr)

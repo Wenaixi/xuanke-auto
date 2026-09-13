@@ -52,17 +52,40 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 				}},
 			})
 		case strings.HasSuffix(r.URL.Path, "/findElectivesData"):
+			// 发布 A：窗口开启（inDateRange=true），61115 可报名 / 61116 已满员；
+			// 发布 B：窗口关闭（inDateRange=false），61117 有空位。
+			// 三态齐全，供手动报名服务端复核（M7）与满员/窗口测试使用。
 			json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "beginTimes": []int64{1789261200000},
-				"selectElectivesData": []any{map[string]any{
-					"publishId": 3225, "publishName": "高二年体育", "inDateRange": false,
-					"canSelect": 1, "hasSelected": 0, "groupCount": 1, "totalCount": 3,
-					"electivesClassList": []any{map[string]any{
-						"id": 61115, "course_name": "健美操", "class_name": "健美操1、2班",
-						"teacher_name_list": "陈跃强", "class_room_name": "操场",
-						"selected_count": 0, "max_count": 36, "can_select": false, "btn_type": 2,
-					}},
-				}},
+				"selectElectivesData": []any{
+					map[string]any{
+						"publishId": 3225, "publishName": "高二年体育", "inDateRange": true,
+						"canSelect": 1, "hasSelected": 0, "groupCount": 1, "totalCount": 3,
+						"electivesClassList": []any{
+							map[string]any{
+								"id": 61115, "course_name": "健美操", "class_name": "健美操1、2班",
+								"teacher_name_list": "陈跃强", "class_room_name": "操场",
+								"selected_count": 0, "max_count": 36, "can_select": true, "btn_type": 2,
+							},
+							map[string]any{
+								"id": 61116, "course_name": "满员课程", "class_name": "满员班",
+								"teacher_name_list": "李老师", "class_room_name": "教室",
+								"selected_count": 36, "max_count": 36, "can_select": false, "btn_type": 2,
+							},
+						},
+					},
+					map[string]any{
+						"publishId": 3226, "publishName": "校本课程", "inDateRange": false,
+						"canSelect": 2, "hasSelected": 0, "groupCount": 1, "totalCount": 2,
+						"electivesClassList": []any{
+							map[string]any{
+								"id": 61117, "course_name": "窗口外课程", "class_name": "窗口外班",
+								"teacher_name_list": "王老师", "class_room_name": "教室",
+								"selected_count": 0, "max_count": 30, "can_select": false, "btn_type": 2,
+							},
+						},
+					},
+				},
 			})
 		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
 			json.NewEncoder(w).Encode(map[string]any{
@@ -222,6 +245,67 @@ func TestAuthRequired(t *testing.T) {
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", "bogus-token")
 	if code != 200 || j["code"].(float64) != 401 {
 		t.Fatalf("无效会话应 401: %d %v", code, j)
+	}
+}
+
+// TestAccountOverrideRequiresAdminSession 验证 ?account= 穿透能力仅限管理员会话：
+// 普通学生会话绝不能穿透到其他账号（水平越权防线）。
+func TestAccountOverrideRequiresAdminSession(t *testing.T) {
+	d := newTestDeps(t)
+
+	// 准备三个账号：student（普通学生）、victim（被攻击目标）、adminName（名为 admin 的普通学生）
+	studentTok := authenticateDirect(t, d, "student")
+	victimTok := authenticateDirect(t, d, "victim")
+	adminNameTok := authenticateDirect(t, d, "admin")
+
+	// 1. 普通会话（student）携带 ?account=victim 改目标：必须只写进 student 自己的目标表，victim 不受影响
+	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets?account=victim",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":0}]}`, studentTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("学生会话设置自己目标应成功: %d %v", code, j)
+	}
+	// victim 自己的目标应为空（student 的穿透未生效）
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", victimTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("victim 读取自己状态应成功: %d %v", code, j)
+	}
+	if stData, ok := j["data"].(map[string]any); ok {
+		if courses, _ := stData["courses"].([]any); len(courses) > 0 {
+			t.Fatalf("victim 的目标不应被 student 的穿透请求修改，当前数量 %d", len(courses))
+		}
+	}
+
+	// 2. 名为 admin 的普通学生会话（非管理员身份）同样不能穿透
+	code, j = doJSONAuth(t, d.api, "PUT", "/api/targets?account=victim",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":0}]}`, adminNameTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("名为 admin 的普通会话设置自己目标应成功: %d %v", code, j)
+	}
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", victimTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("victim 读取自己状态应成功: %d %v", code, j)
+	}
+	if stData, ok := j["data"].(map[string]any); ok {
+		if courses, _ := stData["courses"].([]any); len(courses) > 0 {
+			t.Fatalf("victim 的目标不应被名为 admin 的普通会话修改，当前数量 %d", len(courses))
+		}
+	}
+
+	// 3. 管理员会话携带 ?account= 应能正常穿透（写目标到 victim）
+	adminTok := adminTokenFor(t, d)
+	code, j = doJSONAuth(t, d.api, "PUT", "/api/targets?account=victim",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":0}]}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("管理员会话穿透设置 victim 目标应成功: %d %v", code, j)
+	}
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", victimTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("victim 读取自己状态应成功: %d %v", code, j)
+	}
+	if stData, ok := j["data"].(map[string]any); ok {
+		if courses, _ := stData["courses"].([]any); len(courses) != 1 {
+			t.Fatalf("管理员穿透后 victim 应恰有 1 门目标，实际 %d", len(courses))
+		}
 	}
 }
 
@@ -428,6 +512,53 @@ func TestAdminConfigRefuseUnencryptedVisionKey(t *testing.T) {
 	}
 }
 
+// TestAdminDeleteProtectsRenamedAdmin 管理员删除保护必须跟随改名后的管理员账号名：
+// XUANKE_ADMIN_NAME=root 时，root 账号不可被删除（C1 修复）。
+func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
+	// 判定辅助恒等：改名与默认名都能被 IsAdminAccountName 识别
+	if !(&Deps{AdminName: "root"}).IsAdminAccountName("root") {
+		t.Fatal("改名后的管理员账号名应被识别")
+	}
+	if !(&Deps{}).IsAdminAccountName("admin") {
+		t.Fatal("默认 admin 名也应被识别为管理员账号名")
+	}
+	// 真实 handler 链路：AdminName=root 的完整路由，删除 admin（非管理员名）应被允许，
+	// 删除 root（管理员名）应被拒绝——验证 handleAdminDeleteAccount 不再硬编码 "admin"。
+	d := newTestDepsMode(t, true)
+	// 复用新 TestDeps 的底层组件，但重建 Deps 令 AdminName=root（保留原会话库/账号库/调度器）
+	renamed := &Deps{
+		Store:             d.store,
+		Sched:             d.sched,
+		Accounts:          d.accts,
+		Sessions:          d.sessions,
+		AdminToken:        testAdminToken,
+		AdminName:         "root",
+		ActivationEnabled: true,
+	}
+	req := httptest.NewRequest("DELETE", "/api/admin/accounts", strings.NewReader(`{"account":"root"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	renamed.handleAdminDeleteAccount(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j["code"].(float64) == 0 {
+		t.Fatalf("删除管理员账号 root 应被拒绝: %v", j)
+	}
+	// 管理员自己不存在于 store：删除一个普通账号应正常放行（验证保护判定只挡管理员名）
+	req2 := httptest.NewRequest("DELETE", "/api/admin/accounts", strings.NewReader(`{"account":"acct1"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	renamed.handleAdminDeleteAccount(rec2, req2)
+	if err := json.Unmarshal(rec2.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j["code"].(float64) != 0 {
+		t.Fatalf("删除普通账号应正常放行: %v", j)
+	}
+}
+
 func TestAdminStatsAccountsLogs(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
@@ -493,6 +624,53 @@ func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
 	}
 	st, _ = j["data"].(map[string]any)
 	_ = st
+}
+
+// TestElectiveSelectRejectsWindowClosed 手动报名服务端复核（M7）：
+// 课程所在发布窗口未开放（in_date_range=false）→ 拒绝报名并返回友好错误。
+func TestElectiveSelectRejectsWindowClosed(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// 61117 属于窗口关闭的发布 B：服务端复核必须拒绝，且不发起对平台的真实报名请求
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select",
+		`{"class_id":61117,"course_name":"窗口外课程"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("窗口关闭报名应被拒绝 code=1: %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "未开放") && !strings.Contains(msg, "窗口") {
+		t.Fatalf("拒绝文案应说明窗口未开放，实际: %v", j["msg"])
+	}
+	// 调度器状态不得被标记为 success（复核拦截在先，未真正报名）
+	st := d.sched.StateForAccount("acct1")
+	for _, c := range st.Courses {
+		if c.ClassID == 61117 && c.Status == "success" {
+			t.Fatalf("窗口关闭课程不得标记 success: %v", c)
+		}
+	}
+}
+
+// TestElectiveSelectRejectsFullClass 手动报名服务端复核（M7）：
+// 快照显示课程已满员（selected_count >= max_count）→ 拒绝报名并返回友好错误。
+func TestElectiveSelectRejectsFullClass(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// 61116 满员（selected 36 / max 36）：复核必须拒绝
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select",
+		`{"class_id":61116,"course_name":"满员课程"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("满员报名应被拒绝 code=1: %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "满") {
+		t.Fatalf("拒绝文案应说明课程已满，实际: %v", j["msg"])
+	}
 }
 
 func TestLogsByAccount(t *testing.T) {
@@ -698,6 +876,11 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 func TestHandleElectivesSelectAndExit(t *testing.T) {
 	d := newTestDeps(t)
 	tok := authenticateDirect(t, d, "acct1")
+
+	// 0. 先填充课程快照（mock 发布 A：窗口开启、61115 可报名；发布 B：窗口关闭）
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
 
 	// 1. 测试手动报名 POST /api/electives/select
 	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)

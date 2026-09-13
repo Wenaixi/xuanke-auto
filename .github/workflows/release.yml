@@ -88,8 +88,8 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
           Copy-Item .env.example win-console-pkg/.env.example
           Compress-Archive -Path win-console-pkg/* -DestinationPath "xuanke-${TAG}-windows-amd64-console.zip" -Force
 
-          # 上传构建产物供发布 job 汇总
-          mkdir -p ../dist-artifacts
+          # 上传构建产物供发布 job 汇总（pwsh 无 mkdir -p，须用 New-Item）
+          New-Item -ItemType Directory -Force ../dist-artifacts | Out-Null
           Move-Item "xuanke-${TAG}-*.zip" ../dist-artifacts/
 
       - name: Upload Windows Artifacts

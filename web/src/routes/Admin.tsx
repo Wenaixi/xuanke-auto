@@ -63,6 +63,14 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
     }
   }
 
+  // 第 4 轮：组件卸载时清理挂起的复制反馈定时器（切 Tab/退出 Admin 后不再 setState）
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+    },
+    []
+  )
+
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">

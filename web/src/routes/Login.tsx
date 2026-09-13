@@ -137,7 +137,10 @@ export default function Login({ onLogin }: Props) {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-1 transition-colors"
+                    // n10：可见性切换按钮语义化——aria-label 说明作用、aria-pressed 报状态
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    aria-pressed={showPassword}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>

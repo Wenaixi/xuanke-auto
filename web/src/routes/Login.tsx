@@ -20,6 +20,9 @@ export default function Login({ onLogin }: Props) {
   const [pendingAccount, setPendingAccount] = useState("")
   const [activationCode, setActivationCode] = useState("")
   const [activating, setActivating] = useState(false)
+  // 激活错误独立状态（n7）：激活失败不清污染主登录表单的 error——
+  // 取消/成功返回登录后，主表单错误条保持干净
+  const [activateError, setActivateError] = useState("")
 
   const submit = async () => {
     if (!account.trim() || !password) {
@@ -50,11 +53,11 @@ export default function Login({ onLogin }: Props) {
 
   const activate = async () => {
     if (!activationCode.trim()) {
-      setError("请输入激活码喵~")
+      setActivateError("请输入激活码喵~")
       return
     }
     setActivating(true)
-    setError("")
+    setActivateError("")
     try {
       const data = await api<{ token: string; account: string }>("/activate", {
         method: "POST",
@@ -63,7 +66,7 @@ export default function Login({ onLogin }: Props) {
       setPendingAccount("")
       onLogin(data.token, data.account)
     } catch (e: any) {
-      setError(e.message || "激活失败，请检查激活码是否正确")
+      setActivateError(e.message || "激活失败，请检查激活码是否正确")
     } finally {
       setActivating(false)
     }
@@ -214,10 +217,10 @@ export default function Login({ onLogin }: Props) {
                   />
                 </div>
 
-                {error && (
+                {activateError && (
                   <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
-                    <span>{error}</span>
+                    <span>{activateError}</span>
                   </div>
                 )}
 
@@ -243,7 +246,11 @@ export default function Login({ onLogin }: Props) {
 
                 <button
                   type="button"
-                  onClick={() => setPendingAccount("")}
+                  onClick={() => {
+                    // n7：取消激活——清除待激活账号与激活错误，主表单错误保持干净
+                    setPendingAccount("")
+                    setActivateError("")
+                  }}
                   disabled={activating}
                   className="text-xs text-neutral-500 hover:text-white transition-colors mx-auto py-1"
                 >

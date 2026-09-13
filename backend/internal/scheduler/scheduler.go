@@ -642,6 +642,7 @@ func (s *Scheduler) maybeRelogin(acct string) {
 	}
 	s.reloginAt[acct] = time.Now()
 	s.reloginFail[acct]++
+	log.Printf("[scheduler] 账号 %s 触发自动重登（原因：教务 token 失效，连续失败 %d 次）", acct, s.reloginFail[acct])
 	s.relogging[acct] = true // 标记重登中
 	s.mu.Unlock()
 
@@ -658,8 +659,10 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			delete(s.reloginFail, acct) // 成功清零失败计数，退避表归零
 			s.tokenValid[acct] = false
 			// 新 token 落库（持久化，重启后恢复不丢）
+			var newTok string
 			if client, ok := s.clients.ClientFor(acct); ok {
 				if tok := client.Token(); tok != "" {
+					newTok = tok
 					if uerr := s.store.UpdateIDToken(acct, tok); uerr != nil {
 						log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, uerr)
 					}
@@ -673,7 +676,7 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			default:
 			}
 			s.mu.Unlock()
-			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复", acct)
+			log.Printf("[scheduler] 账号 %s 教务 token 已自动重登恢复（新 token %s...）", acct, maskedToken(newTok))
 			return
 		}
 		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
@@ -692,6 +695,14 @@ type reloginResult struct {
 	acct     string
 	relogged bool
 	err      error
+}
+
+// maskedToken 脱敏打印教务 token：只显示前 8 位，绝不输出完整值。
+func maskedToken(tok string) string {
+	if len(tok) > 8 {
+		return tok[:8]
+	}
+	return tok
 }
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。

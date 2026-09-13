@@ -1,7 +1,10 @@
 package scheduler
 
 import (
+	"bytes"
 	"errors"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -455,6 +458,70 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 	fc.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("未确认满员时不应切备选，备选被提交 %d 次", calls)
+	}
+}
+
+// TestReloginLogs 自动重登全路径日志：触发原因、成功恢复（token 脱敏）、失败原因均可见。
+func TestReloginLogs(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	fc := newFakeClient(false)
+	fc.err = zhidao.ErrUnauthorized // 探测命中 token 失效
+	relogStart := make(chan bool)   // 重登开始信号
+	relogDone := make(chan bool)    // 重登完成信号（阻塞重登，让测试断言"重登中"）
+	fa := &fakeAccts{c: fc, relog: func() {
+		relogStart <- true
+		<-relogDone
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour) // 调度器不轮询
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	_, _ = s.ProbeNow() // 命中失效 → 触发重登
+
+	select {
+	case <-relogStart:
+	case <-time.After(2 * time.Second):
+		t.Fatal("应触发自动重登")
+	}
+	if !strings.Contains(buf.String(), "触发自动重登（原因：教务 token 失效") {
+		t.Fatalf("日志缺少触发原因，实际输出：\n%s", buf.String())
+	}
+	close(relogDone) // 放行重登完成
+	time.Sleep(200 * time.Millisecond)
+
+	logs := buf.String()
+	if !strings.Contains(logs, "自动重登恢复（新 token new-toke...") {
+		t.Fatalf("日志缺少成功恢复（token 脱敏），实际输出：\n%s", logs)
+	}
+	if strings.Contains(logs, "new-token-999...") {
+		t.Fatal("日志泄露完整 token：应只显示前 8 位脱敏")
+	}
+}
+
+// TestReloginFailureLogs 重登失败路径输出失败原因日志。
+func TestReloginFailureLogs(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	fc := newFakeClient(false)
+	fc.err = zhidao.ErrUnauthorized
+	relogDone := make(chan bool) // 阻塞重登完成，让失败路径先断言日志
+	fa := &fakeAccts{c: fc, relogErr: errors.New("验证码识别失败"), relog: func() {
+		<-relogDone
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	_, _ = s.ProbeNow()
+	time.Sleep(100 * time.Millisecond) // 等重登进入（阻塞中）
+	close(relogDone)                   // 放行：重登返回失败
+	time.Sleep(200 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "自动重登失败: 验证码识别失败") {
+		t.Fatalf("日志缺少失败原因，实际输出：\n%s", buf.String())
 	}
 }
 

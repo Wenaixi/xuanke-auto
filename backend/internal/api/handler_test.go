@@ -1050,7 +1050,25 @@ func TestLoginLimiterGC(t *testing.T) {
 	}
 }
 
-// TestLoginRejectsFormContentType 登录/激活接口必须拒绝非 JSON 提交：
+// TestLoginAdminWrongPasswordTimingFlat n4 登录时延侧信道：管理员口令错误分支必须
+// 固定延迟 loginTimingFlat 后再响应，使"管理员名（口令错立即回）"与"未知学生
+// （教务登录网络往返）"的响应时延差被拉平——管理员账号名不能靠响应快慢被枚举。
+func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
+	d := newTestDeps(t)
+	start := time.Now()
+	// 正确管理员账号名 + 错误口令：走恒定时间比对失败 + loginTimingFlat 固定延迟
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"nope"}`)
+	elapsed := time.Since(start)
+	if code != 200 {
+		t.Fatalf("管理口令错误应返回 HTTP 200（业务 code=1），实际 %d", code)
+	}
+	if j["code"].(float64) != 1 {
+		t.Fatalf("管理口令错误应 code=1，实际 %v", j)
+	}
+	if elapsed < loginTimingFlat {
+		t.Fatalf("管理员口令错误分支必须延迟 ≥ loginTimingFlat(%v) 再响应，实际 %v——响应过快会让管理员账号名被侧信道枚举", loginTimingFlat, elapsed)
+	}
+}
 // 跨站表单 POST（application/x-www-form-urlencoded）无法携带 JSON Content-Type，
 // 从源头封堵 CSRF 触发的副作用登录（攻击者借受害者 IP 分布式爆破）。
 func TestLoginRejectsFormContentType(t *testing.T) {

@@ -104,6 +104,10 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 管理员入口：默认账号 admin（可配置改名）+ 管理口令（不触碰教务登录，口令比对恒定时间防爆破）
 	if req.Account == adminName {
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
+			// 口令错误：恒定时间比对已抹平字节级差异（时序安全）。
+			// n4（第 3 轮）：固定延迟 loginTimingFlat 抹平"管理员口令错（立即回）vs
+			// 教务登录（网络往返）"的时延差——管理员账号名不再能靠响应快慢被侧信道枚举。
+			time.Sleep(loginTimingFlat)
 			writeJSON(w, 1, nil, "管理口令错误")
 			return
 		}
@@ -849,6 +853,10 @@ const (
 	loginRate  = 5.0 / 60.0 // 每分钟 5 次
 	loginBurst = 5
 	bucketTTL  = 10 * time.Minute // 空闲桶回收阈值
+	// loginTimingFlat 登录响应时延拉平值（n4）：管理员口令错误分支固定延迟，
+	// 抹平"管理员口令错（立即回）vs 教务登录（网络往返）"的时延差——管理员账号名
+	// 不再能靠响应快慢被侧信道枚举。取值 300ms 与教务登录同量级（Vision+网络往返）。
+	loginTimingFlat = 300 * time.Millisecond
 )
 
 func newLoginLimiter() *loginLimiter {

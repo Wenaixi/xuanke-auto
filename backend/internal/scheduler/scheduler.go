@@ -86,6 +86,7 @@ type Prewarmer interface {
 type Client interface {
 	FindElectives() (*zhidao.ElectivesData, error)
 	SelectClass(classID int) (string, error)
+	ExitClass(classID int) (string, error)
 	IsClassFull(classID int) (bool, error)
 	Token() string // 重登后读取新 token 落库
 }
@@ -677,8 +678,8 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		s.mu.Lock()
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
 		if err == nil && relogged {
-			delete(s.reloginFail, acct) // 成功清零失败计数，退避表归零
-			delete(s.reloginAt, acct)   // 成功清零节流与退避时间戳
+			delete(s.reloginFail, acct)    // 成功清零失败计数，退避表归零
+			s.reloginAt[acct] = time.Now() // 成功后刷新完成时间，维持 30s 基础防抖限频
 			s.tokenValid[acct] = false
 			// 新 token 落库（持久化，重启后恢复不丢）
 			var newTok string

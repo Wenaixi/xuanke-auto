@@ -1,32 +1,26 @@
-# React + TypeScript + Vite
+# 至道选课自动化 · 前端（web/）
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 18 + Vite + TypeScript + Radix Primitives + Tailwind CSS 构建的选课大厅前端，纯黑白极简艺术风格设计。
 
-Currently, two official plugins are available:
+## 开发
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # 本地开发（Vite 代理 /api 到后端 :3091）
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## 质检与构建
+
+```bash
+npx tsc --noEmit     # TypeScript 类型检查
+npm run build        # tsc 类型检查 + Vite 生产构建（产物输出到 backend/web/dist）
+```
+
+构建产物通过 Go 原生 `//go:embed` 嵌入后端单二进制，最终用户无需安装 Node.js。
+
+## 依赖
+
+- `@tanstack/react-query`：API 轮询与缓存（课程/状态/日志/管理后台）
+- `@radix-ui/*`：Dialog / Tabs / Toast 等无头原语
+- `lucide-react`：线性图标
+- `tailwindcss`：原子化样式

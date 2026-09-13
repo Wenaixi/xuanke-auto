@@ -68,7 +68,7 @@ func main() {
 		VisionBaseURL:      cfg.SFBaseURL,
 		VisionAPIKey:       cfg.SFAPIKey,
 		VisionModel:        cfg.SFModel,
-		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr（本地免密钥），无环境自动回退 Vision
+		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 vision（云识别），ddddocr 仅显式配置时启用
 		CaptchaConcurrency: 1,
 		OpenTime:           cfg.OpenTime,
 	})

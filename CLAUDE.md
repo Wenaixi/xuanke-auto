@@ -89,7 +89,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 
 ### 高性能抢课架构（P0 三刀 + 智能调度）
 - **共享高性能连接池 + 预热（压制 1.9s TLS 握手）**：`zhidao.sharedTransport`——`MaxIdleConnsPerHost: 64`、`IdleConnTimeout: 120s`、`ForceAttemptHTTP2: true`；调度器开窗前 2 分钟起 `maybePrewarm` 每 15s 静默 GET /login 保持 TCP/TLS 热态，首波提交零握手等待
-- **服务端时钟毫秒级对齐（tick 全程用校准时间）**：`SyncServerTime` 读 HTTP `Date` 响应头 + RTT/2 中点近似得 `clockOffset`，调度器 `nowAligned()` 统一取校准时刻判定开窗点与冲刺期，根本性消除本地时钟误差（实测校准偏差 ~640ms）；5 秒内不同步一次
+- **服务端时钟毫秒级对齐（tick 全程用校准时间）**：`SyncServerTime` 读 HTTP `Date` 响应头 + RTT/2 中点近似得 `clockOffset`，调度器 `nowAligned()` 统一取校准时刻判定开窗点与冲刺期，根本性消除本地时钟误差（实测校准偏差 ~640ms）；约 60 秒闸门内不同步一次（`time.Minute`）
 - **开窗前 10 秒黄金期 250ms 高频冲刺**：`submitIntervalFor` 依据对齐后时刻在开窗后 10s 内压到 250ms 间隔持续 submitAll，10s 后回落 1s 常态；探测仍受 30s 节流但提交完全不受限
 - **失败分级智能退避（风控 30s / 网络快重试）**：`isRateLimitError` 匹配"频繁/429/稍后重试"文案→`markRateLimitedLocked` 该课程退避 30s；纯网络失败终止本链下 tick 快重试（250ms 黄金期）；Token 失效走 maybeRelogin 异步自动重登
 - **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局 Mutex+Cond 动态限流器（`captchaLimiter`：Acquire/Release/SetLimit 热收敛，管理员改并发即时生效，支持 3 秒内 20 次热调不死锁）；管理员「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
@@ -105,7 +105,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **发布态（前端嵌入二进制，便携单文件交付）**：
   - 前端 `npm run build` 生成的纯静态产物（`web/dist`）通过 Go 原生 `//go:embed dist/*` 嵌入进 `backend/xuanke.exe`；
   - 最终用户无需安装 Node.js 或前端环境，双击单个 `xuanke.exe` 即可在单一端口同时提供后端抢课引擎与前端网页，开箱即用！
-- **防逆向交付（garble 混淆）**：发布态 exe 用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 构建——`-literals` 加密所有字符串字面量（选课接口路径、教务域名、课程数据、管理员提示全部不可见，strings 扫描零命中）、`-tiny` 删除源码路径信息、`-ldflags` 剥符号表；实测从 12.6MB → 24.7MB（Go 运行时无法压缩）。冒烟验证：7 账号会话恢复、服务端时钟对齐、`/` 与 `/api/electives` 200、前端 JS asset 嵌入可访问。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
+- **防逆向交付（garble 混淆）**：本地构建可用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 混淆 Windows 发布 exe（`-literals` 加密字符串字面量、`-tiny` 剥源码路径、`-ldflags` 剥符号表；实测 12.6MB → 24.7MB，strings 扫描零命中）。**注意**：CGO=1 与 garble 不兼容（garble 需 CGO=0），而 Windows 原生内嵌 ddddocr 必须 CGO=1——故自动发布流水线 release.yml 不再产出 garble 混淆版（Windows 交付即 CGO=1 原样构建；Linux/macOS 走 CGO=0 交叉编译，如需混淆可在本地手动执行）。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
 - **单二进制内嵌原生 ddddocr（彻底摆脱 Python 运行时依赖）**：ONNX 模型（common_old.onnx 13MB）+ 字符集（charsets_old.json 56KB）+ ONNX Runtime（onnxruntime.dll 16MB）经 `//go:embed` 编译进单个 exe；运行时懒加载把资源释出到 `%TEMP%\xuanke_ddddocr_assets`（dumpIfDiff 对比大小，无变化不重写），调用 `github.com/yangbin1322/go-ddddocr` 的 `Classification` 直接在进程内推理，单次识别 5~10ms。**构建双轨（build-tag）**：`native_ocr.go`（`//go:build windows && cgo`）走内嵌实现，`native_ocr_stub.go`（`!windows || !cgo`）返回 false/nil 自动回退本地 Python 桥接或 Vision——Linux/macOS 与 CGO=0 交叉编译不受影响。**引擎优先级**：router 对 `XUANKE_CAPTCHA_ENGINE=ddddocr` 先试 `NativeDdddOcrAvailable()` → 回退本地 Python → 再回退 Vision。**注意**：CGO=1 与 garble 混淆不兼容（garble 需 CGO=0），Windows 发布版必须用 CGO=1 原样构建，Linux/macOS 才走 garble。
 - **选课窗口关闭后平台行为（实测）**：窗口结束后 `findElectivesData` 返回 `code:0` 但 `publishes`/`electivesData` 全空（并非 token 失效 code=-1）；`parseElectives` 对此直接返回空快照，`FindElectives` 不再因空快照落后陷入学期列表兜底重试（兜底拿不到更多课程，纯浪费时间）；`selectElectivesClass` 对已关闭窗口返回 `code:1` 报名错误，调度器新增 `isWindowClosedError`（匹配"关闭/未开启/报名时间/已结束"）按满员记入 `full` 集合，窗口关闭后不再每个 tick 反复轰炸报名接口。
 - **日志系统与窗口关闭防御（2026-09-13 全链路补齐）**：
@@ -141,7 +141,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **全链路多账号独立维护（前端至后端彻底打通）**：管理后台「账号管理」为每个学生账号提供专属「选课大厅」入口，点击即可无缝进入该学生名下的独立选课大厅；`/api/electives?account=xxx`、`/api/targets?account=xxx`、`/api/state?account=xxx` 全面支持目标账号透传，管理员未传参时自动对齐首个有预选目标的核心账号（绝不再盲目抓取首个高三测试账号）；前端选课大厅顶部明确显示当前维护账号并隔离缓存与自动保存。
 - **多账号物理隔离 + 会话级账号绑定**：每个账号独立 `zhidao.Client`（账号 A 绝不携带账号 B 的会话），认证后服务端签发随机 Bearer 会话令牌（12h TTL），所有租户接口从会话读取账号（`sessionAccount(r)`）——忽略客户端传入的账号参数，`/state`、`/targets`、`/electives/detail`、`/electives` 均按会话账号隔离。
 - **部署访问口令 gate + 移除硬编码密钥**：`XUANKE_ADMIN_TOKEN` 必须来自环境变量或 `data/.env`（缺失直接 `log.Fatal` 拒绝启动），激活码管理接口用 `crypto/subtle.ConstantTimeCompare` 恒定时间比对；`SF_API_KEY` 也走同源注入。登录限流每分钟 5 次（token bucket，每 IP）
-- **激活码鉴权（取代登录口令 gate）+ 可开关**：登录不再校验部署口令；教务登录成功 → `IsActivated` 未激活返回 `code=1001`（前端据此弹出激活码输入模态框）→ `POST /api/activate {account, code}` 事务内扣减激活码次数 + 记录 `activations` → 签发会话。激活一次永久免激活。激活码由 `X-Admin-Token` 管理接口生成（`XK-XXXX-XXXX-XXXX`，POST count 1-100 × uses≥1 / GET 列表 / DELETE）。开关：`XUANKE_ACTIVATION=off` 完全禁用（登录直接签发会话、activate/admin 接口拒绝）
+- **激活码鉴权（取代登录口令 gate）+ 可开关**：登录不再校验部署口令；教务登录成功 → `IsActivated` 未激活返回 `code=1001`（前端据此弹出激活码输入模态框）→ `POST /api/activate {account, code}` 事务内扣减激活码次数 + 记录 `activations` → 签发会话。激活一次永久免激活。激活码由 `X-Admin-Token` 管理接口生成（`XK-XXXX-XXXX-XXXX-XXXX`，4 组共 16 位十六进制，POST count 1-100 × uses≥1 / GET 列表 / DELETE）。开关：`XUANKE_ACTIVATION=off` 完全禁用（登录直接签发会话、activate/admin 接口拒绝）
 - **多备选课程 + 满员人数对比退避**：每个发布可配置多门备选目标，`targets.priority` 持久化排序；调度器每（账号×发布）一条 goroutine 链（`spawnChain`）按优先级依次尝试，快照满员跳过 → inflight 去重 → `SelectClass` 失败后 `IsClassFull` 实时复核人数（`selected_count >= max_count`），真满才 `markFullLocked` 切下一备选，网络类失败终止本链下一 tick 重试
 - **日志按账号隔离**：`task_log.account` 列 + `AppendLog(acct, ...)` + `LoadLogs(acct, limit)` WHERE 过滤，`/api/logs` 只返回当前会话账号自己的日志，账号间不可互通查看
 - **凭据与敏感配置 AES-GCM 严格加密入库（彻底移除旧明文兼容）**：密码与 settings 表的 vision_key 均经 AES-256-GCM 加密后存入（带有 enc: 密文前缀，XUANKE_MASTER_KEY 环境变量或 data/.master_key 提供主密钥）。secureEncrypt 未注入加密器直接报错拒绝，杜绝明文入库；服务启动加载 settings 时严格校验 enc: 前缀并解密还原，若读取到未加密旧明文直接打印警告并拒绝加载，坚决执行拒绝旧版畸形数据的策略
@@ -191,12 +191,11 @@ cd backend && go test ./...（含 scheduler -race）；cd web && npm run build�
 2. **Tag 自动化多架构打包与发布（.github/workflows/release.yml）**：
    - 触发时机：推送版本标签 `git push origin v*`（例如 `v1.0.0`）；支持 `workflow_dispatch` 手动触发。
    - 前置构建：先由 Node.js 构建前端最新生产级静态资产。
-   - 多架构并行交叉编译（纯 Go 免 CGO，全平台开箱即用）：
-     - Windows x64 GUI 模式（`xuanke-windows-amd64.exe`）：注入 `-ldflags="-s -w -H windowsgui"`，消除控制台黑框；
-     - Windows x64 控制台模式（`xuanke-windows-amd64-console.exe`）：注入 `-ldflags="-s -w"`，保留终端日志输出，便于运维排错；
-     - Windows x64 混淆防逆向版（`xuanke-windows-amd64-garbled.exe`）：自动化安装 garble 工具链，启用 `-literals -tiny` 加密字符串字面量与剥除源码路径；
-     - Linux x64 服务端部署版（`xuanke-linux-amd64`）：兼容主流 Linux 服务器系统；
-     - macOS 双架构（`xuanke-darwin-arm64` / `xuanke-darwin-amd64`）：支持 Apple Silicon M系列与 Intel 芯片。
+   - 多架构并行交叉编译：
+     - Windows x64 GUI 模式（`xuanke-windows-amd64.exe`）：CGO=1 内嵌原生 ddddocr，注入 `-ldflags="-s -w -H windowsgui"`，消除控制台黑框；
+     - Windows x64 控制台模式（`xuanke-windows-amd64-console.exe`）：CGO=1 内嵌原生 ddddocr，注入 `-ldflags="-s -w"`，保留终端日志输出，便于运维排错；
+     - Linux x64 服务端部署版（`xuanke-linux-amd64`）：CGO=0 纯 Go 交叉编译，兼容主流 Linux 服务器系统；
+     - macOS 双架构（`xuanke-darwin-arm64` / `xuanke-darwin-amd64`）：CGO=0 交叉编译，支持 Apple Silicon M系列与 Intel 芯片。
    - 交付物打包规范：
      - 自动为各平台注入脱敏无害的生产配置模板 `.env.example`，避免敏感凭据外泄同时降低用户配置门槛；
      - Windows 打包为 `.zip`，Linux/macOS 打包为 `.tar.gz`；

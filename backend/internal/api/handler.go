@@ -734,10 +734,13 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	windowOpened := d.Sched.WindowOpened()
 	// 全账号日志总数（LoadAllLogs 含全部账号）
 	logsCount := len(allLogs)
-	// 识别引擎与并发上限（管理员后台展示当前生效值）
+	// 识别引擎与并发上限（管理员后台展示当前生效值）。
+	// m19（第 3 轮）：真值=vision——runtime 默认 vision（config.CaptchaEngineDefault），
+	// 空串不可能出现（runtime.New 恒注入非空），兜底也统一 vision，杜绝"stats 显示 ddddocr
+	// 而实际引擎是 vision"的表述错位。
 	eng := cfg.CaptchaEngine
 	if eng == "" {
-		eng = "ddddocr"
+		eng = "vision"
 	}
 	// N5：各账号教务 token 有效性汇总（管理员后台一眼看到哪些账号 token 失效/恢复中）。
 	// 用调度器对外方法逐一查询（含 relogining 半态），不直接读内部 map。

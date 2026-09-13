@@ -260,6 +260,32 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
+// TestLogoutRevokesToken M-7：登出接口立即吊销服务端令牌——
+// 注销后原令牌再次访问任意受保护接口必须 401（令牌外流残留被封堵）。
+func TestLogoutRevokesToken(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+	// 登出前令牌有效
+	if _, j := doJSONAuth(t, d.api, "GET", "/api/state", "", tok); j["code"].(float64) != 0 {
+		t.Fatalf("登出前会话应有效: %v", j)
+	}
+	// 登出（会话级鉴权：携带正确令牌）
+	code, j := doJSONAuth(t, d.api, "POST", "/api/logout", "{}", tok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("登出失败: %d %v", code, j)
+	}
+	// 登出后同一令牌立即失效
+	_, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok)
+	if j["code"].(float64) != 401 {
+		t.Fatalf("登出后令牌应立即 401: %v", j)
+	}
+	// 无会话调用登出本身应 401
+	_, j = doJSON(t, d.api, "POST", "/api/logout", "{}")
+	if j["code"].(float64) != 401 {
+		t.Fatalf("无会话登出应 401: %v", j)
+	}
+}
+
 // TestAccountOverrideRequiresAdminSession 验证 ?account= 穿透能力仅限管理员会话：
 // 普通学生会话绝不能穿透到其他账号（水平越权防线）。
 func TestAccountOverrideRequiresAdminSession(t *testing.T) {

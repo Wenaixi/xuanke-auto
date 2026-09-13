@@ -436,6 +436,15 @@ func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, logs, "")
 }
 
+// handleLogout 注销当前会话（M-7）：立即吊销服务端令牌。
+// 会话已由 requireAuth 验证通过——Delete 后该令牌在服务端即刻失效，
+// 即使被复制/窃取的 localStorage 令牌也无法再发起任何请求。
+func (d *Deps) handleLogout(w http.ResponseWriter, r *http.Request) {
+	d.Sessions.Delete(sessionToken(r))
+	d.Store.AppendLog(sessionAccount(r), 0, "logout", "账号 "+sessionAccount(r)+" 注销会话", false)
+	writeJSON(w, 0, nil, "已注销")
+}
+
 // handleHealth 健康检查（免认证，仅探活）。
 func (d *Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, "ok", "")

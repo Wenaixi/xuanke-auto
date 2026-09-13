@@ -5,7 +5,7 @@ import Dashboard from "./routes/Dashboard"
 import Select from "./routes/Select"
 import Admin from "./routes/Admin"
 import { ToastProvider } from "./components/ui/Toast"
-import { UNAUTHORIZED_EVENT } from "./api/client"
+import { logout as apiLogout, UNAUTHORIZED_EVENT } from "./api/client"
 import type { Account, Sessions } from "./types"
 
 const queryClient = new QueryClient({
@@ -52,8 +52,11 @@ export default function App() {
     // 管理员账号登录后直接进入管理员界面（账号名与后端管理员名一致即管理员）
     setInAdmin(account === adminName)
   }
-  // 退出当前账号：仅移除该账号会话，其他账号保留
-  const logout = () => {
+  // 退出当前账号：仅移除该账号会话，其他账号保留。
+  // M-7：登出前调用后端 /api/logout 作废服务端令牌（浏览器本地删除只是第一步，
+  // 令牌被复制/窃取后仍在服务端有效——登出即吊销，杜绝令牌外流残留）。
+  const logout = (token: string) => {
+    apiLogout(token)
     const next = { ...loadSessions() }
     delete next[current]
     saveSessions(next)
@@ -158,7 +161,7 @@ export default function App() {
               <Admin
                 account={current}
                 sessionToken={sessionToken}
-                onLogout={logout}
+                onLogout={() => logout(sessionToken)}
                 onSelectAccount={(acct) => setTargetAccount(acct)}
                 onBackToStudent={() => {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
@@ -171,7 +174,7 @@ export default function App() {
               <Dashboard
                 account={current}
                 sessionToken={sessionToken}
-                onLogout={logout}
+                onLogout={() => logout(sessionToken)}
                 onGoSelect={() => setPage("select")}
               />
             ) : (

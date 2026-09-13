@@ -169,6 +169,10 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("GET /api/logs", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleLogs)(w, r)
 	})
+	// M-7：登出接口——会话级鉴权，立即吊销服务端令牌（防止令牌外流残留）
+	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
+		requireAuth(d, d.handleLogout)(w, r)
+	})
 
 	return recoverMiddleware(securityHeaders(mux))
 }

@@ -79,3 +79,14 @@ export async function exitElective(
     body: JSON.stringify({ class_id: classId }),
   })
 }
+
+// logout 注销当前会话（POST /api/logout，M-7）：
+// 令牌被服务端立即作废——即使浏览器端 localStorage 被窃取/复制，令牌也已失效。
+// 失败（网络抖动）不阻塞前端本地登出（会话即将过期，最终由服务端 12h TTL 兜底）。
+export async function logout(session: string): Promise<void> {
+  try {
+    await api("/logout", { method: "POST", session, body: "{}" })
+  } catch {
+    // 静默：登出是尽力而为，本地已登出即达到目的
+  }
+}

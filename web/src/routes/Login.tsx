@@ -98,15 +98,16 @@ export default function Login({ onLogin }: Props) {
                 submit()
               }}
             >
-              {/* 账号输入框 */}
+              {/* 账号输入框（n15：label 经 htmlFor 关联输入框，点击标签即聚焦） */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-neutral-400 flex items-center justify-between">
+                <label htmlFor="login-account" className="text-xs text-neutral-400 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <User className="h-3.5 w-3.5 text-neutral-500" />
                     <span>账号 / 学号</span>
                   </span>
                 </label>
                 <Input
+                  id="login-account"
                   placeholder="输入教务学号或账号"
                   value={account}
                   onChange={(e) => setAccount(e.target.value)}
@@ -118,7 +119,7 @@ export default function Login({ onLogin }: Props) {
 
               {/* 密码输入框 */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-neutral-400 flex items-center justify-between">
+                <label htmlFor="login-password" className="text-xs text-neutral-400 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <Lock className="h-3.5 w-3.5 text-neutral-500" />
                     <span>登录密码</span>
@@ -126,6 +127,7 @@ export default function Login({ onLogin }: Props) {
                 </label>
                 <div className="relative">
                   <Input
+                    id="login-password"
                     type={showPassword ? "text" : "password"}
                     placeholder="输入教务登录密码"
                     value={password}
@@ -206,11 +208,12 @@ export default function Login({ onLogin }: Props) {
             <div className="p-6 pt-2">
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-neutral-400 flex items-center gap-1.5">
+                  <label htmlFor="activation-code" className="text-xs text-neutral-400 flex items-center gap-1.5">
                     <ShieldCheck className="h-3.5 w-3.5 text-neutral-500" />
                     <span>激活码</span>
                   </label>
                   <Input
+                    id="activation-code"
                     value={activationCode}
                     onChange={(e) => setActivationCode(e.target.value)}
                     placeholder="XK-XXXX-XXXX-XXXX"

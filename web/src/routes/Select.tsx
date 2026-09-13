@@ -123,10 +123,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // M-8（第 3 轮）：加 2s 自轮询——electives 的升频判定依赖 window_opened 信号，
   // 若此查询被动等 electives invalidate 才刷新，开窗瞬间（publishes 短暂为空）会把
   // 10s 慢轮询带进黄金期；独立轮询让 window_opened 一开窗立即升频 2s，两信号同源。
+  // n12（第 4 轮）：窗口已关闭后降回 30s——与 Dashboard 同一信号同一次序，
+  // 避免窗口关闭后仍 2s 高频打 /state 刷屏日志。
   const { data: stateData } = useQuery({
     queryKey: ["state", account, sessionToken],
     queryFn: () => api<SchedulerState>("/state?account=" + encodeURIComponent(account), { session: sessionToken }),
-    refetchInterval: 2000,
+    refetchInterval: (query) => (query.state.data?.window_closed ? 30000 : 2000),
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
@@ -146,7 +148,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 进入页面时自动回显已保存的目标课程（含多备选优先级）。
   // M-9（第 3 轮）：函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽
   // 外部 `selected` 导致数据重取后回显永久失效的问题。
+  // 第 4 轮：用户已编辑过目标（rev>0）时跳过回显——用户"清空全部目标"后 2s 轮询
+  // 返回的旧 courses 若再次回填，会把清空静默撤销并重新保存旧目标（回显与防抖保存竞态）。
   useEffect(() => {
+    if (rev > 0) return
     if (stateData?.courses && stateData.courses.length > 0) {
       setSelected((prev) => {
         if (Object.values(prev).some((arr) => arr.length > 0)) return prev
@@ -159,7 +164,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         return initial
       })
     }
-  }, [stateData])
+  }, [stateData, rev])
 
   const publishes = data?.publishes ?? []
 

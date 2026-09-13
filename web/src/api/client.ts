@@ -29,10 +29,44 @@ export async function api<T>(
     throw new ApiError(-2, "服务器响应异常（HTTP " + r.status + "）")
   }
   if (j.code === 401) {
-    // 会话过期：广播事件，由 App 移除该账号会话
-    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    // 会话过期：广播事件，附带发生 401 的目标账号（避免代理查询时误杀管理员）
+    let account = ""
+    if (path.includes("account=")) {
+      const match = path.match(/[?&]account=([^&]+)/)
+      if (match) account = decodeURIComponent(match[1])
+    }
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account } }))
     throw new ApiError(j.code, j.msg || "会话已失效")
   }
   if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
   return j.data
+}
+
+// selectElective 手动报名指定选修课 (POST /api/electives/select)
+export async function selectElective(
+  classId: number,
+  session: string,
+  account?: string,
+  courseName?: string
+): Promise<{ msg: string; class_id: number }> {
+  const q = account ? `?account=${encodeURIComponent(account)}` : ""
+  return api<{ msg: string; class_id: number }>(`/electives/select${q}`, {
+    method: "POST",
+    session,
+    body: JSON.stringify({ class_id: classId, course_name: courseName }),
+  })
+}
+
+// exitElective 手动退选指定选修课 (POST /api/electives/select/exit)
+export async function exitElective(
+  classId: number,
+  session: string,
+  account?: string
+): Promise<{ msg: string; class_id: number }> {
+  const q = account ? `?account=${encodeURIComponent(account)}` : ""
+  return api<{ msg: string; class_id: number }>(`/electives/select/exit${q}`, {
+    method: "POST",
+    session,
+    body: JSON.stringify({ class_id: classId }),
+  })
 }

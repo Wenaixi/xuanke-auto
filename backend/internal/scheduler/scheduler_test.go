@@ -73,6 +73,12 @@ func (f *fakeClient) SelectClass(classID int) (string, error) {
 	return "报名成功", nil
 }
 
+func (f *fakeClient) ExitClass(classID int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return "退选成功", nil
+}
+
 func (f *fakeClient) Token() string { return "new-token-999" }
 
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {

@@ -63,20 +63,26 @@ export default function App() {
     if (current !== adminName) setInAdmin(false)
   }, [accounts, current, adminName])
 
-  // 后端返回 401（会话过期）：剔除当前账号的失效令牌
+  // 后端返回 401（会话过期）：剔除目标账号的失效令牌（CRITICAL 前端 C1 防御）
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail
+      const targetAccount = detail?.account || current
+      // 管理员处于后台管理态代理查看学生大厅时，若发生 401 绝不误杀管理员自身会话
+      if (current === adminName && inAdmin && targetAccount !== adminName) {
+        return
+      }
       setSessions((prev) => {
-        if (!current || !prev[current]) return prev
+        if (!targetAccount || !prev[targetAccount]) return prev
         const next = { ...prev }
-        delete next[current]
+        delete next[targetAccount]
         localStorage.setItem("xk_sessions", JSON.stringify(next))
         return next
       })
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [current])
+  }, [current, adminName, inAdmin])
 
   // 壁纸滚动统一机制（手机 + 电脑同一套，仅放大比例不同）：
   //   背景随下滑“往上走”：滚动页面时图片以 1:1 速度上移（露出图片下方），

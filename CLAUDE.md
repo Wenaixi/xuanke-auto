@@ -93,6 +93,10 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **开窗前 10 秒黄金期 250ms 高频冲刺**：`submitIntervalFor` 依据对齐后时刻在开窗后 10s 内压到 250ms 间隔持续 submitAll，10s 后回落 1s 常态；探测仍受 30s 节流但提交完全不受限
 - **失败分级智能退避（风控 30s / 网络快重试）**：`isRateLimitError` 匹配"频繁/429/稍后重试"文案→`markRateLimitedLocked` 该课程退避 30s；纯网络失败终止本链下 tick 快重试（250ms 黄金期）；Token 失效走 maybeRelogin 异步自动重登
 - **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局 Mutex+Cond 动态限流器（`captchaLimiter`：Acquire/Release/SetLimit 热收敛，管理员改并发即时生效，支持 3 秒内 20 次热调不死锁）；管理员「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
+- **并发重登会话隔离加固（数据层 2 个 CRITICAL 连根拔除）**：
+  1. **重登只信客户端内部账密**：`zhidao.ReloginIfNeeded` 与调用方传入的账号名完全解耦——客户端本身唯一绑定账号（`ensure` 分配、`Restore`/`SetCredentials` 注入），重登一律用客户端内部 `account/password` 登录自己，并发为多账号调用时绝不用空壳账密把别人的 token 写进别人的客户端（数据层 CRITICAL 1）；
+  2. **token_valid 读写串行化**：`scheduler.TokenValidFor` 与 `maybeRelogin` 统一用 `reloginMu` 串行化"决策是否重登/查询有效性"两段，消除并发重登时 `tokenValid`/`relogging` 读到的半态竞态（数据层 CRITICAL 2）。
+- **窗口状态裸指针根治（调度器 MAJOR 3）**：`WindowOpened` 由返回 `*bool` 裸指针改为布尔值快照——调用方拿地址读不再被并发探测改写的内存（指针悬空竞态已根除），新增 `HasProbed` 供 admin/stats 区分"从未探测"与"探测结果为关"，`boolPtr` 残留已清除。
 
 ### 架构设计（模块化开发 + 单二进制嵌入交付）
 - **开发态（前后端分离极速热重载）**：

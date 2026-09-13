@@ -79,8 +79,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 轮询判定来源：in_date_range 与 window_opened 双信号合并（MAJOR-G）。
       // 窗口即将开启的瞬间平台会短暂返回空 publishes，此时仅凭 in_date_range 会把
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
+      // F5-05（第 5 轮）：窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
+      // 清空，继续 10s 高频打 findElectivesData 纯浪费；与 /state 同信号降 30s，全站统一。
       const pubs = query.state.data?.publishes ?? []
       const inRange = pubs.some((p) => p.in_date_range)
+      if (stateData?.window_closed) return 30000
       return inRange || stateData?.window_opened ? 2000 : 10000
     },
   })

@@ -92,7 +92,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **服务端时钟毫秒级对齐（tick 全程用校准时间）**：`SyncServerTime` 读 HTTP `Date` 响应头 + RTT/2 中点近似得 `clockOffset`，调度器 `nowAligned()` 统一取校准时刻判定开窗点与冲刺期，根本性消除本地时钟误差（实测校准偏差 ~640ms）；5 秒内不同步一次
 - **开窗前 10 秒黄金期 250ms 高频冲刺**：`submitIntervalFor` 依据对齐后时刻在开窗后 10s 内压到 250ms 间隔持续 submitAll，10s 后回落 1s 常态；探测仍受 30s 节流但提交完全不受限
 - **失败分级智能退避（风控 30s / 网络快重试）**：`isRateLimitError` 匹配"频繁/429/稍后重试"文案→`markRateLimitedLocked` 该课程退避 30s；纯网络失败终止本链下 tick 快重试（250ms 黄金期）；Token 失效走 maybeRelogin 异步自动重登
-- **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局信号量 `captchaSemaphore` 串行化识别（默认并发 1，管理员可热收敛）；Admin「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
+- **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局 Mutex+Cond 动态限流器（`captchaLimiter`：Acquire/Release/SetLimit 热收敛，管理员改并发即时生效，支持 3 秒内 20 次热调不死锁）；管理员「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
 
 ### 架构设计（模块化开发 + 单二进制嵌入交付）
 - **开发态（前后端分离极速热重载）**：
@@ -124,6 +124,9 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
   - 极简几何圆角（4px - 8px），摒弃臃肿膨胀的大圆角与花哨阴影，保留建筑般的硬朗质感。
 
 ### 关键决策与系统化调试排错记录
+- **窗口开启后的官网同款手动报名/退选（2026-09-13 落地，与自动抢课并存）**：选课窗口**开启前**保持自动预选逻辑；**开启后**用户可在选课大厅按官网交互手动报名/退选（btn_type=1 显示红底退选按钮、btn_type=2 显示白底报名按钮、can_select 控制可点性），操作后前端 2 秒动态轮询同步全量状态。后端新增 `POST /api/electives/select`（报名）与 `POST /api/electives/select/exit`（退选），请求体 `{classId, courseName}`，管理员会话可带 `?account=` 穿透到任意账号、普通会话强制绑定额定账号。两接口与调度器通过**排他互斥**协同：`TryAcquireSubmit` 抢在飞锁（防手动与自动并发重复发包），成功回调 `MarkDone`（写 success 表 + 清 full/rateLimited + 置 success）、退选回调 `RemoveDone`（删 success + 置 pending）、满员回调 `RemoveFull`。平台业务错误文案原样下发前端提示。**契约**：窗口已关闭时平台返回"无效的课程ID"，调度器按满员记入 full 集不再轰炸。
+- **`btn_type` 状态机落地规范（官网逆向契约）**：btn_type 与 can_select 正交——btn_type 决定"点击后的动作"（1=退选、2=报名），can_select 决定"是否可点"（false 时按钮禁用并展示 title 承载的禁用原因）。`hasSelected`/`canSelect` 为发布级计数（已选/上限），`selected_count`/`max_count` 为课程级名额。前端 2 秒动态轮询仅在窗口开放（in_date_range）时启用，关闭后回落到 10 秒。
+- **调度器对外新增 4 方法（手动选课协同，供 api 层调用）**：`TryAcquireSubmit(acct, classID)` 返回一次性 release（inflight 在飞互斥，冲突返回 false 提示"该课程正在提交中"）；`MarkDone(acct, classID, courseName, msg)` 写 done + 清 full/rateLimited + 置 success + SaveSuccess + AppendLog；`RemoveDone(acct, classID)` 删 done + 置 pending + AppendLog("exit")；`RemoveFull(acct, classID)` 清除满员标记（手动退选后重选先解封）。spawnChain 提交前增加 inflight 去重——手动提交进行中的课程自动链跳过，杜绝双发包。
 - **管理员后台（admin 账号 + 管理口令，会话级鉴权）**：`record admin` + `XUANKE_ADMIN_TOKEN` 比对（ConstantTimeCompare）→ `session.CreateAdmin` → 后续全部管理接口走 `requireAdminSession`（Bearer 会话）鉴权。入口：登录页账号填 `admin`、密码填管理口令（绕过教务登录，免平台限流）。管理接口全部挂 `/api/admin/*`：`config` GET/PUT 热改 + SaveSettings 落库、`stats` 运行状态、`codes` 激活码生成/列表/删除、`accounts` 账号管理（禁止删 admin）、`logs` 全量日志。普通用户会话访问一律 403。前端 admin 登录后进独立管理页（routes/Admin.tsx，五 Tab：激活码/配置/状态/账号/日志）
 - **运行时热配置中心（runtime.Store，全部热重载免重启）**：管理员改动立即进 `runtime.Store`（RWMutex + Get 快照拷贝 + Update 闭包）。生效链路——激活码开关（`activationEnabled()` 三处登录/激活/生成读取）、Vision url/key/model（`Accounts.SetVision` 推全部客户端）、开放时间（`sched.SetOpenTimeFn` 调度器逐 tick 读取）；PUT 同步 `SaveSettings` 全量落库（settings k/v 表），重启后 LoadSettings 覆盖环境变量恢复。敏感值回显脱敏（`maskKey` 只显 `****`+后4位）
 - **教务 token 失效自动重登（取代早期"禁止自动重登"）**：doRequest 对 code=-1 返回 `ErrUnauthorized` 本身不重登；调度器探测命中该错误时按账号标记失效并异步自动重登（防重入 + 30 秒节流，Vision 持续失败不轰炸登录接口），成功后新 token 落库（UpdateIDToken）+ 立即补一次探测。网络类失败绝不重登。前端 `/state` 只读 `token_valid` 显示有效性（有效 / 已失效·自动恢复中），不显示次数与时间

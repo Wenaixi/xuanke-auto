@@ -611,11 +611,18 @@ const reloginInterval = 30 * time.Second
 // 重登失败退避（防平台锁号的最后防线）：连续失败 n 次后，距离下次重试为 backoffMin << n，
 // 封顶 backoffMax，所以 Vision 服务持续故障时登录频率只会越来越低，绝不会把账号刷到锁号。
 const (
-	backoffMin = 30 * time.Second
-	backoffMax = 10 * time.Minute
+	backoffMin     = 30 * time.Second
+	backoffMax     = 10 * time.Minute
+	maxReloginFail = 5 // 30s * 2^5 = 960s > 10m，封顶 5 次防溢出
 )
 
 func (s *Scheduler) reloginBackoff(n int) time.Duration {
+	if n <= 0 {
+		return backoffMin
+	}
+	if n > maxReloginFail {
+		return backoffMax
+	}
 	d := backoffMin << n // 每次失败翻倍
 	if d > backoffMax || d <= 0 {
 		return backoffMax
@@ -653,7 +660,9 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		return // 30s 基础节流
 	}
 	s.reloginAt[acct] = time.Now()
-	s.reloginFail[acct]++
+	if s.reloginFail[acct] < maxReloginFail {
+		s.reloginFail[acct]++
+	}
 	log.Printf("[scheduler] 账号 %s 触发自动重登（原因：教务 token 失效，连续失败 %d 次）", acct, s.reloginFail[acct])
 	s.relogging[acct] = true // 标记重登中
 	s.mu.Unlock()
@@ -669,6 +678,7 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
 		if err == nil && relogged {
 			delete(s.reloginFail, acct) // 成功清零失败计数，退避表归零
+			delete(s.reloginAt, acct)   // 成功清零节流与退避时间戳
 			s.tokenValid[acct] = false
 			// 新 token 落库（持久化，重启后恢复不丢）
 			var newTok string
@@ -977,19 +987,15 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 	}
 }
 
-// releaseFullIfFreedLocked 快照（新鲜且显示不满）时解除 full 标记并回 pending（需持锁）。
+// releaseFullIfFreedLocked 快照显示不满时解除 full 标记并回 pending（需持锁）。
+// 只要快照显示有名额空余（如其他同学退选），立即解除 full 标记，黄金期 250ms 冲刺立即捡漏 (CRITICAL C1)。
 func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	if !s.fullHas(acct, classID) {
 		return
 	}
-	fresh := false
-	if acct != "" && s.acctData != nil {
-		if _, ok := s.acctData[acct]; ok && time.Since(s.acctDataAt[acct]) <= snapshotTTL {
-			fresh = true
-		}
-	}
-	if !fresh && (s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL) {
-		return // 快照过期，等下一次有效快照再判断
+	// 若无任何快照数据，无法判断，保持原状
+	if (s.acctData == nil || s.acctData[acct] == nil) && s.lastData == nil {
+		return
 	}
 	if s.classFullInSnapshot(acct, classID) {
 		return

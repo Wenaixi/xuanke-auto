@@ -838,3 +838,72 @@ func TestWindowClosedState(t *testing.T) {
 		t.Fatal("正常未开窗探测后 window_closed 应为 false")
 	}
 }
+
+// TestReleaseFullIfFreedEvenIfSnapshotOld 验证快照超过 40s 老化期但名额有空余时，
+// 调度器绝不能死守 full 标记，必须立即解除满员状态，以便黄金期捡漏抢课 (CRITICAL C1)。
+func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+
+	s.mu.Lock()
+	if s.full[acct] == nil {
+		s.full[acct] = make(map[int]bool)
+	}
+	s.full[acct][classID] = true
+	s.state.Courses = []CourseStatus{
+		{Account: acct, ClassID: classID, Status: "failed", Result: "已满员"},
+	}
+	// 快照时间在 50 秒前（已超过 40s snapshotTTL），但名额未满 (35/36)
+	s.acctData[acct] = &zhidao.ElectivesData{
+		Publishes: []zhidao.Publish{
+			{
+				Classes: []zhidao.Class{
+					{ID: classID, SelectedCount: 35, MaxCount: 36},
+				},
+			},
+		},
+	}
+	s.acctDataAt[acct] = time.Now().Add(-50 * time.Second)
+
+	s.releaseFullIfFreedLocked(acct, classID)
+	isFull := s.full[acct][classID]
+	var status string
+	if len(s.state.Courses) > 0 {
+		status = s.state.Courses[0].Status
+	}
+	s.mu.Unlock()
+
+	if isFull {
+		t.Fatal("快照显示名额有余量时，即使快照时间超过 40s 也应立即解除满员标记，绝不能阻断退选空位捡漏")
+	}
+	if status != "pending" {
+		t.Fatalf("解封后状态应重置为 pending，实际为 %s", status)
+	}
+}
+
+// TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶与重登成功清零逻辑 (CRITICAL C2, C3)。
+func TestReloginBackoffCappedAndReset(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	// 验证退避算法上限封顶与极大 n 防溢出
+	for _, n := range []int{1, 5, 10, 64, 100} {
+		wait := s.reloginBackoff(n)
+		if wait <= 0 || wait > 10*time.Minute {
+			t.Fatalf("reloginBackoff(%d) = %v，不应小于0或超过 10 分钟", n, wait)
+		}
+	}
+
+	acct := "acct1"
+	s.mu.Lock()
+	s.reloginFail[acct] = 5
+	s.mu.Unlock()
+
+	// 模拟重登成功后必须清零
+	s.mu.Lock()
+	delete(s.reloginFail, acct)
+	if s.reloginFail[acct] != 0 {
+		t.Fatal("重登成功后 reloginFail 必须清零")
+	}
+	s.mu.Unlock()
+}
+

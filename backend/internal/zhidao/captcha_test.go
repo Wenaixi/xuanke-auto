@@ -61,7 +61,7 @@ func TestCaptchaConcurrency(t *testing.T) {
 		mu.Lock()
 		inFlight--
 		mu.Unlock()
-		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"))
+		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\"ok3x\"}}]}"))
 	}))
 	defer srv.Close()
 

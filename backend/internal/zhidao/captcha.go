@@ -17,6 +17,19 @@ type CaptchaRecognizer interface {
 	Recognize(img []byte) (string, error)
 }
 
+// normalizeCaptchaText 统一规范化验证码识别结果：
+// 只保留字母/数字（平台验证码为纯英数字，净化可剔除视觉模型拼接的噪声符号/空格），
+// 长度不足 3 或超过 5 视为识别无效（平台验证码字符数 3~5）。
+func normalizeCaptchaText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // captchaSemaphore 全局验证码识别并发限流信号量（默认并发 1）。
 // 多个账号同时失效重登时，识别请求严格串行——平台验证码接口与登录接口
 // 对高并发敏感，串行识别从根因杜绝"登录失败次数过多"熔断。
@@ -141,10 +154,18 @@ type VisionRecognizer struct {
 	cfg VisionConfig
 }
 
-// Recognize 实现 CaptchaRecognizer 接口（带并发限流）。
+// Recognize 实现 CaptchaRecognizer 接口（带并发限流 + 结果规范化）。
 func (v *VisionRecognizer) Recognize(img []byte) (string, error) {
 	return withConcurrency(func() (string, error) {
-		return recognizeViaVision(v.cfg, img)
+		raw, err := recognizeViaVision(v.cfg, img)
+		if err != nil {
+			return "", err
+		}
+		norm := normalizeCaptchaText(raw)
+		if len(norm) < 3 || len(norm) > 5 {
+			return "", fmt.Errorf("识别长度为 %d（净化自 %q），不匹配平台 3~5 位字符", len(norm), raw)
+		}
+		return norm, nil
 	})
 }
 

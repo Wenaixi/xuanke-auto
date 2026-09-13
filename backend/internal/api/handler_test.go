@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -477,6 +478,43 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	list, _ = j["data"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("删除后应剩 1 个激活码: %v", j)
+	}
+}
+
+// TestAdminConfigSaveFailStillDispatch M-4：落库失败时——配置已内存生效、下游热下发
+// 必须照常执行（识别引擎/Vision 同步新值），且响应如实区分"已生效但落库失败"（code=500）。
+func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 注入落库失败桩
+	saveSettingsErrForTest = errors.New("settings 落库失败")
+	t.Cleanup(func() { saveSettingsErrForTest = nil })
+
+	code, j := doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
+		`{"vision_base_url":"https://fail.example.com/v1"}`, adminTok)
+	if code != 200 {
+		t.Fatalf("落库失败应返回 HTTP 200（业务 code=500），实际 %d", code)
+	}
+	if j["code"].(float64) != 500 {
+		t.Fatalf("落库失败应业务 code=500 如实区分，实际 %v", j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "落库失败") {
+		t.Fatalf("报错文案应明示落库失败: %v", j)
+	}
+	// 内存已生效：运行时配置中心已是新地址
+	if got := d.rt.Get().VisionBaseURL; got != "https://fail.example.com/v1" {
+		t.Fatalf("内存配置应已生效: %v", got)
+	}
+	// 下游热下发未跳过：再次热改（仍失败）后登录，验证码识别应打到新地址并失败——
+	// 证明 SetVision/识别引擎切换在落库失败路径也被执行
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
+		`{"vision_base_url":"https://invalid2.example.com/v1"}`, adminTok)
+	if j["code"].(float64) != 500 {
+		t.Fatalf("再次落库失败仍应 500: %v", j)
+	}
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"acct2","password":"pwd"}`)
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "invalid2.example.com") {
+		t.Fatalf("下游 Vision 热下发被跳过（登录应打到新地址）: %v", j)
 	}
 }
 

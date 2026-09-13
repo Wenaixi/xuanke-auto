@@ -632,14 +632,15 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 		cfg := d.Runtime.Get()
-		// 配置变更落库（settings 全量替换，重启后恢复）。vision_key 加密落库：
+		// 先尝试落库（settings 全量替换，重启后恢复）。vision_key 加密落库：
 		// 与凭据同强度（AES-256-GCM），settings 表内永不出现明文密钥。
 		visionKey, vErr := d.secureEncrypt(cfg.VisionAPIKey)
 		if vErr != nil {
 			writeJSON(w, 1, nil, "配置加密失败: "+vErr.Error())
 			return
 		}
-		if sErr := d.Store.SaveSettings(map[string]string{
+		// 先落库、后内存生效与下游下发（M-4：落库失败也要完成下发，杜绝半生效误导）。
+		if sErr := d.saveSettings(map[string]string{
 			"activation_enabled": strconv.FormatBool(cfg.ActivationEnabled),
 			"vision_base_url":    cfg.VisionBaseURL,
 			"vision_key":         visionKey,
@@ -648,18 +649,16 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
 			"open_time":          cfg.OpenTime,
 		}); sErr != nil {
-			// m5 修复：落库失败绝不静默——配置已内存生效，但重启即回退。
-			// 如实返回 500，让管理员立即知晓持久化失败，避免"改完以为保存了"的配置丢失。
+			// M-4 修复（第 3 轮）：落库失败绝不静默——配置已内存生效，但重启即回退。
+			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，
+			// 识别引擎/Vision 仍按新配置同步给账号客户端，杜绝"半生效"误导。
 			log.Printf("[api] 配置落库失败: %v", sErr)
+			d.dispatchRuntimeConfig(cfg)
 			writeJSON(w, 500, nil, "配置已生效但落库失败（重启后将回退）："+sErr.Error())
 			return
 		}
 		// 热重载下游组件：验证码识别配置推给全部账号客户端；打开时间由调度器运行时读取
-		d.Accounts.SetVision(zhidao.VisionConfig{
-			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
-		})
-		// 识别引擎热切换（ddddocr 本地 / Vision 二选一）+ 并发限流信号量热收敛
-		applyCaptchaRecognizerFor(d.Runtime, d.Accounts)
+		d.dispatchRuntimeConfig(cfg)
 		if len(changed) == 0 {
 			writeJSON(w, 1, nil, "没有可应用的有效配置项")
 			return
@@ -677,6 +676,33 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 405, nil, "方法不允许")
 	}
+}
+
+// dispatchRuntimeConfig 把运行时配置热下发到下游组件（M-4 提取）：
+// 验证码识别配置推给全部账号客户端 + 识别引擎热切换（ddddocr 本地 / Vision 二选一）
+// + 并发限流信号量热收敛 + 调度器开放时间由运行时逐 tick 读取（无需显式通知）。
+// 放在"落库成功"与"落库失败但内存已生效"两条路径共用——半生效绝不静默。
+func (d *Deps) dispatchRuntimeConfig(cfg runtime.Config) {
+	// d.Store 为 nil 时跳过（测试直接直构 Deps 的场景；生产恒非 nil）
+	if d.Accounts != nil {
+		d.Accounts.SetVision(zhidao.VisionConfig{
+			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
+		})
+		applyCaptchaRecognizerFor(d.Runtime, d.Accounts)
+	}
+}
+
+// saveSettingsErrForTest 测试注入钩子（仅测试包内使用）：置非 nil 时 saveSettings 直接
+// 返回该错误，模拟 settings 落库失败——M-4 验证"内存生效但落库失败"时下游热下发不被跳过。
+var saveSettingsErrForTest error
+
+// saveSettings 配置落库（settings 全量替换）。经此间接方法路由，便于测试注入落库失败
+// （M-4：验证"落库失败但内存生效"时下游热下发不被跳过）。
+func (d *Deps) saveSettings(kv map[string]string) error {
+	if saveSettingsErrForTest != nil {
+		return saveSettingsErrForTest
+	}
+	return d.Store.SaveSettings(kv)
 }
 
 // handleAdminStats 系统运行状态总览。

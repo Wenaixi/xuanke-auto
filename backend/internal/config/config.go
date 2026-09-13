@@ -92,12 +92,15 @@ func loadDotEnv(path string) {
 	}
 }
 
-// CaptchaEngineDefault 默认验证码识别引擎：本地 ddddocr（免密钥），无环境则自动回退 Vision。
+// CaptchaEngineDefault 默认验证码识别引擎。
+// 平台验证码为 3~5 位扭曲英数字，硅基流动 Vision 实测一次成功率接近 100%；
+// 本地 ddddocr 模型与平台验证码风格不匹配（识别出 3~6 位不规则字符串），
+// 仅适合作为无外网的兜底。故默认 Vision，内置 ddddocr 仅在内嵌模型可用且显式配置时启用。
 func CaptchaEngineDefault() string {
 	if v := os.Getenv("XUANKE_CAPTCHA_ENGINE"); v == "vision" || v == "ddddocr" {
 		return v
 	}
-	return "ddddocr"
+	return "vision"
 }
 
 // dataDir 数据目录：可执行文件同目录下的 data/（保证双击 exe 即可用，不依赖 cwd）。
@@ -138,7 +141,7 @@ XUANKE_ADMIN_TOKEN=` + admin + `
 # 教务登录验证码识别密钥（可选留空；默认识别引擎 ddddocr 不需要密钥）
 SF_API_KEY=
 # 识别引擎（ddddocr=本地默认，免密钥；vision=硅基流动云识别，需填 SF_API_KEY）
-XUANKE_CAPTCHA_ENGINE=ddddocr
+XUANKE_CAPTCHA_ENGINE=vision
 
 # 激活码机制开关：on=启用（默认）；off=完全关闭，登录直接进入系统
 XUANKE_ACTIVATION=on

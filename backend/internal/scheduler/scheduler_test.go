@@ -63,6 +63,7 @@ type fakeClient struct {
 	relogCalls  int // 重登回调调用次数（测试用）
 	syncOffset  time.Duration
 	syncErr     error // 时钟对齐失败时注入的错误
+	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
 }
 
 // SyncServerTime 可控时钟对齐：返回预置偏差或错误（MAJOR-C 测试用）。
@@ -120,6 +121,12 @@ func (f *fakeClient) Token() string { return "new-token-999" }
 
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 	f.mu.Lock()
+	if f.fullBlock != nil {
+		fullBlock := f.fullBlock
+		f.mu.Unlock()
+		fullBlock() // 锁外阻塞：模拟真实网络请求耗时，不持 fakeClient.mu
+		f.mu.Lock()
+	}
 	defer f.mu.Unlock()
 	for _, p := range f.data.Publishes {
 		for _, c := range p.Classes {
@@ -1490,6 +1497,50 @@ func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	fc.mu.Unlock()
 	if callsAfter > calls {
 		t.Fatalf("窗口关闭后 full 应阻止后续提交，调用从 %d 增长到 %d——防轰炸失效", calls, callsAfter)
+	}
+}
+
+// TestClassFullRealtimeNotHoldingMu 实时人数复核不得持 s.mu 发起网络请求（C-4）：
+// 复核期间其他账号的探测/提交仍须能拿锁推进——此前复核持有 s.mu 最长 15 秒，
+// 黄金冲刺期被白白锁死；修复后锁外请求，复核期间 WindowOpened() 可立即返回。
+func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
+	fc := newFakeClient(true)
+	// 报名失败 → 走实时复核路径（快照保持未满，让调用必然穿透到 SelectClass 再失败）
+	fc.mu.Lock()
+	fc.selectErr[61115] = errors.New("该课程已满员")
+	fc.mu.Unlock()
+	recheckStarted := make(chan struct{})
+	fc.fullBlock = func() {
+		close(recheckStarted) // 复核已进入网络请求段
+		time.Sleep(500 * time.Millisecond)
+	}
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	// 第二个账号的命名使 WindowOpened 探测走 AnyClient = 同一 fc，数据聚集在 acct1
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	s.mu.Lock()
+	s.state.WindowOpened = true // 预置开窗状态，避免依赖探测时序
+	s.mu.Unlock()
+
+	// 等待提交走到实时复核的"网络请求"段（此时 s.mu 必须已释放）
+	select {
+	case <-recheckStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("提交失败后应触发实时人数复核")
+	}
+
+	// 复核在网络在飞时：其他路径必须仍能拿 s.mu（证明锁已释放）
+	done := make(chan struct{})
+	go func() {
+		_ = s.WindowOpened()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("实时复核网络在飞期间 s.mu 仍被持有——锁外复核修复失效")
 	}
 }
 

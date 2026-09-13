@@ -937,13 +937,22 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
+			// C-4（第 3 轮）：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
+			// 全局锁，黄金冲刺期里其它账号的探测/提交/时钟对齐全被锁死；锁外复核完再回锁收尾。
+			s.mu.Unlock()
 			full, cErr := s.classFullRealtime(acct, t.ClassID)
+			s.mu.Lock()
 			if cErr == nil && full {
 				s.markFullLocked(acct, t)
 				s.mu.Unlock()
 				continue
 			}
-			// 实时复核未现满员（网络抖动/人未满但报名被拒）：保留失败状态，终止本链，下个 tick 重试
+			// 实时复核未现满员（网络抖动/人未满但报名被拒）：保留失败状态，终止本链，下个 tick 重试。
+			// 复核期间锁被释放，可能已被手动报名并 MarkDone 置成功——绝不覆盖胜利状态。
+			if s.doneHas(acct, t.ClassID) {
+				s.mu.Unlock()
+				return
+			}
 			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
 			if s.store != nil {
 				s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)

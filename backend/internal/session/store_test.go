@@ -131,3 +131,46 @@ func TestRandTokenPanicsOnRandFailure(t *testing.T) {
 	}()
 	randToken()
 }
+
+// TestActivationTicket 激活票据（C-2）：登录颁发、绑定账号、单次消费、短时过期。
+func TestActivationTicket(t *testing.T) {
+	s := New(time.Hour)
+
+	// 1. 登录颁发：票据非空且有效
+	tok := s.CreateTicket("acct1")
+	if tok == "" {
+		t.Fatal("票据不应为空")
+	}
+	// 2. 正确账号消费成功，且票据立即作废（单次）
+	if err := s.ConsumeTicket(tok, "acct1"); err != nil {
+		t.Fatalf("正确账号应能消费票据: %v", err)
+	}
+	if err := s.ConsumeTicket(tok, "acct1"); err == nil {
+		t.Fatal("已使用的票据不得再次消费")
+	}
+
+	// 3. 换账号激活：票据绑定 acct1，用 acct2 消费必须失败
+	tok2 := s.CreateTicket("acct1")
+	if err := s.ConsumeTicket(tok2, "acct2"); err == nil {
+		t.Fatal("票据与账号不匹配必须拒绝")
+	}
+	// 4. 不存在的票据
+	if err := s.ConsumeTicket("bogus", "acct1"); err == nil {
+		t.Fatal("不存在的票据必须拒绝")
+	}
+}
+
+// TestActivationTicketExpiry 票据 5 分钟过期：过期后消费被拒，令牌可被重用。
+func TestActivationTicketExpiry(t *testing.T) {
+	s := New(time.Hour)
+	tok := s.CreateTicket("acct1")
+	// 直接改写过期时间（白盒测试访问票内部状态）
+	s.mu.Lock()
+	for _, tk := range s.tickets {
+		tk.expires = time.Now().Add(-time.Minute)
+	}
+	s.mu.Unlock()
+	if err := s.ConsumeTicket(tok, "acct1"); err == nil {
+		t.Fatal("过期票据必须拒绝")
+	}
+}

@@ -123,18 +123,21 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !activated {
-			// 未激活：前端据此弹出激活码输入框
-			writeJSON(w, 1001, map[string]string{"account": req.Account}, "该账号尚未激活，请输入激活码")
+			// C-2（第 3 轮）：教务登录成功即颁发短期单次激活票据（绑定本次登录账号），
+			// 未激活账号的 /api/activate 必须携带它才能消耗激活码，杜绝持码者对任意已登录账号激活。
+			ticket := d.Sessions.CreateTicket(req.Account)
+			writeJSON(w, 1001, map[string]string{"ticket": ticket, "account": req.Account}, "该账号尚未激活，请输入激活码")
 			return
 		}
 	}
 	d.issueSession(w, req.Account)
 }
 
-// ActivateRequest 激活请求体。
+// ActivateRequest 激活请求体（C-2 修复后：激活必须携带登录签发的短期票据）。
 type ActivateRequest struct {
 	Account string `json:"account"`
 	Code    string `json:"code"`
+	Ticket  string `json:"ticket"`
 }
 
 // activationEnabled 读取激活码机制开关：优先运行时配置（管理员热改立即生效），
@@ -147,6 +150,9 @@ func (d *Deps) activationEnabled() bool {
 }
 
 // handleActivate 激活账号：消耗激活码并签发会话（机制关闭时拒绝）。
+// C-2 修复（第 3 轮）：激活必须携带登录颁发的短期单次激活票据，且票据绑定账号
+// 与本次激活账号必须一致——激活码从此绑定"刚通过教务登录的账号"，
+// 不再允许持码者对任意已登录过本应用的账号名激活（学号可猜测的台账外接管已封堵）。
 func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 	if !d.activationEnabled() {
 		writeJSON(w, 1, nil, "激活码机制已关闭")
@@ -157,11 +163,17 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
-	if req.Account == "" || req.Code == "" {
-		writeJSON(w, 1, nil, "账号与激活码不能为空")
+	if req.Account == "" || req.Code == "" || req.Ticket == "" {
+		writeJSON(w, 1, nil, "账号、激活码与激活票据不能为空")
 		return
 	}
-	ok, err := d.Store.ConsumeActivationCode(strings.TrimSpace(req.Code), strings.TrimSpace(req.Account))
+	acct := strings.TrimSpace(req.Account)
+	// 票据必须有效（存在、未用尽）且绑定账号与本次激活账号一致
+	if err := d.Sessions.ConsumeTicket(req.Ticket, acct); err != nil {
+		writeJSON(w, 1, nil, "激活票据无效或已过期，请重新登录后再激活")
+		return
+	}
+	ok, err := d.Store.ConsumeActivationCode(strings.TrimSpace(req.Code), acct)
 	if err != nil {
 		writeJSON(w, 1, nil, "激活失败: "+err.Error())
 		return
@@ -170,7 +182,7 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "激活码无效或已用尽")
 		return
 	}
-	d.issueSession(w, strings.TrimSpace(req.Account))
+	d.issueSession(w, acct)
 }
 
 // issueSession 记录账号名 + 签发会话 + 记日志。

@@ -188,20 +188,25 @@ func doJSONAdmin(t *testing.T, h http.Handler, method, path, body, adminTok stri
 	return doJSONAuth(t, h, method, path, body, adminTok)
 }
 
-// loginAndGetToken 复刻真实完整链路：教务登录（未激活返回 code=1001，同时注册账号客户端）-> 激活码激活 -> 返回会话令牌。
+// loginAndGetToken 复刻真实完整链路：教务登录（未激活返回 code=1001 并颁发激活票据）-> 激活码激活 -> 返回会话令牌。
 func loginAndGetToken(t *testing.T, d *testDeps, acct string) string {
 	t.Helper()
-	// 教务登录：注册账号到 accounts 管理器，并应返回未激活提示
+	// 教务登录：注册账号到 accounts 管理器，并应返回未激活提示 + 激活票据
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"`+acct+`","password":"pwd"}`)
 	if code != 200 || j["code"].(float64) != 1001 {
 		t.Fatalf("未激活账号登录应返回 1001: %d %v", code, j)
 	}
-		// 生成激活码
+	data, _ := j["data"].(map[string]any)
+	if data == nil || data["ticket"] == nil || data["ticket"] == "" {
+		t.Fatalf("未激活登录必须颁发激活票据: %v", j)
+	}
+	ticket, _ := data["ticket"].(string)
+	// 生成激活码
 	if err := d.store.CreateActivationCode("XK-ABCD-EF12-3456", 10); err != nil {
 		t.Fatal(err)
 	}
-	// 激活并签发会话
-	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"`+acct+`","code":"XK-ABCD-EF12-3456"}`)
+	// 携带票据激活并签发会话
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"`+acct+`","code":"XK-ABCD-EF12-3456","ticket":"`+ticket+`"}`)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("激活失败: %d %v", code, j)
 	}
@@ -311,10 +316,50 @@ func TestAccountOverrideRequiresAdminSession(t *testing.T) {
 
 func TestLoginUnactivatedNeedsCode(t *testing.T) {
 	d := newTestDeps(t)
-	// 未激活账号登录：教务登录成功但应返回 code=1001 提示输入激活码
+	// 未激活账号登录：教务登录成功但应返回 code=1001 并颁发激活票据（C-2）
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"acct1","password":"pwd"}`)
 	if code != 200 || j["code"].(float64) != 1001 {
 		t.Fatalf("未激活登录应返回 1001: %d %v", code, j)
+	}
+	data, _ := j["data"].(map[string]any)
+	if data == nil || data["ticket"] == nil || data["ticket"] == "" {
+		t.Fatalf("未激活登录必须颁发激活票据: %v", j)
+	}
+}
+
+// TestActivateRequiresTicketAndBinding 激活必须携带有效票据且与激活账号一致（C-2）：
+// 无票据、票据与账号不匹配、票据已用尽一律拒绝，杜绝持码者对任意账号激活。
+func TestActivateRequiresTicketAndBinding(t *testing.T) {
+	d := newTestDeps(t)
+	// 登录 acct1 拿票据
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"acct1","password":"pwd"}`)
+	if code != 200 || j["code"].(float64) != 1001 {
+		t.Fatalf("未激活登录应返回 1001: %d %v", code, j)
+	}
+	data, _ := j["data"].(map[string]any)
+	ticket, _ := data["ticket"].(string)
+	if err := d.store.CreateActivationCode("XK-ABCD-EF12-3456", 10); err != nil {
+		t.Fatal(err)
+	}
+	// 1. 无票据：拒绝
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"XK-ABCD-EF12-3456"}`)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("无票据激活应被拒绝: %d %v", code, j)
+	}
+	// 2. 票据与账号不匹配（票据绑 acct1，激活 acct2）：拒绝
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct2","code":"XK-ABCD-EF12-3456","ticket":"`+ticket+`"}`)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("票据账号不匹配应被拒绝: %d %v", code, j)
+	}
+	// 3. 正确消费成功
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"XK-ABCD-EF12-3456","ticket":"`+ticket+`"}`)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("携带正确票据应激活成功: %d %v", code, j)
+	}
+	// 4. 同一票据再激活一次（已用尽）：拒绝——激活码不得被重复使用
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"XK-ABCD-EF12-3456","ticket":"`+ticket+`"}`)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("已用尽的票据再次激活应被拒绝: %d %v", code, j)
 	}
 }
 
@@ -393,13 +438,22 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	if code != 200 || j["code"].(float64) != 0 || len(list) != 2 {
 		t.Fatalf("激活码列表异常: %d %v", code, j)
 	}
-	// 用激活码激活账号，验证可用次数扣减
+	// 用激活码激活账号，验证可用次数扣减（C-2：必须携带登录签发的激活票据）
 	first := codes[0].(string)
 	// 生成码为 16 位 hex（XK-XXXX-XXXX-XXXX-XXXX），断言熵提升落地（m7）
 	if strings.Count(first, "-") != 4 {
 		t.Fatalf("激活码应为 16 位 hex（4 段分隔），实际 %q", first)
 	}
-	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"`+first+`"}`)
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"acct1","password":"pwd"}`)
+	if code != 200 || j["code"].(float64) != 1001 {
+		t.Fatalf("未激活登录应返回 1001: %d %v", code, j)
+	}
+	loginData, _ := j["data"].(map[string]any)
+	ticket, _ := loginData["ticket"].(string)
+	if ticket == "" {
+		t.Fatalf("未激活登录必须颁发激活票据: %v", j)
+	}
+	code, j = doJSON(t, d.api, "POST", "/api/activate", `{"account":"acct1","code":"`+first+`","ticket":"`+ticket+`"}`)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("激活失败: %d %v", code, j)
 	}

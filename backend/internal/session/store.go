@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"time"
 )
@@ -17,16 +18,62 @@ type Session struct {
 	Expires time.Time
 }
 
+// ticketTTL 激活票据有效期：登录后 5 分钟内未激活即失效，防票据泄露长期有效。
+const ticketTTL = 5 * time.Minute
+
 // Store 内存会话注册表：随机令牌 -> 账号绑定，过期自动失效。
+// ticket 激活票据：登录成功但未激活的账号凭它完成激活（短期单次，C-2）。
 type Store struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
+	tickets  map[string]*ticket
 	ttl      time.Duration
+}
+
+// ticket 一次激活票据：绑定账号，只能使用一次。
+type ticket struct {
+	account string
+	expires time.Time
+	used    bool
 }
 
 // New 创建会话存储，ttl 为会话有效期。
 func New(ttl time.Duration) *Store {
-	return &Store{sessions: make(map[string]*Session), ttl: ttl}
+	return &Store{sessions: make(map[string]*Session), tickets: make(map[string]*ticket), ttl: ttl}
+}
+
+// CreateTicket 为"刚通过教务登录但尚未激活"的账号签发短期单次激活票据。
+// 票据绑定该账号；激活接口校验票据与激活账号一致后才消耗激活码（C-2）。
+func (s *Store) CreateTicket(account string) string {
+	tok := randToken()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tickets[tok] = &ticket{account: account, expires: time.Now().Add(ticketTTL)}
+	return tok
+}
+
+// ConsumeTicket 校验并单次消费激活票据：存在、未用尽、未过期，且绑定账号一致。
+// 消费成功即作废该票据（一次登录一次激活，重复使用返回错误）。
+func (s *Store) ConsumeTicket(token, account string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tickets[token]
+	if !ok {
+		return errors.New("票据不存在")
+	}
+	if t.used {
+		return errors.New("票据已使用")
+	}
+	if time.Now().After(t.expires) {
+		delete(s.tickets, token)
+		return errors.New("票据已过期")
+	}
+	if t.account != account {
+		return errors.New("票据与账号不匹配")
+	}
+	t.used = true
+	delete(s.tickets, token)
+	return nil
 }
 
 // Create 为账号签发新会话令牌（32 字节 hex，普通用户）。

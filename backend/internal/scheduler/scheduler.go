@@ -380,6 +380,19 @@ func (s *Scheduler) TokenValidFor(acct string) bool {
 	return !s.tokenValid[acct] && !s.relogging[acct]
 }
 
+// AccountsWithTargets 返回当前所有已配置有效目标的账号列表（排序）。
+func (s *Scheduler) AccountsWithTargets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for a, ts := range s.acctTargets {
+		if len(ts) > 0 {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // ElectivesSnapshotFor 返回指定账号的内存课程快照（40 秒内有效）。
 // 若该账号暂无专属快照或已过期，则回退全局快照。
 func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bool) {
@@ -526,6 +539,12 @@ func (s *Scheduler) tick() {
 // 提交循环（spawnChain）仍会继续尝试目标课程，黄金期不因数据异常而停摆。
 func (s *Scheduler) probe() {
 	now := time.Now()
+	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照
+	for _, a := range s.AccountsWithTargets() {
+		go func(acct string) {
+			_, _ = s.ProbeForAccount(acct)
+		}(a)
+	}
 	client, ok := s.clients.AnyClient()
 	if !ok {
 		return // 尚无账号登录，安静等待

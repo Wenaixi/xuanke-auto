@@ -26,6 +26,7 @@ export default function App() {
   const [page, setPage] = useState<"dashboard" | "select">("dashboard")
   const [current, setCurrent] = useState<Account>("")
   const [inAdmin, setInAdmin] = useState(false)
+  const [targetAccount, setTargetAccount] = useState<Account | null>(null)
   // 管理员账号名：登录返回 adminName 时同步（后端 XUANKE_ADMIN_NAME 决定，默认 admin）
   const [adminName, setAdminName] = useState("admin")
 
@@ -132,11 +133,18 @@ export default function App() {
         </div>
         <main className="app-content">
           {sessionToken ? (
-            inAdmin || current === adminName ? (
+            targetAccount ? (
+              <Select
+                account={targetAccount}
+                sessionToken={sessionToken}
+                onDone={() => setTargetAccount(null)}
+              />
+            ) : inAdmin || current === adminName ? (
               <Admin
                 account={current}
                 sessionToken={sessionToken}
                 onLogout={logout}
+                onSelectAccount={(acct) => setTargetAccount(acct)}
                 onBackToStudent={() => {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
                   const others = accounts.filter((a) => a !== adminName)

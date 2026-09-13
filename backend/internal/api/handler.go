@@ -179,12 +179,20 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 }
 
 // handleElectives 课程列表：直读调度器内存快照（超高性能），快照过期才触发探测。
+// 支持 ?account= 参数，允许管理员或多账号独立维护任意指定账号的专属选课大厅。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	if acct == d.AdminNameValue() {
+		if q := r.URL.Query().Get("account"); q != "" {
+			acct = q
+		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
+			acct = targetAccts[0]
+		}
+	}
 	if acct != "" && acct != d.AdminNameValue() {
 		if data, ok := d.Sched.ElectivesSnapshotFor(acct); ok {
 			writeJSON(w, 0, data, "")
-		return
+			return
 		}
 		data, err := d.Sched.ProbeForAccount(acct)
 		if err != nil {
@@ -214,6 +222,11 @@ type TargetsRequest struct {
 // handleSetTargets 设置目标课程并持久化（账号来自会话绑定）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	if acct == d.AdminNameValue() {
+		if q := r.URL.Query().Get("account"); q != "" {
+			acct = q
+		}
+	}
 	var req TargetsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -240,7 +253,15 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 
 // handleState 调度器状态（按会话账号过滤目标）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
-	st := d.Sched.StateForAccount(sessionAccount(r))
+	acct := sessionAccount(r)
+	if acct == d.AdminNameValue() {
+		if q := r.URL.Query().Get("account"); q != "" {
+			acct = q
+		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
+			acct = targetAccts[0]
+		}
+	}
+	st := d.Sched.StateForAccount(acct)
 	writeJSON(w, 0, st, "")
 }
 

@@ -17,6 +17,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import {
   Activity,
+  BookMarked,
   Copy,
   Check,
   LogOut,
@@ -37,9 +38,10 @@ interface Props {
   sessionToken: string
   onLogout: () => void
   onBackToStudent: () => void
+  onSelectAccount?: (acct: string) => void
 }
 
-export default function Admin({ sessionToken, onLogout, onBackToStudent }: Props) {
+export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
   const { toast } = useToast()
 
@@ -127,7 +129,7 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent }: Props
             <StatsTab sessionToken={sessionToken} />
           </TabsContent>
           <TabsContent value="accounts">
-            <AccountsTab sessionToken={sessionToken} />
+            <AccountsTab sessionToken={sessionToken} onSelectAccount={onSelectAccount} />
           </TabsContent>
           <TabsContent value="logs">
             <LogsTab sessionToken={sessionToken} />
@@ -561,7 +563,7 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
 
 // ---- 账号管理 ----
 
-function AccountsTab({ sessionToken }: { sessionToken: string }) {
+function AccountsTab({ sessionToken, onSelectAccount }: { sessionToken: string; onSelectAccount?: (acct: string) => void }) {
   const { toast } = useToast()
   const accountsQuery = useQuery({
     queryKey: ["admin-accounts", sessionToken],
@@ -629,15 +631,26 @@ function AccountsTab({ sessionToken }: { sessionToken: string }) {
                       {success.length > 0 ? success.join(", ") : <span className="text-neutral-600 text-xs">-</span>}
                     </td>
                   <td className="p-3 sm:p-4 align-middle text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => remove(a.account)}
-                      className="text-xs text-neutral-400 hover:text-white hover:border-white"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      删除
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSelectAccount?.(a.account)}
+                        className="text-xs text-white border-neutral-700 hover:border-white flex items-center gap-1.5"
+                      >
+                        <BookMarked className="h-3.5 w-3.5" />
+                        <span>选课大厅</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => remove(a.account)}
+                        className="text-xs text-neutral-400 hover:text-white hover:border-white"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        删除
+                      </Button>
+                    </div>
                   </td>
                   </tr>
                 )

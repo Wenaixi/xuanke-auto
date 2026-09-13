@@ -67,15 +67,15 @@ function parseCountdown(target: string | null): {
 export default function Select({ account, sessionToken, onDone }: Props) {
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["electives", sessionToken],
-    queryFn: () => api<ElectivesData>("/electives", { session: sessionToken }),
+    queryKey: ["electives", account, sessionToken],
+    queryFn: () => api<ElectivesData>("/electives?account=" + encodeURIComponent(account), { session: sessionToken }),
     refetchInterval: 10000,
   })
 
   // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）
   const { data: stateData } = useQuery({
     queryKey: ["state", account, sessionToken],
-    queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
+    queryFn: () => api<SchedulerState>("/state?account=" + encodeURIComponent(account), { session: sessionToken }),
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
@@ -175,7 +175,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       const json = JSON.stringify(targets)
       if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
       try {
-        await api("/targets", {
+        await api("/targets?account=" + encodeURIComponent(account), {
           method: "PUT",
           body: json,
           session: sessionToken,

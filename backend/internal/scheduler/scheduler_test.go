@@ -101,6 +101,13 @@ func (f *fakeClient) FindElectives() (*zhidao.ElectivesData, error) {
 	return &cp, nil
 }
 
+// SelectClassCalls 返回指定课程报名调用次数（读锁保护，测试并发安全）。
+func (f *fakeClient) SelectClassCalls(classID int) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.selectCalls[classID]
+}
+
 func (f *fakeClient) SelectClass(classID int) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

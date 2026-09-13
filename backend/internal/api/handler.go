@@ -570,6 +570,10 @@ type AdminConfigView struct {
 	OpenTime           string `json:"open_time"`
 }
 
+// maxCaptchaConcurrency 验证码识别并发上限（D-A1）：并发 1 是安全基线，20 覆盖
+// 多账号同时登录/重登的峰值；越界值整体拒绝，绝不静默保底（避免管理员误配
+// 大并发打爆本地 ONNX 或云 API）。
+
 // handleAdminConfig GET 读取 / PUT 热更新系统配置。
 // PUT 立即写入运行时配置中心（调度器/账号管理器/Vision 同步生效）并落库 settings。
 func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
@@ -600,6 +604,16 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var changed []string
+		// D-A1（第 4 轮）：先校验值域再进 Runtime.Update——非法引擎/越界并发整体拒绝，
+		// 绝不落库也不下发；与 open_time 无效拒绝同策略，杜绝 stats 显示与实际引擎错位。
+		if req.CaptchaEngine != nil && *req.CaptchaEngine != "vision" && *req.CaptchaEngine != "ddddocr" {
+			writeJSON(w, 1, nil, "识别引擎仅支持 vision 或 ddddocr")
+			return
+		}
+		if req.CaptchaConcurrency != nil && (*req.CaptchaConcurrency < 1 || *req.CaptchaConcurrency > maxCaptchaConcurrency) {
+			writeJSON(w, 1, nil, "验证码识别并发需在 1-20 之间")
+			return
+		}
 		d.Runtime.Update(func(c *runtime.Config) {
 			if req.ActivationEnabled != nil {
 				c.ActivationEnabled = *req.ActivationEnabled
@@ -624,9 +638,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				changed = append(changed, "captcha_engine")
 			}
 			if req.CaptchaConcurrency != nil {
-				if *req.CaptchaConcurrency < 1 {
-					*req.CaptchaConcurrency = 1
-				}
 				c.CaptchaConcurrency = *req.CaptchaConcurrency
 				changed = append(changed, "captcha_concurrency")
 			}
@@ -892,6 +903,8 @@ const (
 	// 抹平"管理员口令错（立即回）vs 教务登录（网络往返）"的时延差——管理员账号名
 	// 不再能靠响应快慢被侧信道枚举。取值 300ms 与教务登录同量级（Vision+网络往返）。
 	loginTimingFlat = 300 * time.Millisecond
+	// maxCaptchaConcurrency 验证码识别并发上限（D-A1）：越界值整体拒绝。
+	maxCaptchaConcurrency = 20
 )
 
 func newLoginLimiter() *loginLimiter {

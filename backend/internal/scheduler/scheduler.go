@@ -125,6 +125,7 @@ type Scheduler struct {
 	inflight         map[string]map[int]bool // [账号][classID] 正在提交
 	done             map[string]map[int]bool // [账号][classID] 已成功
 	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
+	refused          map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
 	lastProbe        time.Time
 	lastSubmit       time.Time             // 上次提交时间（submitAll 节流）
 	prevWindowOpened bool                  // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
@@ -166,6 +167,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		inflight:    make(map[string]map[int]bool),
 		done:        make(map[string]map[int]bool),
 		full:        make(map[string]map[int]bool),
+		refused:     make(map[string]map[int]bool),
 		tokenValid:  make(map[string]bool),
 		reloginAt:   make(map[string]time.Time),
 		reloginFail: make(map[string]int),
@@ -285,10 +287,13 @@ func (s *Scheduler) openTimeNow() time.Time {
 }
 
 // SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
+// 用户重新设定目标即"主动重新选它"：清空该账号 refused 标记——被手动退选的课程
+// 只有在用户重新设为目标时才被自动引擎重新接管（A2：绝不静默抢回）。
 func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acctTargets[acct] = targets
+	delete(s.refused, acct)
 	// 仅重建该账号对应的课程状态（保留其他账号）
 	keep := s.state.Courses[:0]
 	for _, c := range s.state.Courses {
@@ -845,6 +850,11 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				continue
 			}
+			// 手动退选后被用户拒绝的课程：自动引擎绝不抢回（A2），直到用户重新设为目标
+			if s.refusedHas(acct, t.ClassID) {
+				s.mu.Unlock()
+				continue
+			}
 			s.releaseFullIfFreedLocked(acct, t.ClassID)
 			if s.fullHas(acct, t.ClassID) {
 				s.mu.Unlock()
@@ -1107,6 +1117,12 @@ func (s *Scheduler) inflightHas(acct string, classID int) bool {
 	return ok && m[classID]
 }
 
+// refusedHas 用户是否已手动拒绝（退选）该课程（需持锁）。
+func (s *Scheduler) refusedHas(acct string, classID int) bool {
+	m, ok := s.refused[acct]
+	return ok && m[classID]
+}
+
 // statusIndexLocked 按账号 + 课程查找状态下标（需持有锁）。
 func (s *Scheduler) statusIndexLocked(acct string, classID int) int {
 	for i := range s.state.Courses {
@@ -1232,7 +1248,9 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 
 // RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
 // 同步清理 inflight 位：退选进行中占用的提交锁位必须释放（M5）。
-// 移除后，后台 spawnChain 在下一个 tick 将重新接管该课程（天然支持退选后重新选择）。
+// 同时记入 refused 集合并置"已用户退选"文案：后台 spawnChain 从此对该课程绝不再自动
+// 接管——用户手动退出的课，自动引擎下一 tick（≤1s）就抢回是错误行为（第 4 轮 MAJOR A2），
+// 只有用户重新把它设为目标（SetTargetsForAccount 清空 refused）才恢复自动接管。
 func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1245,15 +1263,19 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	if s.full[acct] != nil {
 		delete(s.full[acct], classID)
 	}
+	if s.refused[acct] == nil {
+		s.refused[acct] = map[int]bool{}
+	}
+	s.refused[acct][classID] = true
 	idx := s.statusIndexLocked(acct, classID)
 	if idx >= 0 {
 		s.state.Courses[idx].Status = "pending"
-		s.state.Courses[idx].Result = "已手动退选"
+		s.state.Courses[idx].Result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 	}
 	if s.store != nil {
-		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功", true)
+		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true)
 	}
-	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，已从成功列表移除并恢复 pending", acct, classID)
+	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，记入 refused——自动引擎不再接管", acct, classID)
 	return nil
 }
 

@@ -107,7 +107,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "管理口令错误")
 			return
 		}
-		sess := d.Sessions.CreateAdmin()
+		sess := d.Sessions.CreateAdmin(adminName)
 		d.Store.AppendLog(adminName, 0, "login", "管理员登录成功", true)
 		writeJSON(w, 0, map[string]string{"token": sess, "account": adminName, "adminName": adminName}, "管理员登录成功")
 		return
@@ -395,9 +395,16 @@ func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, st, "")
 }
 
-// handleAccounts 当前会话账号视角的账号列表（注册表顺序）。
+// handleAccounts 当前会话账号视角的账号列表。
+// M-2 修复（第 3 轮）：普通会话只回显自身绑定账号（学号即情报，杜绝账号枚举）；
+// 管理员会话回显全量（多账号维护管理需要），与"日志按账号隔离"同隐私边界。
 func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 0, d.Accounts.Registered(), "")
+	acct := sessionAccount(r)
+	if d.allowAccountOverride(r) {
+		writeJSON(w, 0, d.Accounts.Registered(), "")
+		return
+	}
+	writeJSON(w, 0, []string{acct}, "")
 }
 
 // handleLogs 报名日志（仅返回当前会话账号自己的日志）。

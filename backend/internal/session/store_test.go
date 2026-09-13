@@ -46,7 +46,7 @@ func TestDelete(t *testing.T) {
 
 func TestAdminSession(t *testing.T) {
 	s := New(time.Hour)
-	adminTok := s.CreateAdmin()
+	adminTok := s.CreateAdmin("admin")
 	if !s.IsAdmin(adminTok) {
 		t.Fatal("管理员令牌应 IsAdmin=true")
 	}
@@ -65,7 +65,7 @@ func TestAdminSession(t *testing.T) {
 
 func TestIsAdminToken(t *testing.T) {
 	s := New(time.Hour)
-	adminTok := s.CreateAdmin()
+	adminTok := s.CreateAdmin("admin")
 	if !s.IsAdminToken(adminTok) {
 		t.Fatal("管理员令牌 IsAdminToken 应为 true")
 	}
@@ -81,7 +81,7 @@ func TestRevokeAccount(t *testing.T) {
 	s := New(time.Hour)
 	tokA := s.Create("acctA")
 	tokB := s.Create("acctB")
-	adminTok := s.CreateAdmin()
+	adminTok := s.CreateAdmin("admin")
 
 	// 吊销 acctA：acctA 全部会话失效，其他账号不受影响
 	s.RevokeAccount("acctA")

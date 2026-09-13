@@ -81,9 +81,11 @@ func (s *Store) Create(account string) string {
 	return s.create(account, false)
 }
 
-// CreateAdmin 签发管理员会话（账号固定 admin，Admin=true）。
-func (s *Store) CreateAdmin() string {
-	return s.create("admin", true)
+// CreateAdmin 签发管理员会话（账号绑定配置的管理员账号名，Admin=true）。
+// 默认 admin；改名后（XUANKE_ADMIN_NAME）仍以配置名绑定，杜绝"会话账号=字面量 admin"
+// 与"IsAdminAccountName=配置名"两套真相错位（M-3）。
+func (s *Store) CreateAdmin(name string) string {
+	return s.create(name, true)
 }
 
 func (s *Store) create(account string, admin bool) string {

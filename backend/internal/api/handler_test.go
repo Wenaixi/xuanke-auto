@@ -38,8 +38,13 @@ func newTestDeps(t *testing.T) *testDeps {
 	return newTestDepsMode(t, true)
 }
 
-// newTestDepsMode activation 为激活码机制开关。
+// newTestDepsMode activation 为激活码机制开关；adminName 为管理员账号名（默认 admin）。
 func newTestDepsMode(t *testing.T, activation bool) *testDeps {
+	return newTestDepsModeName(t, activation, "admin")
+}
+
+// newTestDepsModeName 指定管理员账号名构造（M-3 改名回归用）。
+func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testDeps {
 	t.Helper()
 	zhi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -136,7 +141,7 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 	}
 	enc := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
 	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
-	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken, "admin",
+	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken, adminName,
 		rt.Get().ActivationEnabled, enc, dec, rt)
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, dec: dec}
 }
@@ -604,8 +609,8 @@ func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
 	if !(&Deps{}).IsAdminAccountName("admin") {
 		t.Fatal("默认 admin 名也应被识别为管理员账号名")
 	}
-	// 真实 handler 链路：AdminName=root 的完整路由，删除 admin（非管理员名）应被允许，
-	// 删除 root（管理员名）应被拒绝——验证 handleAdminDeleteAccount 不再硬编码 "admin"。
+	// 真实 handler 链路：AdminName=root 的完整路由，删除 root（管理员名）应被拒绝，
+	// 删除 admin（非管理员名）应被允许——验证 handler 不再硬编码 "admin"。
 	d := newTestDepsMode(t, true)
 	// 复用新 TestDeps 的底层组件，但重建 Deps 令 AdminName=root（保留原会话库/账号库/调度器）
 	renamed := &Deps{
@@ -638,6 +643,36 @@ func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
 	}
 	if j["code"].(float64) != 0 {
 		t.Fatalf("删除普通账号应正常放行: %v", j)
+	}
+}
+
+// TestRenamedAdminSessionBindsConfigName 管理员会话账号必须绑定配置名（M-3）：
+// XUANKE_ADMIN_NAME=root 后，管理员会话的 sessionAccount 必须返回 root（而非字面量 admin），
+// 使 handleElectives/State 的 IsAdminAccountName 兜底路径判定一致——
+// 改名后无 ?account= 参数时不会再错误地当学生账号处理（ProbeForAccount("admin") 会撞不存在的客户端）。
+func TestRenamedAdminSessionBindsConfigName(t *testing.T) {
+	d := newTestDepsModeName(t, true, "root")
+	// 用 root + 管理口令登录管理员会话
+	adminTok := ""
+	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"root","password":"`+testAdminToken+`"}`)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("改名管理员登录失败: %d %v", code, j)
+	}
+	if data, ok := j["data"].(map[string]any); ok {
+		adminTok, _ = data["token"].(string)
+	}
+	if adminTok == "" {
+		t.Fatalf("改名管理员登录缺少会话令牌: %v", j)
+	}
+	// 管理员会话账号名应为 root（M-3 修复前是硬编码 admin，穿透兜底会错位）
+	sessAcct, ok := d.sessions.Account(adminTok)
+	if !ok || sessAcct != "root" {
+		t.Fatalf("管理员会话账号应绑定配置名 root，实际 %q %v", sessAcct, ok)
+	}
+	// 管理员会话可访问管理接口（会话身份 Admin:true 不受账号名影响）
+	code, j = doJSONAuth(t, d.api, "GET", "/api/admin/config", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("改名管理员会话应能访问管理接口: %d %v", code, j)
 	}
 }
 
@@ -881,6 +916,38 @@ func TestSetTargetsEmptyAllowed(t *testing.T) {
 	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets", `{"targets":[]}`, tok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("应允许设置空目标以支持清空: %d %v", code, j)
+	}
+}
+
+// TestAccountsNonAdminSeesOnlySelf 普通会话只能看到自身账号（M-2）：
+// 即使系统里注册了多个账号，普通会话的 /api/accounts 也只回显自己的账号名，
+// 杜绝账号枚举（学号/姓名高价值情报）；管理员会话回显全量。
+func TestAccountsNonAdminSeesOnlySelf(t *testing.T) {
+	d := newTestDeps(t)
+	tok1 := authenticateDirect(t, d, "acct1")
+	tok2 := authenticateDirect(t, d, "acct2")
+
+	// 普通会话 acct1：只看到自己
+	code, j := doJSONAuth(t, d.api, "GET", "/api/accounts", "", tok1)
+	list, _ := j["data"].([]any)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("accounts 异常: %d %v", code, j)
+	}
+	if len(list) != 1 || list[0] != "acct1" {
+		t.Fatalf("普通会话应只看到自身账号，实际 %v", list)
+	}
+	// 普通会话 acct2：同样只看到自己，看不到 acct1
+	code, j = doJSONAuth(t, d.api, "GET", "/api/accounts", "", tok2)
+	list, _ = j["data"].([]any)
+	if len(list) != 1 || list[0] != "acct2" {
+		t.Fatalf("普通会话 acct2 应只看到自身账号，实际 %v", list)
+	}
+	// 管理员会话：回显全量（与多账号维护管理一致）
+	adminTok := adminTokenFor(t, d)
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/accounts", "", adminTok)
+	list, _ = j["data"].([]any)
+	if code != 200 || j["code"].(float64) != 0 || len(list) != 2 {
+		t.Fatalf("管理员会话应看到全部账号: %d %v", code, j)
 	}
 }
 

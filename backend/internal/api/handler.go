@@ -631,10 +631,8 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	}
 	// window_opened 与调度器实际探测状态保持一致（学生端 /state 同源），
 	// 不用本地时钟直判——平台开放时间与本地配置若有偏差，管理员不会误判。
+	// WindowOpened 返回布尔快照（不再返回裸指针，评审 MAJOR 已根除指针悬空竞态）。
 	windowOpened := d.Sched.WindowOpened()
-	if windowOpened == nil {
-		windowOpened = boolPtr(time.Now().After(open)) // 调度器未启动时的回退
-	}
 	// 全账号日志总数（LoadAllLogs 含全部账号）
 	logsCount := len(allLogs)
 	// 识别引擎与并发上限（管理员后台展示当前生效值）
@@ -645,7 +643,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 0, map[string]any{
 		"open_time":           open.Format("2006-01-02 15:04:05"),
 		"activation_on":       cfg.ActivationEnabled,
-		"window_opened":       *windowOpened,
+		"window_opened":       windowOpened,
 		"account_count":       len(accounts),
 		"targets_count":       targetsCount,
 		"success_count":       len(success),
@@ -657,8 +655,6 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"open_time_set":       true,
 	}, "")
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 // handleAdminAccounts 账号管理列表（含目标与已成功课程）。
 func (d *Deps) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {

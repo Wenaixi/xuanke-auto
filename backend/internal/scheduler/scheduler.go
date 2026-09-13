@@ -369,7 +369,7 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	defer s.mu.Unlock()
 	st := s.state
 	st.OpenTime = s.openTimeNow() // 运行时配置优先（热重载立即反映）
-	st.TokenValid = !s.tokenValid[acct] && !s.relogging[acct]
+	st.TokenValid = s.tokenValidForLocked(acct)
 	st.Courses = nil
 	for _, c := range s.state.Courses {
 		if c.Account == acct {
@@ -381,9 +381,17 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 
 // TokenValidFor 查询指定账号教务 token 有效性（未记录失效标记即视为有效）。
 // relogging（重登进行中）也视为失效——重登尚未完成时对外显示"已失效·自动恢复中"。
+// 与 maybeRelogin 用同一把 reloginMu 串行化，避免读到"即将写入"的半态。
 func (s *Scheduler) TokenValidFor(acct string) bool {
+	s.reloginMu.Lock()
+	defer s.reloginMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.tokenValidForLocked(acct)
+}
+
+// tokenValidForLocked 计算指定账号 token 有效性（需持 s.mu 与 s.reloginMu）。
+func (s *Scheduler) tokenValidForLocked(acct string) bool {
 	return !s.tokenValid[acct] && !s.relogging[acct]
 }
 
@@ -463,12 +471,19 @@ func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
 	return s.lastData, true
 }
 
-// WindowOpened 返回当前窗口开启状态（以调度器实际探测结果为准）。
-// 返回 nil 表示调度器尚未产生任何探测结论（学生端 /state 同源字段）。
-func (s *Scheduler) WindowOpened() *bool {
+// HasProbed 调度器是否已产生至少一次探测（区分"从未探测"与"探测结果为空"）。
+func (s *Scheduler) HasProbed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return &s.state.WindowOpened
+	return !s.lastProbe.IsZero()
+}
+
+// WindowOpened 返回当前窗口开启状态（以调度器实际探测结果为准）。
+// 返回布尔值快照（历史上返回 *bool 裸指针，改为值拷贝防止指针悬空读-写竞态）。
+func (s *Scheduler) WindowOpened() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.WindowOpened
 }
 
 // WindowClosed 返回窗口是否已关闭（探测到空快照且从未开过窗）。

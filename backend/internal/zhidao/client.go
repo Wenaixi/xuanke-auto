@@ -401,6 +401,11 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。
 // 最多重登一次：返回 (是否已重登, 错误)。
+//
+// 加固（并发重登 CRITICAL）：此方法与调用方传入的账号名无关——客户端本身就
+// 有唯一绑定的账号（ensure 分配、Restore/SetCredentials 注入），重登一律用
+// 客户端内部 account/password，绝不被调用方传入的参数影响。这样并发为多个
+// 账号调用时，每个客户端只用自己的账密重登自己，杜绝交叉污染。
 func (c *Client) ReloginIfNeeded() (bool, error) {
 	c.mu.Lock()
 	acct, pwd := c.account, c.password

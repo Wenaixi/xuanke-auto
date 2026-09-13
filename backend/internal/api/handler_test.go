@@ -920,6 +920,53 @@ func TestSetTargetsEmptyAllowed(t *testing.T) {
 	}
 }
 
+// TestSetTargetsBounds 目标数量与范围必须受校验（n2）：
+// 超过 100 门 / 非法 publish_id / 非法 priority 一律拒绝，且不得入库。
+func TestSetTargetsBounds(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	// 1. 超过条数上限（101 门）必须拒绝
+	var big strings.Builder
+	big.WriteString(`{"targets":[`)
+	for i := 0; i < 101; i++ {
+		if i > 0 {
+			big.WriteString(",")
+		}
+		fmt.Fprintf(&big, `{"publish_id":1,"class_id":%d,"course_name":"c%d","priority":%d}`, 61115+i, i, i)
+	}
+	big.WriteString(`]}`)
+	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets", big.String(), tok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("超过 100 门目标应被拒绝: %d %v", code, j)
+	}
+
+	// 2. publish_id 非法（<=0）必须拒绝
+	code, j = doJSONAuth(t, d.api, "PUT", "/api/targets",
+		`{"targets":[{"publish_id":0,"class_id":61115,"course_name":"健美操","priority":0}]}`, tok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("publish_id<=0 应被拒绝: %d %v", code, j)
+	}
+
+	// 3. priority 越界（负数 / >999）必须拒绝
+	code, j = doJSONAuth(t, d.api, "PUT", "/api/targets",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":-1}]}`, tok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("priority 负数应被拒绝: %d %v", code, j)
+	}
+	code, j = doJSONAuth(t, d.api, "PUT", "/api/targets",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":1000}]}`, tok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("priority>999 应被拒绝: %d %v", code, j)
+	}
+
+	// 4. 拒绝后原目标不得被改动（保持空）
+	targets, err := d.store.LoadTargetsForAccount("acct1")
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("非法请求不应写入目标表: %v %v", targets, err)
+	}
+}
+
 // TestAccountsNonAdminSeesOnlySelf 普通会话只能看到自身账号（M-2）：
 // 即使系统里注册了多个账号，普通会话的 /api/accounts 也只回显自己的账号名，
 // 杜绝账号枚举（学号/姓名高价值情报）；管理员会话回显全量。

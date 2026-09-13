@@ -349,6 +349,9 @@ type TargetsRequest struct {
 	Targets []scheduler.Target `json:"targets"`
 }
 
+// maxTargetsPerAccount 每个账号目标课程条数上限（n2 防异常放大；前端选择远达不到）。
+const maxTargetsPerAccount = 100
+
 // handleSetTargets 设置目标课程并持久化（账号来自会话绑定；仅管理员会话可跨账号）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
@@ -366,9 +369,24 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	if req.Targets == nil {
 		req.Targets = []scheduler.Target{}
 	}
+	// n2 修复（第 3 轮）：目标数量与范围双重校验——
+	// 条数上限防恶意放大（每个账号最多 100 门，前端单选多选也远达不到）；
+	// publish_id/priority 必须有界，防止越界值干扰调度器按发布分组与优先级排序。
+	if len(req.Targets) > maxTargetsPerAccount {
+		writeJSON(w, 1, nil, fmt.Sprintf("目标课程数量超过上限（最多 %d 门）", maxTargetsPerAccount))
+		return
+	}
 	for _, t := range req.Targets {
 		if t.ClassID <= 0 {
 			writeJSON(w, 1, nil, "class_id 无效")
+			return
+		}
+		if t.PublishID <= 0 {
+			writeJSON(w, 1, nil, "publish_id 无效")
+			return
+		}
+		if t.Priority < 0 || t.Priority > 999 {
+			writeJSON(w, 1, nil, "priority 需在 0-999 之间")
 			return
 		}
 	}

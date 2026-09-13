@@ -778,6 +778,32 @@ func TestSubmitIntervalSprint(t *testing.T) {
 	}
 }
 
+// TestProbeIntervalWindowClosed 窗口已关闭（开放时间已过 + 快照空）时降回 30s 探测，
+// 杜绝窗口关闭后仍 2 秒高频盯守平台（浪费请求 + 日志刷屏）；
+// 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。
+func TestProbeIntervalWindowClosed(t *testing.T) {
+	// 已过开放时间 + 空快照 → WindowClosed=true → 降回 30s
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
+	s.probe()
+	if !s.StateForAccount("acct1").WindowClosed {
+		t.Fatal("空快照应标记窗口关闭")
+	}
+	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("窗口关闭后应 30s 探测，实际 %v", got)
+	}
+
+	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（管理员热改新一轮的防守场景）
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
+	s2.probe() // 空快照 → WindowClosed=true
+	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
+		t.Fatalf("临门期应 2s 盯守（不受已关闭标记影响），实际 %v", got)
+	}
+}
+
 // TestServerClockAlignment 验证服务端时钟偏移校准生效。
 func TestServerClockAlignment(t *testing.T) {
 	s := New(nil, &fakeStore{}, time.Now(), time.Second)

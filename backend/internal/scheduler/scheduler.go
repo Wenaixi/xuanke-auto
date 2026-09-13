@@ -57,8 +57,13 @@ const (
 
 // probeIntervalFor 按当前时刻与开放时间的距离选择探测间隔。
 // 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
+// 窗口已关闭（开放时间已过且快照为空）时降回 30 秒——窗口结束后再高频盯守毫无意义，
+// 只会浪费请求并刷屏日志；若管理员热改开放时间到未来（新一轮），临门判断仍优先生效。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
 	if now.After(s.openTimeNow().Add(-nearWindow)) {
+		if now.After(s.openTimeNow()) && s.WindowClosed() {
+			return probeIntervalFar // 开放时间已过且窗口关闭：降回 30s
+		}
 		return probeIntervalNear
 	}
 	return probeIntervalFar
@@ -463,6 +468,13 @@ func (s *Scheduler) WindowOpened() *bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return &s.state.WindowOpened
+}
+
+// WindowClosed 返回窗口是否已关闭（探测到空快照且从未开过窗）。
+func (s *Scheduler) WindowClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.WindowClosed
 }
 
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。

@@ -1051,3 +1051,97 @@ func FormatOpenTime(s string) (time.Time, error) {
 	}
 	return t, nil
 }
+
+// TryAcquireSubmit 尝试获取对指定账号课程的提交排他锁（在飞互斥）。
+// 若当前正在提交，返回 false；若成功获取，返回安全释放函数和 true。
+func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inflight[acct] == nil {
+		s.inflight[acct] = make(map[int]bool)
+	}
+	if s.inflight[acct][classID] {
+		return nil, false
+	}
+	s.inflight[acct][classID] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			delete(s.inflight[acct], classID)
+			s.mu.Unlock()
+		})
+	}, true
+}
+
+// MarkDone 手动或外部操作成功后同步调度器状态：记入 done、清 full 与退避、置 success 状态并持久化。
+func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done[acct] == nil {
+		s.done[acct] = make(map[int]bool)
+	}
+	s.done[acct][classID] = true
+	if s.full[acct] != nil {
+		delete(s.full[acct], classID)
+	}
+	if s.rateLimited[acct] != nil {
+		delete(s.rateLimited[acct], classID)
+	}
+	idx := s.statusIndexLocked(acct, classID)
+	if idx >= 0 {
+		s.state.Courses[idx].Status = "success"
+		s.state.Courses[idx].Result = msg
+	} else if courseName != "" {
+		s.state.Courses = append(s.state.Courses, CourseStatus{
+			Account:    acct,
+			ClassID:    classID,
+			CourseName: courseName,
+			Status:     "success",
+			Result:     msg,
+		})
+	}
+	if s.store != nil {
+		_ = s.store.SaveSuccess(acct, classID)
+		_ = s.store.AppendLog(acct, classID, "select", msg, true)
+	}
+	log.Printf("[scheduler] 账号 %s 课程 %d 手动标记成功: %s", acct, classID, msg)
+	return nil
+}
+
+// RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
+// 移除后，后台 spawnChain 在下一个 tick 将重新接管该课程（天然支持退选后重新选择）。
+func (s *Scheduler) RemoveDone(acct string, classID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done[acct] != nil {
+		delete(s.done[acct], classID)
+	}
+	if s.full[acct] != nil {
+		delete(s.full[acct], classID)
+	}
+	idx := s.statusIndexLocked(acct, classID)
+	if idx >= 0 {
+		s.state.Courses[idx].Status = "pending"
+		s.state.Courses[idx].Result = "已手动退选"
+	}
+	if s.store != nil {
+		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功", true)
+	}
+	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，已从成功列表移除并恢复 pending", acct, classID)
+	return nil
+}
+
+// RemoveFull 外部手动或快照更新时解除满员标记。
+func (s *Scheduler) RemoveFull(acct string, classID int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.full[acct] != nil {
+		delete(s.full[acct], classID)
+	}
+	idx := s.statusIndexLocked(acct, classID)
+	if idx >= 0 && s.state.Courses[idx].Status == "failed" {
+		s.state.Courses[idx].Status = "pending"
+		s.state.Courses[idx].Result = ""
+	}
+}

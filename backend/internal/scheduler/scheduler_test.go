@@ -907,3 +907,56 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 	s.mu.Unlock()
 }
 
+// TestSchedulerManualSyncAndSubmitMutex 验证手动报名、退选状态协同与提交排他互斥锁 (Task 3)。
+func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
+	fs := &fakeStore{}
+	s := New(&fakeAccts{}, fs, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	courseName := "健美操"
+
+	// 1. 验证 TryAcquireSubmit 排他互斥
+	release1, ok1 := s.TryAcquireSubmit(acct, classID)
+	if !ok1 || release1 == nil {
+		t.Fatal("首次获取单课提交锁应成功")
+	}
+	_, ok2 := s.TryAcquireSubmit(acct, classID)
+	if ok2 {
+		t.Fatal("并发重复获取同一账号同一课程的提交锁应被拒绝，防止重复发包")
+	}
+	release1() // 释放锁
+	release3, ok3 := s.TryAcquireSubmit(acct, classID)
+	if !ok3 || release3 == nil {
+		t.Fatal("释放锁后应能再次成功获取提交锁")
+	}
+	release3()
+
+	// 2. 验证 MarkDone 手动报名成功同步
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
+	err := s.MarkDone(acct, classID, courseName, "手动报名成功")
+	if err != nil {
+		t.Fatalf("MarkDone 失败: %v", err)
+	}
+	if !s.doneHas(acct, classID) {
+		t.Fatal("MarkDone 后 done 集合中应存在该课程")
+	}
+	st := s.StateForAccount(acct)
+	if len(st.Courses) == 0 || st.Courses[0].Status != "success" {
+		t.Fatalf("MarkDone 后状态应为 success，实际: %+v", st.Courses)
+	}
+
+	// 3. 验证 RemoveDone 手动退选同步
+	err = s.RemoveDone(acct, classID)
+	if err != nil {
+		t.Fatalf("RemoveDone 失败: %v", err)
+	}
+	if s.doneHas(acct, classID) {
+		t.Fatal("RemoveDone 后 done 集合中不应再有该课程")
+	}
+	st2 := s.StateForAccount(acct)
+	if len(st2.Courses) == 0 || st2.Courses[0].Status != "pending" {
+		t.Fatalf("RemoveDone 后状态应重置为 pending 以便自动引擎重新接管，实际: %+v", st2.Courses)
+	}
+}
+
+

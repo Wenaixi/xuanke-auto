@@ -42,7 +42,7 @@ interface Props {
   onSelectAccount?: (acct: string) => void
 }
 
-export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
+export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
   // n8：复制反馈定时器句柄——连续复制不同码时先 clearTimeout 旧定时器，
   // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）
@@ -128,23 +128,24 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelec
           </TabsList>
 
           <TabsContent value="codes">
-            <CodesTab sessionToken={sessionToken} onCopy={copy} copied={copied} />
+            <CodesTab account={account} sessionToken={sessionToken} onCopy={copy} copied={copied} />
           </TabsContent>
           <TabsContent value="config">
-            <ConfigTab sessionToken={sessionToken} />
+            <ConfigTab account={account} sessionToken={sessionToken} />
           </TabsContent>
           <TabsContent value="stats">
-            <StatsTab sessionToken={sessionToken} />
+            <StatsTab account={account} sessionToken={sessionToken} />
           </TabsContent>
           <TabsContent value="accounts">
             <AccountsTab
+              account={account}
               sessionToken={sessionToken}
               onSelectAccount={onSelectAccount}
               onAskDelete={(acct) => setPendingDelete(acct)}
             />
           </TabsContent>
           <TabsContent value="logs">
-            <LogsTab sessionToken={sessionToken} />
+            <LogsTab account={account} sessionToken={sessionToken} />
           </TabsContent>
         </Tabs>
 
@@ -211,10 +212,12 @@ export default function Admin({ sessionToken, onLogout, onBackToStudent, onSelec
 // ---- 激活码管理 ----
 
 function CodesTab({
+  account,
   sessionToken,
   onCopy,
   copied,
 }: {
+  account: Account
   sessionToken: string
   onCopy: (c: string) => void
   copied: string
@@ -225,8 +228,11 @@ function CodesTab({
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<string[]>([])
 
+  // n11（第 3 轮）：queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
+  // 同一浏览器令牌，若缓存只按令牌分键，另一账号的轮询数据会覆盖本账号视图。
+  // （会话级服务端数据本就按 sessionAccount 过滤，本地缓存键必须跟随同一维度。）
   const codesQuery = useQuery({
-    queryKey: ["admin-codes", sessionToken],
+    queryKey: ["admin-codes", account, sessionToken],
     queryFn: () => api<ActivationCode[]>("/admin/codes", { session: sessionToken }),
     refetchInterval: 5000,
   })
@@ -376,7 +382,7 @@ function CodesTab({
 
 // ---- 系统配置 ----
 
-function ConfigTab({ sessionToken }: { sessionToken: string }) {
+function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: string }) {
   const { toast } = useToast()
   const [baseUrl, setBaseUrl] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -389,7 +395,7 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
   const initializedRef = useRef(false)
 
   const configQuery = useQuery({
-    queryKey: ["admin-config", sessionToken],
+    queryKey: ["admin-config", account, sessionToken],
     queryFn: () => api<AdminConfig>("/admin/config", { session: sessionToken }),
   })
 
@@ -584,9 +590,9 @@ function ConfigTab({ sessionToken }: { sessionToken: string }) {
 
 // ---- 运行状态 ----
 
-function StatsTab({ sessionToken }: { sessionToken: string }) {
+function StatsTab({ account, sessionToken }: { account: Account; sessionToken: string }) {
   const statsQuery = useQuery({
-    queryKey: ["admin-stats", sessionToken],
+    queryKey: ["admin-stats", account, sessionToken],
     queryFn: () => api<AdminStats>("/admin/stats", { session: sessionToken }),
     refetchInterval: 5000,
   })
@@ -654,16 +660,18 @@ function StatsTab({ sessionToken }: { sessionToken: string }) {
 // ---- 账号管理 ----
 
 function AccountsTab({
+  account,
   sessionToken,
   onSelectAccount,
   onAskDelete,
 }: {
+  account: Account
   sessionToken: string
   onSelectAccount?: (acct: string) => void
   onAskDelete: (acct: string) => void
 }) {
   const accountsQuery = useQuery({
-    queryKey: ["admin-accounts", sessionToken],
+    queryKey: ["admin-accounts", account, sessionToken],
     queryFn: () => api<AdminAccount[]>("/admin/accounts", { session: sessionToken }),
     refetchInterval: 10000,
   })
@@ -749,9 +757,9 @@ function AccountsTab({
 
 // ---- 日志总览 ----
 
-function LogsTab({ sessionToken }: { sessionToken: string }) {
+function LogsTab({ account, sessionToken }: { account: Account; sessionToken: string }) {
   const logsQuery = useQuery({
-    queryKey: ["admin-logs", sessionToken],
+    queryKey: ["admin-logs", account, sessionToken],
     queryFn: () => api<AdminLog[]>("/admin/logs?limit=200", { session: sessionToken }),
     refetchInterval: 5000,
   })

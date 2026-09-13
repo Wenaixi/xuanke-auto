@@ -469,6 +469,10 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "每个激活码使用次数至少为 1")
 			return
 		}
+		if req.Uses > 1000 {
+			writeJSON(w, 1, nil, "每个激活码使用次数上限为 1000")
+			return
+		}
 		codes := make([]string, 0, req.Count)
 		for i := 0; i < req.Count; i++ {
 			code := newActivationCode()
@@ -499,9 +503,13 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 
 // newActivationCode 生成 XK-XXXX-XXXX-XXXX 格式激活码（16 位十六进制）。
 // m7 修复：原 12 位 hex（48bit 熵）对有效期长的激活码偏低，提升至 16 位 hex（64bit 熵）。
+// M-1 修复（第 3 轮）：crypto/rand 失败即 panic（与 randToken 同策略）——
+// 熵源故障时代码绝不静默产出全零可预测激活码，让攻击者拿到重复码无限激活。
 func newActivationCode() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand 不可用，无法生成安全激活码: " + err.Error())
+	}
 	s := strings.ToUpper(hex.EncodeToString(b))
 	return fmt.Sprintf("XK-%s-%s-%s-%s", s[0:4], s[4:8], s[8:12], s[12:16])
 }

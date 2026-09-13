@@ -423,8 +423,13 @@ func TestAdminAuth(t *testing.T) {
 func TestAdminCodesGenerateListDelete(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
+	// uses 超上限（>1000）必须被拒绝（n3），拒绝不应入库
+	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":1,"uses":1001}`, adminTok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("uses 超上限应被拒绝: %d %v", code, j)
+	}
 	// 生成 2 个激活码，每个可用 3 次
-	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":2,"uses":3}`, adminTok)
+	code, j = doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":2,"uses":3}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("生成激活码失败: %d %v", code, j)
 	}

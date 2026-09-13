@@ -28,6 +28,25 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
 func (f *fakeStore) UpdateIDToken(acct, idToken string) error    { return nil }
 
+// syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
+// 若用裸 bytes.Buffer 会与测试主协程并发读写（读 String / 写 Write）触发 -race；加锁彻底解除。
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
 	mu          sync.Mutex
@@ -469,7 +488,7 @@ func TestBackupNotAdvancedOnNetworkError(t *testing.T) {
 
 // TestReloginLogs 自动重登全路径日志：触发原因、成功恢复（token 脱敏）、失败原因均可见。
 func TestReloginLogs(t *testing.T) {
-	var buf bytes.Buffer
+	var buf syncLogBuffer
 	old := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(old)
@@ -508,7 +527,7 @@ func TestReloginLogs(t *testing.T) {
 
 // TestReloginFailureLogs 重登失败路径输出失败原因日志。
 func TestReloginFailureLogs(t *testing.T) {
-	var buf bytes.Buffer
+	var buf syncLogBuffer
 	old := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(old)

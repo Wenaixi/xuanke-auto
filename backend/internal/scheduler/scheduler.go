@@ -325,10 +325,15 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 					// syncFailStreak（≥3 且开放时间已过），本字段写而不读，与成功路径的
 					// 清零对称保留（失败/恢复时刻留档，便于未来按时间差精细调参）。
 					s.syncFailedWindow = time.Now()
+					// B21-01（第 21 轮）：到达 3 次后只把校准偏差复位（回退到本地时钟），
+					// 绝不在此清零 streak——旧实现同一临界区先 ++ 再清零，外部读取方
+					// （WindowClosed 持同一把锁）永远读不到 3（值域恒 {0,1,2}），B19-01
+					// 的时钟兜底判据实为不可达死代码（对应测试手动注入 3 恒假绿）。
+					// 保留 streak 持续增长，幽灵窗口判据成为真实可达状态；同步成功时
+					// 统一清零自愈（见下），瞬断 1 次只记 1 次、绝不误触发。
 					if s.syncFailStreak >= 3 {
 						s.clockOffset = 0
-						s.syncFailStreak = 0 // 已回退并告警，重置计数等下一轮重新累计
-						log.Printf("[scheduler] 时钟对齐连续失败已达 %d 次，校准偏差已复位（回退到本地时钟）", 3)
+						log.Printf("[scheduler] 时钟对齐连续失败已达 %d 次，校准偏差已复位（回退到本地时钟）", s.syncFailStreak)
 					}
 					return
 				}
@@ -712,6 +717,8 @@ func (s *Scheduler) WindowClosed() bool {
 	// 从未开过窗的空快照 + 开放时间已过时，2s 高频探测/1s 提交只烧平台（熔断形态）。
 	// 自愈由 syncFailStreak 归零（同步成功）提供。注意 syncFailedWindow 字段写而不读
 	// （判据只用 syncFailStreak），已在 maybeSyncClock 注释注明，避免误读为死代码。
+	// B21-01（第 21 轮）：streak 现在真实可达——maybeSyncClock 失败分支不再清零
+	// （见下），连续失败 ≥3 后持续累计、同步成功才归零；WindowClosed 判据首次真实生效。
 	if s.syncFailStreak >= 3 && !s.openTimeNow().IsZero() {
 		return true
 	}

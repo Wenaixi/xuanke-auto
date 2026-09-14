@@ -1980,17 +1980,19 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 }
 
 // TestGhostWindowClockFailuresSuspend 验证从未开过窗的空快照 + 时钟连续失败 ≥3 时
-// 判定"幽灵窗口已关闭"（B19-01，第 19 轮）：packaged 默认 open_time 已过 + 平台空快照
-// 环境下，WindowClosed() 必须为 true（tick 守卫挂起提交 + 探测降回 30s），
-// 自愈由时钟成功恢复（syncFailStreak 归零）提供。
+// 判定"幽灵窗口已关闭"（B19-01 时钟兜底 + B21-01 使其真实可达）：packaged 默认
+// open_time 已过 + 平台空快照 + syncFailStreak 持续累计 ≥3，WindowClosed() 必须为 true
+// （tick 守卫挂起提交 + 探测降回 30s），自愈由时钟成功恢复（streak 归零）提供。
 func TestGhostWindowClockFailuresSuspend(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.mu.Lock()
 	fc.data.Publishes = nil // 幽灵窗口形态：空快照且从未开过窗
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
-	// 模拟时钟连续失败 ≥3：只置进度计数（WindowClosed 兜底判定只用 syncFailStreak +
-	// 开放时间已过；syncFailedWindow 为写而不读的失败时刻留档，测试不依赖）
+	// B21-01：判据读 syncFailStreak（≥3 即幽灵窗口，生产代码在 maybeSyncClock 失败分支
+	// 累计、成功分支清零）。此前该字段在失败分支内被立即清零、外部永远读不到 3（死代码），
+	// 测试是手动注入模拟——现在 streak 持续累计，判据真实可达。前置进样保证测试不依赖
+	// 时钟备选路径。
 	s.mu.Lock()
 	s.syncFailStreak = 3
 	s.mu.Unlock()

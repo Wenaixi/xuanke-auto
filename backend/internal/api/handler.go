@@ -177,7 +177,9 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acct := strings.TrimSpace(req.Account)
-	// 票据必须有效（存在、未用尽）且绑定账号与本次激活账号一致
+	// 票据必须有效（存在、未用尽）且绑定账号与本次激活账号一致。
+	// F13-m1（第 13 轮）：票据在激活码校验失败时已在 ConsumeTicket 中被销毁（单次防重放
+	// 的刻意决策），用户收到"激活码无效"后需重新登录拿新票据再试——绝不因此放宽票据复用。
 	if err := d.Sessions.ConsumeTicket(req.Ticket, acct); err != nil {
 		writeJSON(w, 1, nil, "激活票据无效或已过期，请重新登录后再激活")
 		return

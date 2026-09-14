@@ -1932,18 +1932,23 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 // 空 → 下轮重打，probeIntervalFor 恒 2s 高频探测，防轰炸契约闭环缺口。
 // 量变判据：EmptyProbeRuns≥3 且从未开窗且开放时间已过 → 视同关闭；开窗/非空快照/未到
 // 开放时间即归零自愈（不误伤开窗前正常空快照的临门盯守）。
+// B21-02（第 21 轮）：入账增量再加"已过开窗点 10s 裕量"——开窗瞬间平台预清空 publishes
+// （F7-01 真实现象）时，旧判据会在黄金期误挂起；补这段过渡期错开，真实窗口开启后连续
+// 空快照才确证幽灵窗口。
 func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.mu.Lock()
 	fc.data.Publishes = nil // 幽灵窗口形态：空快照且从未开过窗
 	fc.mu.Unlock()
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	// 开放时间设 12s 前（已过开窗点 + 超出 10s 裕量），让入账条件"now > open+10s"成立
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-12*time.Second), time.Hour)
 
 	// 连续探测入账前（EmptyProbeRuns=0）：不得误判关闭（首次探测 / 开窗前正常空快照）
 	if s.WindowClosed() {
 		t.Fatal("从未连续探测到空快照前不得视同关闭（首探不计数）")
 	}
 	// 入账 1-2 轮：仍未达 3 轮阈值，不得误判（连续两次空快照可能是平台抖动）
+	// 注意：入账计数由 probe() 在真实探测时递增，测试直接置 state 模拟"探测已入账 2 轮"
 	s.mu.Lock()
 	s.state.EmptyProbeRuns = 2
 	s.mu.Unlock()
@@ -1976,6 +1981,28 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 	s.mu.Unlock()
 	if s.WindowClosed() {
 		t.Fatal("EmptyProbeRuns 归零（窗口若真开、探测拿到非空快照）后应解除")
+	}
+
+	// B21-02 反向断言 3：开窗点后 10s 裕量内（now ≤ open+10s）probe() 绝不入账空快照轮数——
+	// 开窗瞬间平台预清空 publishes 的过渡态（F7-01）不得被误判幽灵窗口。裕量在入账侧
+	// （probe() 的 `now.After(open+10s)` 才 ++），故用真实 probe() 验证，而非置 state。
+	// 情况 A：开放时间 5s 前（仍在 10s 裕量窗口内）→ 空快照探测不得入账（EmptyProbeRuns 保持 0）
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-5*time.Second), time.Hour)
+	s2.probe()
+	s2.mu.Lock()
+	runs2 := s2.state.EmptyProbeRuns
+	s2.mu.Unlock()
+	if runs2 != 0 {
+		t.Fatalf("开窗点后 10s 裕量内的空快照探测不得入账 EmptyProbeRuns（防误挂黄金期），实际 %d", runs2)
+	}
+	// 情况 B：开放时间 12s 前（已过 10s 裕量）→ 空快照探测正常入账（EmptyProbeRuns=1）
+	s3 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-12*time.Second), time.Hour)
+	s3.probe()
+	s3.mu.Lock()
+	runs3 := s3.state.EmptyProbeRuns
+	s3.mu.Unlock()
+	if runs3 != 1 {
+		t.Fatalf("已过 10s 裕量的空快照探测应正常入账 EmptyProbeRuns=1，实际 %d", runs3)
 	}
 }
 

@@ -926,7 +926,11 @@ func (s *Scheduler) probe() {
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
 	// 注意绝不触碰 state.WindowClosed（由 B18-M1/B19-01 判据独占）：这里只维护量变计数，
 	// WindowClosed() 读取它做"视同关闭"兜底——不写 state.WindowClosed 避免误标真实关闭。
-	if !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow()) {
+	// B21-02（第 21 轮）：入账另加"已过开窗点 10s 裕量"——平台在开窗前会预清空 publishes
+	// （F7-01 记录的真实现象，切学期/数据迁移），若开窗瞬间清空过渡态持续 ≥6 秒（3 次探测
+	// × 2s 临门间隔），旧判据会在真实窗口已开时误挂起黄金期提交+降频探测；以"开窗点后
+	// 10s 内不计空快照轮数"错开过渡态，窗口真开（10s 黄金期结束）后连续空才确证幽灵窗口。
+	if !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow().Add(10*time.Second)) {
 		s.state.EmptyProbeRuns++
 	} else {
 		s.state.EmptyProbeRuns = 0

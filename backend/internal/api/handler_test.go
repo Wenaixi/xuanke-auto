@@ -619,6 +619,29 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if j["code"].(float64) == 0 {
 		t.Fatalf("无效打开时间不应接受: %v", j)
 	}
+	// 无效打开时间必须返回明确格式错误（不得落入"没有可应用的有效配置项"歧义）
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "开放时间格式错误") {
+		t.Fatalf("无效 open_time 应返回明确格式错误，实际: %v", j)
+	}
+	// B21-04（第 21 轮）：格式非法的 open_time 混改时整体拒绝——不得让其他字段生效
+	// 造成"配置已更新"半假成功。混改 PUT 里故意带上一个"与当前值不同的合法新字段"
+	// vision_model=MUTANT：整体拒绝生效时它必须保持 new-model 不被应用。
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"vision_model":"MUTANT","open_time":"2026/09/14 10:00:00"}`, adminTok)
+	if j["code"].(float64) == 0 {
+		t.Fatalf("非法 open_time 混改必须整体拒绝（不得半假成功）: %v", j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "开放时间格式错误") {
+		t.Fatalf("混改拒绝的报错必须指向格式，实际: %v", j)
+	}
+	// 配置保持原状：vision_model 未因混改而变（仍为上一轮热更新的 new-model）
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/config", "", adminTok)
+	if j["code"].(float64) != 0 {
+		t.Fatalf("读取配置失败: %v", j)
+	}
+	cfgKeep, _ := j["data"].(map[string]any)
+	if vm, _ := cfgKeep["vision_model"].(string); vm != "new-model" {
+		t.Fatalf("非法 open_time 混改后原字段不得被改动，vision_model 应仍为 new-model: %v", cfgKeep)
+	}
 
 	// F7-02（第 7 轮）：空 open_time 是"显式清空开放时间"，不再静默忽略——
 	// 必须真实生效（内存 + 落库 + admin config 回显全为空），调度器解除窗口机制。

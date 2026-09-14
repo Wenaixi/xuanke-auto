@@ -703,6 +703,19 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "验证码识别并发需在 1-20 之间")
 			return
 		}
+		// B21-04（第 21 轮）：非空但格式非法的 open_time 必须整体拒绝——校验必须前置到
+		// Runtime.Update 闭包之外：旧实现 `else if FormatOpenTime(...)==nil` 校验失败静默忽略
+		// （混改 PUT 返回"配置已更新"但 open_time 未变，半假成功）；若把 writeJSON+return
+		// 写在闭包内，return 只退出闭包不退出 handler，既会重复写响应（双 JSON body）又会把
+		// 前置字段（如 activation_enabled）部分应用进内存配置——"整体拒绝"名存实亡。
+		// 前置校验与非法引擎/越界并发同策略：整体拒绝、绝不落库也不下发。到这里的错误信息
+		// 已含 "开放时间格式错误" 前缀（FormatOpenTime 自带），此处只补"应为"提示即可。
+		if req.OpenTime != nil && *req.OpenTime != "" {
+			if _, err := scheduler.FormatOpenTime(*req.OpenTime); err != nil {
+				writeJSON(w, 1, nil, "开放时间格式错误（应为 2006-01-02 15:04:05）："+err.Error())
+				return
+			}
+		}
 		d.Runtime.Update(func(c *runtime.Config) {
 			if req.ActivationEnabled != nil {
 				c.ActivationEnabled = *req.ActivationEnabled
@@ -741,7 +754,9 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 					// "管理员手动解除窗口机制"，语义与 loadDotEnv"仅回填空值"一致。
 					c.OpenTime = ""
 					changed = append(changed, "open_time")
-				} else if _, err := scheduler.FormatOpenTime(*req.OpenTime); err == nil {
+				} else {
+					// 格式校验已由 B21-04 前置在 Runtime.Update 闭包之外统一拒绝（非法值到不了这里），
+					// 此处仅落合法值。
 					c.OpenTime = *req.OpenTime
 					changed = append(changed, "open_time")
 				}

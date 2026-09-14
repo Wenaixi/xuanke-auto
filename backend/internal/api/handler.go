@@ -393,6 +393,12 @@ const maxTargetsPerAccount = 100
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	if d.allowAccountOverride(r) {
+		// B20-04（第 20 轮）：与 handleElectives/handleState 对齐——管理员会话不带 ?account=
+		// 时取"首个有目标的核心账号"兜底，绝不让目标落入管理员账号孤儿行（B15-M4 已清
+		// "任意串透传"孤儿行形态，此处是同族缺口：未传参时 acct 停在管理员名）。否则
+		// SetTargetsForAccount(admin, ts) 写进 store.targets 无主行（重启 LoadTargetsForAccount
+		// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（B10-04 排序后 admin 可能成"核心账号"）。
+		// 学生账号（非管理员名）会话永远有自己的绑定额定账号，不受影响。
 		if q := r.URL.Query().Get("account"); q != "" {
 			// B15-M4（第 15 轮）：透传目标账号必须真实存在（凭据表有记录）——
 			// 否则 SetTargetsForAccount 把目标写进孤儿行（store.targets 无主数据），
@@ -418,6 +424,13 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			acct = q
+		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
+			// B20-04：无透传时对齐核心账号（与 handleElectives/handleState 同款兜底）
+			acct = targetAccts[0]
+		} else {
+			// 无透传且无任何有目标账号：毫不可写入管理员账号 → 整体拒绝（管理员自己不是学生）
+			writeJSON(w, 1, nil, "请指定要设置目标的学生账号（?account=）")
+			return
 		}
 	}
 	var req TargetsRequest

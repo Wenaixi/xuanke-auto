@@ -1543,3 +1543,51 @@ func TestSetTargetsUnknownAccountDoesNotFabricate(t *testing.T) {
 		t.Fatalf("管理员对不存在的账号设置目标应被拒绝，却返回成功 %v", j)
 	}
 }
+
+// TestAdminSetTargetsWithoutAccountRejects B20-04：管理员会话不带 ?account= 时必须整体拒绝，
+// 绝不让目标落入管理员账号孤儿行——此前 acct 停留在 sessionAccount(r)=管理员名，
+// SetTargetsForAccount(admin, ts) 写进 store.targets 无主行（重启 LoadTargetsForAccount
+// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（B10-04 排序后 admin 可能成"核心账号"）。
+// 契约：目标只该属于学生账号；管理员未指定学生账号（且无任何有目标账号可兜底）→ 拒绝。
+// 与 handleElectives/handleState 的"对齐核心账号"不同——目标是写入操作，无法确定归属时
+// 宁可拒绝绝不张冠李戴；若会话绑定学生账号（非管理员名），不受影响照常写入。
+func TestAdminSetTargetsWithoutAccountRejects(t *testing.T) {
+	d := newTestDeps(t)
+	// 管理员会话（adminName="admin"，会话账号即管理员名）
+	adminTok := d.sessions.CreateAdmin("admin")
+	req := httptest.NewRequest("PUT", "/api/targets",
+		strings.NewReader(`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":0}]}`))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	// 修复前：acct=admin → 校验放行 → SetTargetsForAccount 写孤儿行 → code:0（红灯）；
+	// 修复后：无透传且无有目标账号可对齐 → 明确拒绝 code:1
+	if j["code"].(float64) == 0 {
+		t.Fatalf("管理员不带 account 设置目标应被拒绝（不得写入管理员账号孤儿行），却返回成功 %v", j)
+	}
+	// 持久化验证：store.targets 无 admin 孤儿行
+	ts, err := d.store.LoadTargetsForAccount("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 0 {
+		t.Fatalf("拒绝后 store.targets 不得存在 admin 孤儿行，实际 %d 行", len(ts))
+	}
+}
+
+// TestStudentSetTargetsWithoutAccountOK 学生账号（非管理员名）会话不带 ?account= 时
+// 照常写入自己的目标（B20-04 反向防线：修复只该管管理员，绝不误伤普通学生会话）。
+func TestStudentSetTargetsWithoutAccountOK(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+	code, j := doJSONAuth(t, d.api, "PUT", "/api/targets",
+		`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`, tok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("学生会话设置目标应照常成功: %d %v", code, j)
+	}
+}

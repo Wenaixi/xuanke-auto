@@ -25,20 +25,14 @@ interface Props {
   onGoSelect: () => void
 }
 
-interface ParsedCountdown {
-  days: string
-  hours: string
-  minutes: string
-  seconds: string
-  isExpired: boolean
-}
-
-function parseCountdown(target: string | null): ParsedCountdown {
-  if (!target) {
-    return { days: "00", hours: "00", minutes: "00", seconds: "00", isExpired: true }
-  }
-  const t = new Date(target).getTime()
-  const diff = t - Date.now()
+function useTickingCountdown(target: string | null) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  // 目标变化时回到 "now"（首次挂载 / 窗口开启瞬间）；过期即全 00
+  const diff = target ? new Date(target).getTime() - now : 0
   if (diff <= 0) {
     return { days: "00", hours: "00", minutes: "00", seconds: "00", isExpired: true }
   }
@@ -47,7 +41,6 @@ function parseCountdown(target: string | null): ParsedCountdown {
   const h = Math.floor((totalSeconds % 86400) / 3600)
   const m = Math.floor((totalSeconds % 3600) / 60)
   const s = totalSeconds % 60
-
   const pad = (n: number) => n.toString().padStart(2, "0")
   return {
     days: pad(d),
@@ -93,17 +86,12 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     refetchInterval: () => (state?.window_closed ? 30000 : 3000),
   })
 
-  // 本地每秒刷新倒计时，确保数字秒级平滑跳动
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 1000)
-    return () => clearInterval(timer)
-  }, [])
-
+  // F8-04（第 8 轮）：删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
+  // 日志列表/状态卡片不再每秒全量重建。数组改为 hooks 层的派生常量，杜绝重复计算
   const courses = state?.courses ?? []
   const openTimeStr =
     state?.open_time && state.open_time !== "0001-01-01T00:00:00Z" ? state.open_time : null
-  const cd = parseCountdown(openTimeStr)
+  const cd = useTickingCountdown(openTimeStr)
 
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">

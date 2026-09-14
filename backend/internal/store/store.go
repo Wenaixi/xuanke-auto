@@ -393,9 +393,9 @@ func (s *Store) LoadAllLogs(limit int) ([]LogEntry, error) {
 
 // AdminAccount 账号管理条目：账号名 + 目标 + 已成功课程。
 type AdminAccount struct {
-	Account  string               `json:"account"`
-	Targets  []scheduler.Target   `json:"targets"`
-	Success  []int                `json:"success"`
+	Account string             `json:"account"`
+	Targets []scheduler.Target `json:"targets"`
+	Success []int              `json:"success"`
 }
 
 // ListAdminAccounts 列出全部账号及目标/成功记录（管理员账号管理用）。

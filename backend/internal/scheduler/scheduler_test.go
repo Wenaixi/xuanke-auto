@@ -26,8 +26,8 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 	return nil
 }
 
-func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
-func (f *fakeStore) UpdateIDToken(acct, idToken string) error    { return nil }
+func (f *fakeStore) SaveSuccess(acct string, classID int) error   { return nil }
+func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
 
 // syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
@@ -64,7 +64,7 @@ type fakeClient struct {
 	selectCalls map[int]int
 	relogCalls  int // 重登回调调用次数（测试用）
 	syncOffset  time.Duration
-	syncErr     error // 时钟对齐失败时注入的错误
+	syncErr     error  // 时钟对齐失败时注入的错误
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
 }
 
@@ -174,7 +174,7 @@ type fakeAccts struct {
 	relog         func() // 重登钩子（可编程，记录是否被调用）
 	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
 
-	mu      sync.Mutex   // 保护 removed（测试并发读写）
+	mu      sync.Mutex      // 保护 removed（测试并发读写）
 	removed map[string]bool // 已删除账号（ClientFor 返回不存在）
 }
 
@@ -836,7 +836,6 @@ func TestWindowOpenSubmitsWithoutProbeReset(t *testing.T) {
 	fc.mu.Unlock()
 	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
 }
-
 
 // TestRateLimitBackoff 平台返回“操作频繁”或 429 类风控文案时，自动退避 30s，后续轮次跳过该课程。
 func TestRateLimitBackoff(t *testing.T) {
@@ -1599,5 +1598,3 @@ func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
 		t.Fatal("实时复核网络在飞期间 s.mu 仍被持有——锁外复核修复失效")
 	}
 }
-
-

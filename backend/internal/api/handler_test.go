@@ -32,7 +32,7 @@ type testDeps struct {
 	sched    *scheduler.Scheduler
 	sessions *session.Store
 	accts    *accounts.Manager
-	rt       *runtime.Store // 运行时配置中心（测试重建 handler 用）
+	rt       *runtime.Store               // 运行时配置中心（测试重建 handler 用）
 	dec      func(string) (string, error) // 注入的解密函数（测试断言加密还原用）
 }
 
@@ -1396,5 +1396,70 @@ func TestHandleElectivesSelectAndExit(t *testing.T) {
 	}
 	if !foundPending {
 		t.Fatal("手动退选成功后调度器状态应被恢复为 pending")
+	}
+}
+
+// TestHandleElectivesSelectUnauthorizedRelogin B8-M7：手动报名命中教务 token 失效
+// （ErrUnauthorized）时，接口返回友好提示「正在自动重登」，并实际触发了调度器的
+// maybeRelogin（重登计数/失效标记状态可观测）。此前手动路径把原始报错抛给前端、
+// 永不触发重登（UX 断裂：用户手动点报名被告知失败却无人自愈）。
+func TestHandleElectivesSelectUnauthorizedRelogin(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	// 让 mock 教务报名接口返回"未登录"（token 失效语义 = code=-1）
+	d.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/electives/select"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "currentYearTermList": []any{
+				map[string]any{"schoolYear": 2026, "schoolTerm": 1, "selected": true},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/findElectivesData"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "selectElectivesData": []any{
+				map[string]any{
+					"publishId": 3225, "publishName": "高二年体育", "inDateRange": true,
+					"canSelect": 1, "hasSelected": 0, "electivesClassList": []any{
+						map[string]any{
+							"id": 61115, "course_name": "健美操", "selected_count": 0,
+							"max_count": 36, "can_select": true, "btn_type": 2,
+						},
+					},
+				},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/selectElectivesClass"):
+			// 教务 token 失效语义：统一返回"您未登录"
+			json.NewEncoder(w).Encode(map[string]any{"code": -1, "msg": "您未登录,请刷新页面重新登录"})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "unknown " + r.URL.Path})
+		}
+	})
+
+	// 先填充快照（mock 正常），再手动报名（mock 返回未登录）
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("教务鉴权失效的手动报名应返回业务错误: %d %v", code, j)
+	}
+	msg, _ := j["msg"].(string)
+	if !strings.Contains(msg, "自动重登") {
+		t.Fatalf("失效提示应包含'自动重登'文案，实际: %v", msg)
+	}
+
+	// 断言调度器已异步触发重登：失败计数/重登中标记被置上（maybeRelogin 幂等门控）。
+	// scheduler 的 relogging/tokenValid 为包内私有字段，经公开只读访问器确认：
+	// TokenValidFor 返回 token 失效标记；StateForAccount 的 TokenValid 字段同步反映。
+	wait := time.Now().Add(3 * time.Second)
+	for {
+		st := d.sched.StateForAccount("acct1")
+		if st.TokenValid == false {
+			break // token 已被标记失效（重登进行中）
+		}
+		if time.Now().After(wait) {
+			t.Fatal("手动报名触发 ErrUnauthorized 后调度器应推进自动重登状态")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

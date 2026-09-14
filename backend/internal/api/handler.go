@@ -300,6 +300,15 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	// 4. 调用教务平台真实报名接口
 	msg, err := client.SelectClass(req.ClassID)
 	if err != nil {
+		// B8-M7（第 8 轮）：token 失效时手动报名/退选同样触发自动重登——
+		// 此前手动路径把"未登录"原文直接抛给前端，不会走 maybeRelogin，后台要等
+		// 探测/自动链发现失效才重登（UX 断裂：用户手动点时报错却无人自愈）
+		if errors.Is(err, zhidao.ErrUnauthorized) {
+			d.Sched.MarkTokenValid(acct)
+			d.Sched.MaybeRelogin(acct)
+			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
+			return
+		}
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}
@@ -350,6 +359,13 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	// 3. 调用教务平台真实退选接口
 	msg, err := client.ExitClass(req.ClassID)
 	if err != nil {
+		// B8-M7（第 8 轮）：token 失效路径同样自动重登（与报名路径对称）
+		if errors.Is(err, zhidao.ErrUnauthorized) {
+			d.Sched.MarkTokenValid(acct)
+			d.Sched.MaybeRelogin(acct)
+			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
+			return
+		}
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}

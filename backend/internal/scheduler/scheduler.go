@@ -106,7 +106,7 @@ type AccountClients interface {
 type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
-	UpdateIDToken(acct, idToken string) error // 自动重登后落库新 token
+	UpdateIDToken(acct, idToken string) error     // 自动重登后落库新 token
 	DeleteSuccess(acct string, classID int) error // B8-M2（第 8 轮）：手动退选后删除 success 行
 }
 
@@ -130,17 +130,17 @@ type Scheduler struct {
 	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入（B6-04）
 	lastSubmit       time.Time               // 上次提交时间（submitAll 节流）
 	prevWindowOpened bool                    // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
-	lastData         *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
+	lastData         *zhidao.ElectivesData   // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
 	acctData         map[string]*zhidao.ElectivesData // [账号] 专属课程快照（年级物理隔离）
-	acctDataAt       map[string]time.Time            // [账号] 专属快照时间戳
-	tokenValid       map[string]bool      // [账号] token 失效标记（false=有效，缺失即有效）
-	reloginAt        map[string]time.Time // [账号] 上次重登时间（30s 节流 + 退避计时基准）
-	reloginFail      map[string]int       // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
-	relogging        map[string]bool      // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
-	reloginMu        sync.Mutex           // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
-	reloginResults   chan reloginResult   // 重登结果回传（异步结果在 tick 主循环统一处理）
-	warnedNoTargets  bool                 // M-3：无目标空转警告只打一次
+	acctDataAt       map[string]time.Time             // [账号] 专属快照时间戳
+	tokenValid       map[string]bool                  // [账号] token 失效标记（false=有效，缺失即有效）
+	reloginAt        map[string]time.Time             // [账号] 上次重登时间（30s 节流 + 退避计时基准）
+	reloginFail      map[string]int                   // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
+	relogging        map[string]bool                  // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
+	reloginMu        sync.Mutex                       // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
+	reloginResults   chan reloginResult               // 重登结果回传（异步结果在 tick 主循环统一处理）
+	warnedNoTargets  bool                             // M-3：无目标空转警告只打一次
 
 	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
 	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
@@ -710,7 +710,6 @@ func (s *Scheduler) reloginBackoff(n int) time.Duration {
 func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
-
 	s.mu.Lock()
 	if s.relogging[acct] {
 		s.mu.Unlock()
@@ -800,6 +799,10 @@ func (s *Scheduler) MarkTokenValid(acct string) {
 	delete(s.reloginFail, acct)
 	delete(s.relogging, acct)
 }
+
+// MaybeRelogin 导出别名：供 api 层在手动报名/退选命中 ErrUnauthorized 时触发重登
+// （B8-M7，与自动链路径对称），命名上明确它是幂等门控的。
+func (s *Scheduler) MaybeRelogin(acct string) { s.maybeRelogin(acct) }
 
 // reloginResult 重登结果（异步回传到 tick 主循环统一处理）。
 type reloginResult struct {

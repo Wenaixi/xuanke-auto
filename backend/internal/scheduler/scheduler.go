@@ -142,7 +142,9 @@ type Scheduler struct {
 	warnedNoTargets  bool                 // M-3：无目标空转警告只打一次
 
 	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
-	lastSyncTime   time.Time                    // 上次时钟对齐采样时间
+	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
+	lastSyncStart  time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
+	syncing        bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
 	syncFailStreak int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
 	lastPrewarm    time.Time                    // 上次连接池预热时间
 	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
@@ -235,14 +237,33 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 // maybeSyncClock 定期异步采样教务服务端时间，校准本地时钟偏差。
 // MAJOR-C 回退：同步连续失败 3 次即复位 clockOffset=0（窗口判定回到本地时钟），
 // 绝不带着一个过期偏差长期误判开窗点；单次成功立即清零失败计数，瞬断不累计。
+// B7-M1（第 7 轮）：同步闸门推进改为"同步成功才推进 lastSyncTime"——此前在锁内、
+// 发起异步 goroutine 前就把 lastSyncTime=now：网络抖动导致 SyncServerTime 挂起 >300ms
+// 时（等于上一个 tick 间隔），并发 goroutine 回写会跳过一个完整的 60s 窗口，且
+// 连续失败 3 次复位 clockOffset 后该分钟整段不再校准。现在的推进语义：启动同步
+// 即记录发起时刻（lastSyncStart），只有成功采样才把 lastSyncTime 推到发起时刻——
+// 失败绝不吃闸门、也绝不复位 lastSyncTime，下一轮 tick 立即可重试，校准窗口最多
+// 丢失一个 tick 间隔（300ms）而非整分钟。
 func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Lock()
+	// 快路径（现在被成功推进）：距上次成功采样 ≥1min 才发起新同步
 	if !s.lastSyncTime.IsZero() && now.Sub(s.lastSyncTime) < time.Minute {
 		s.mu.Unlock()
 		return
 	}
-	s.lastSyncTime = now
+	// 防止重入：上一轮同步仍在进行（未落地），本 tick 不叠加
+	if !s.syncing {
+		s.syncing = true
+		s.lastSyncStart = now
+	}
+	inflight := s.syncing
+	if inflight {
+		s.lastSyncStart = now // 上一次在途失败/未落地：把发起时刻往前推，成功后回写
+	}
 	s.mu.Unlock()
+	if !inflight {
+		return
+	}
 
 	if client, ok := s.clients.AnyClient(); ok {
 		if syncer, ok := client.(TimeSyncer); ok {
@@ -250,6 +271,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				offset, err := syncer.SyncServerTime()
 				s.mu.Lock()
 				defer s.mu.Unlock()
+				s.syncing = false
 				if err != nil {
 					s.syncFailStreak++
 					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
@@ -262,6 +284,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				}
 				s.clockOffset = offset
 				s.syncFailStreak = 0
+				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
 		}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type {
   Account,
@@ -48,6 +48,8 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
   // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toast } = useToast()
+  // F8-03（第 8 轮）：删除账号成功后立即失效账号列表查询（否则 10s 轮询前行不消失）
+  const queryClient = useQueryClient()
   // N3：删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -202,6 +204,9 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                         session: sessionToken,
                         body: JSON.stringify({ account: pendingDelete }),
                       })
+                      // F8-03（第 8 轮）：删除成功后立即失效账号列表查询——
+                      // 否则行要等 10s refetch 轮询才消失，用户刚删的账号仍显示在列表中
+                      queryClient.invalidateQueries({ queryKey: ["admin-accounts"] })
                       setPendingDelete(null)
                       toast({ title: "已删除", description: `账号 ${pendingDelete} 已移除` })
                     } catch (e: any) {
@@ -406,7 +411,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const [openTime, setOpenTime] = useState("")
   const [activationOn, setActivationOn] = useState(true)
   const [saving, setSaving] = useState(false)
-  const initializedRef = useRef(false)
 
   const configQuery = useQuery({
     queryKey: ["admin-config", account, sessionToken],
@@ -420,7 +424,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const loaded = configQuery.data
   useEffect(() => {
     if (loaded) {
-      initializedRef.current = true
       setBaseUrl(loaded.vision_base_url)
       setModel(loaded.vision_model)
       setEngine(loaded.captcha_engine || "vision")

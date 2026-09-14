@@ -297,12 +297,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
     void saveNow()
   }
-  // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据。
-  // F7-01（第 7 轮）：自动保存只由"用户改动"驱动——依赖只有 rev（用户点选自增），
-  // publishes 改为经 ref 读取而非依赖。此前 publishes（轮询新对象引用）进依赖导致每次
-  // 轮询都重跑 effect：窗口开启瞬间平台短暂清空 publishes → build() 产出 [] → 防抖 PUT
-  // {"targets":[]} 把服务端/调度器内存目标整体抹除，黄金期 250ms 冲刺空转；
-  // 窗口关闭后目标被永久抹除。发布列表收缩绝不等于用户意图清空目标。
+  // F13-C1（第 13 轮）：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
+  // 防抖 effect 仍只由 rev 驱动（与 F7-01 同款守卫）——轮询/回显/窗口收缩绝不触发保存。
   const publishesRef = useRef<readonly Publish[]>(publishes)
   publishesRef.current = publishes
   useEffect(() => {

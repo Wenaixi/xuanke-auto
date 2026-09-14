@@ -94,27 +94,22 @@ export default function App() {
       if (current === adminName && inAdmin && lostAccount !== adminName) {
         return
       }
-      // F7-05（第 7 轮）：updater 内夹带 saveSessions 副作用属反模式——React 并发下 updater
-      // 可能在非提交阶段被调用（StrictMode 下甚至加倍）。setSessions 的 updater 保持纯
-      // 函数（只算 next）；localStorage 落盘在 setSessions 之后对 clean 快照单独执行。
-      let removedNext = false
-      setSessions((prev) => {
-        if (!prev[lostAccount]) return prev
-        const next = { ...prev }
-        delete next[lostAccount]
-        removedNext = true
-        return next
-      })
-      if (removedNext) {
-        const snap = loadSessions()
-        const next = { ...snap }
-        delete next[lostAccount]
-        saveSessions(next)
-      }
+      // F8-01（第 8 轮）：F7-05 把落盘放进 setSessions updater 之后的 if——但 React 的
+      // updater 不在 setState 调用栈内同步执行（render 阶段才跑），removedNext 求值时
+      // 恒为 false，localStorage 永不更新 → 401 剔除的失效账号刷新后复活。改为与
+      // login/logout 完全一致的"快照→改→落盘→setState"同步链路（幂等，无覆盖丢失），
+      // updater 无副作用的要求通过"根本不写 updater"达成。
+      const snap = loadSessions()
+      if (snap[lostAccount] === undefined) return
+      const next = { ...snap }
+      delete next[lostAccount]
+      saveSessions(next)
+      setSessions(next)
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [current, adminName, inAdmin])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminName, inAdmin])
 
   // 壁纸滚动统一机制（手机 + 电脑同一套，仅放大比例不同）：
   //   背景随下滑“往上走”：滚动页面时图片以 1:1 速度上移（露出图片下方），

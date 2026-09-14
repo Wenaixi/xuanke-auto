@@ -1184,11 +1184,14 @@ func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time)
 	return false
 }
 
+// B16-M1（第 16 轮）：退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
+// spawnChain 用 nowAlignedLocked() 判期，两套时间基（实测相差 ~640ms）边界同一语义。
+// 读侧 isRateLimitedLocked 已用 nowAlignedLocked()（1021 行），写入必须同源，语义自洽。
 func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Duration) {
 	if s.rateLimited[acct] == nil {
 		s.rateLimited[acct] = map[int]time.Time{}
 	}
-	s.rateLimited[acct][classID] = time.Now().Add(d)
+	s.rateLimited[acct][classID] = s.nowAlignedLocked().Add(d)
 }
 
 // classFullInSnapshot 快照人数确认满员（需持锁）。优先匹配该账号专属快照，无快照时回退全局快照。

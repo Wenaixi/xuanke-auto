@@ -234,7 +234,9 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">预选目标课程</span>
-                  <span className="text-white font-mono tabular-nums">{courses.length} / 3 门</span>
+                  {/* F10-06（第 10 轮）：去掉"/ 3 门"——后端上限 100 门且每发布可配多条备选，
+                      3 门是早期"每账号至多 3 门"旧约束残留，硬编码展示与真实能力分叉 */}
+                  <span className="text-white font-mono tabular-nums">{courses.length} 门</span>
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">教务令牌</span>
@@ -278,7 +280,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
               </h2>
             </div>
             <span className="text-xs text-neutral-500 font-mono">
-              3 COURSES MAX
+              {/* F10-06：3 门是旧约束残留，现为动态目标集合，展示名改 TARGETS */}
+              TARGETS
             </span>
           </div>
 
@@ -435,7 +438,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
               {state?.window_opened ? "窗口开放中" : "系统待命中"}
             </span>
             <span className="text-[10px] text-neutral-500 font-mono">
-              {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}/3
+              {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}
             </span>
           </div>
         </div>

@@ -158,22 +158,27 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   )
 
   // 备选目标挑选：同发布下按点击顺序排优先级，取消后后续自动升级
+  // F10-02（第 10 轮）：toast 移出 setSelected 的 updater——React 明令 updater 必须是
+  // 纯函数，StrictMode 会对 updater 双调、并发渲染下也可能丢弃并重放；updater 内调
+  // toast()（内部即另一组件的 setState）会让「已设为首选/已取消目标」重复弹出。
+  // 事件处理器内 selected 恒为最近已提交渲染值（两次独立点击之间有渲染提交），
+  // 先算 next 快照再 setSelected(next) 与函数式更新等价，且无副作用混入。
   const pick = (publishId: number, classItem: ClassItem) => {
-    setSelected((prev) => {
-      const arr = [...(prev[publishId] ?? [])]
-      const idx = arr.findIndex((c) => c.id === classItem.id)
-      if (idx >= 0) {
-        arr.splice(idx, 1)
-        toast({
-          title: "已取消目标",
-          description:
-            arr.length > 0
-              ? `已移出【${classItem.course_name}】，后续备选自动升级（当前首选：${arr[0].course_name}）`
-              : `已移出【${classItem.course_name}】，该发布已无预选目标`,
-          variant: "default",
-        })
-        return { ...prev, [publishId]: arr }
-      }
+    const arr = [...(selected[publishId] ?? [])]
+    const idx = arr.findIndex((c) => c.id === classItem.id)
+    if (idx >= 0) {
+      arr.splice(idx, 1)
+      setSelected({ ...selected, [publishId]: arr })
+      toast({
+        title: "已取消目标",
+        description:
+          arr.length > 0
+            ? `已移出【${classItem.course_name}】，后续备选自动升级（当前首选：${arr[0].course_name}）`
+            : `已移出【${classItem.course_name}】，该发布已无预选目标`,
+        variant: "default",
+      })
+    } else {
+      setSelected({ ...selected, [publishId]: [...arr, classItem] })
       toast({
         title: arr.length === 0 ? "已设为首选" : "已设为备选目标",
         description:
@@ -182,8 +187,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             : `已选中【${classItem.course_name}】为备选 ${arr.length}，可继续添加同发布备选`,
         variant: "default",
       })
-      return { ...prev, [publishId]: [...arr, classItem] }
-    })
+    }
     setRev((r) => r + 1) // 标记选课改动，触发自动保存防抖
   }
 

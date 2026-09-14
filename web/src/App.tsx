@@ -78,14 +78,21 @@ export default function App() {
   // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。
   // 第 4 轮：detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
   // 不到账号时（如本地已注销）跳过，杜绝慢请求乱序返回时按闭包 current 误杀其他账号。
+  // F10-05（第 10 轮）：归属判定一律以 detail.session（发起请求的 Bearer 令牌）为准——
+  // 它才是 401 的真实主体；detail.account（?account= 穿透目标）仅在 session 缺失时兜底，
+  // 且先按"账号名直查"再按"令牌反查"，反查无果直接跳过（管理员代理页停留期间自身会话
+  // 过期：事件带管理员令牌 → 反查出管理员 → 正常剔除回登录页，不再卡死在代理页）。
   useEffect(() => {
     const onUnauthorized = (e: Event) => {
       const detail = (e as CustomEvent)?.detail
-      const lostRaw = detail?.account || current
-      // 反查归属账号：detail.account 可能是账号名也可能是会话令牌（无 ?account= 的请求）
+      const lostRaw = detail?.session || detail?.account || current
+      // 反查归属账号：lostRaw 可能是会话令牌（无 ?account= 的请求）也可能是账号名；
+      // 先按账号名直查 sessions 映射，查不到再按令牌值反查，仍无则跳过（非本机会话）。
       const sessionsSnap = loadSessions()
       const lostAccount =
-        sessionsSnap[lostRaw] === undefined ? Object.keys(sessionsSnap).find((k) => sessionsSnap[k] === lostRaw) : lostRaw
+        sessionsSnap[lostRaw] === undefined
+          ? Object.keys(sessionsSnap).find((k) => sessionsSnap[k] === lostRaw)
+          : lostRaw
       if (!lostAccount) return
       // 被吊销的账号恰是管理员当前代理查看的学生账号时，先退出代理视图——
       // 该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。

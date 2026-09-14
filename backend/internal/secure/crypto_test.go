@@ -1,6 +1,7 @@
 package secure
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -76,5 +77,22 @@ func TestLoadOrCreateKey(t *testing.T) {
 	t.Setenv("XUANKE_MASTER_KEY", "abc")
 	if _, err := LoadOrCreateKey(dbPath); err == nil {
 		t.Fatal("非法主密钥应报错")
+	}
+}
+
+// TestLoadOrCreateKeyRejectsTruncatedFile F17-04（第 17 轮）：损坏/空 .master_key 文件
+// 必须显式报错——此前原样返回任意字节，AES-256-GCM 初始化失败且 store 无对账，
+// 加密凭据静默不可读；更糟的是下一次新部署会用随机密钥覆盖损坏文件，数据库
+// "不可解密"永久损坏。测试：预写 16 字节（非 32）密钥文件，应报错而非返回。
+func TestLoadOrCreateKeyRejectsTruncatedFile(t *testing.T) {
+	t.Setenv("XUANKE_MASTER_KEY", "")
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, ".master_key")
+	if err := os.WriteFile(keyFile, []byte("short-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dir, "test.db") // dbPath 与密钥文件同目录：Dir(dbPath) = dir
+	if _, err := LoadOrCreateKey(dbPath); err == nil {
+		t.Fatal("长度非 32 的 .master_key 文件应报错")
 	}
 }

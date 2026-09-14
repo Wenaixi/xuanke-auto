@@ -857,16 +857,19 @@ func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
 	if st["window_opened"] != false {
 		t.Fatalf("未探测开启时 window_opened 应为 false，实际 %v", st["window_opened"])
 	}
-	// 探测确认窗口开启（模拟调度器探测到 InDateRange）：stats 应显示已开
-	// （这里直接走调度器状态字段；mock server 的 electivesData 默认 inDateRange=false，
-	// 通过 ProbeNow 无法置真——直接操纵调度器状态模拟探测结果）
-	d.sched.ProbeNow() // 填充快照（inDateRange 仍 false）
+	// 探测确认窗口开启（ProbeNow 会填充全局快照/写 lastProbe）：
+	// stats 的 window_opened 必须与调度器实际探测状态（WindowOpened）同源。
+	d.sched.ProbeNow()
+	openedBySched := d.sched.WindowOpened()
 	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("stats 二次读取异常: %d %v", code, j)
 	}
 	st, _ = j["data"].(map[string]any)
-	_ = st
+	if st["window_opened"] != openedBySched {
+		t.Fatalf("stats(window_opened=%v) 与调度器探测状态(%v) 不同源",
+			st["window_opened"], openedBySched)
+	}
 }
 
 // TestElectiveSelectRejectsWindowClosed 手动报名服务端复核（M7）：

@@ -282,6 +282,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // targets=[] 是一个"假清空"，会把已落库目标永久抹除。守卫"发布缺席 + 已有选中
   // 目标"=数据缺席绝非用户意图；只有 selected 全空（用户明确清空全部）才合法 PUT []。
   const publishesMissing = publishesRef.current.length === 0 && selectedCount > 0
+  // F16-01（第 16 轮）：publishesMissing 是渲染期常量——防抖/flush 回调在 400ms 后
+  // 执行时读的是旧闭包值；若这期间发布集合整体重建（开窗瞬间平台清空又恢复，id 全变
+  // 但字段一样），build() 拿最新 publishesRef 联查 selected[旧 publish_id] → 全 undefined
+  // → targets=[] 假清空抹掉后端目标。根因修法：在消费时刻对 build 结果做"每个
+  // publish_id 都属于当前 publishesRef"的全数校验，任一漂移即置脏跳过——比把
+  // publishesMissing 改同步 ref 更短，且连"集合非空但 key 漂移"的偏态一并覆盖。
+  const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
+    const ids = new Set(pubs.map((p) => p.publish_id))
+    return targets.every((t) => ids.has(t.publish_id))
+  }
   const flushTargets = () => {
     if (rev === 0) return
     if (publishesMissing) {
@@ -299,6 +309,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           priority: i,
         })
       })
+    }
+    // F16-01：发布集合在"渲染→回调"窗口内重建（id 漂移）时，targets 的 publish_id 已
+    // 不属于当前发布集 → 这份快照是错位假清空，绝不 PUT，置脏等下次正确联查再落库。
+    if (!targetsUseCurrentPublishes(targets, publishesRef.current)) {
+      dirtyRef.current = true
+      return
     }
     targetRef.current = targets
     if (savingRef.current) {
@@ -338,7 +354,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         dirtyRef.current = true
         return
       }
-      targetRef.current = build()
+      const next = build()
+      // F16-01：防抖消费时刻同样过"发布 id 全数校验"——publishesMissing 是渲染期旧值，只在
+      // load 时一次，防抖回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
+      if (!targetsUseCurrentPublishes(next, publishesRef.current)) {
+        dirtyRef.current = true
+        return
+      }
+      targetRef.current = next
       if (savingRef.current) {
         dirtyRef.current = true // 保存进行中：标记脏，完成后补发
         return

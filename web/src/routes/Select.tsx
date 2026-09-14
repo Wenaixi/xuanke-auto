@@ -359,6 +359,25 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
     void saveNow()
   }
+  // F21-01（第 21 轮）：返回控制台前必须把"在飞 PUT 的补发窗口"关掉——直接 onDone
+  // 会同步卸载：若点击返回时上一条目标保存仍在飞行（savingRef=true）而用户又改动过
+  // 目标，flushTargets 只置脏就返回；飞行 PUT 完成后 finally 发现已卸载（F13-C2 契约）
+  // 跳过补发，最后一批改动静默丢失。修复：先 flush，再等飞行中 PUT 结束（其 finally
+  // 会在卸载前自动补发最新快照），直到保存链静止才真正卸载。守卫拦下的假清空脏块
+  // （publishes 恒空）不在此列——那是 F15/F16/F17 链的刻意安全方向，等无可等，绝不
+  // 强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
+  const handleBack = async () => {
+    for (let i = 0; i < 3; i++) {
+      flushTargets()
+      if (!dirtyRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
+      if (!savingRef.current) continue    // 脏块被守卫拦下（等无可等）：下轮再试即放行
+      const deadline = Date.now() + 21000
+      while (savingRef.current && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 30)) // 等飞行中 PUT 结束，补发链在 finally 自接
+      }
+    }
+    onDone()
+  }
   // F13-C1（第 13 轮）：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
   // 防抖 effect 仍只由 rev 驱动（与 F7-01 同款守卫）——轮询/回显/窗口收缩绝不触发保存。
   const publishesRef = useRef<readonly Publish[]>(publishes)
@@ -461,8 +480,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 // F12-M1（第 12 轮）：返回前先 flush 挂起的防抖/重发目标保存——
                 // 直接 onDone 会卸载组件、400ms 防抖 timer 被清理，最后一次点选
                 // 到返回间隔 <400ms 时整批目标永不 PUT。
-                flushTargets()
-                onDone()
+                // F21-01（第 21 轮）：改为等待保存链静止的异步句柄——flush 后若
+                // 在飞 PUT 完成会经 finally 自动补发（见 handleBack），全部落定才卸载。
+                void handleBack()
               }}
               className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
             >
@@ -576,7 +596,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             tabs.length===0，此前整个主区不渲染且顶部徽章显示 n/0；补空态与徽章分母兜底 */}
         {!isLoading && !isError && tabs.length > 0 && (
           <Tabs
-            value={activeTab ?? String(tabs[0].publish_id)}
+            value={activeTab && tabs.some((t) => String(t.publish_id) === activeTab) ? activeTab : String(tabs[0].publish_id)}
             onValueChange={setActiveTab}
             className="space-y-4"
           >
@@ -816,12 +836,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
         {/* 退选二次确认极简黑白 Modal (复刻官网 layer.confirm("确认退选该选修课?")) */}
         {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
+        {/* F21-03（第 21 轮）：补 Esc 关闭——有 role=dialog 却无 keydown 处理，键盘用户只能
+            Tab 到按钮；与取消按钮同逻辑，退选中（actionLoading）不响应防误关 */}
         {exitModalClass && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
             role="dialog"
             aria-modal="true"
             aria-labelledby="exit-modal-title"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && actionLoading !== exitModalClass.id) {
+                setExitModalClass(null)
+              }
+            }}
           >
             <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">

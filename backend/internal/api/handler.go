@@ -394,6 +394,29 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
+			// B15-M4（第 15 轮）：透传目标账号必须真实存在（凭据表有记录）——
+			// 否则 SetTargetsForAccount 把目标写进孤儿行（store.targets 无主数据），
+			// 重启恢复 LoadTargetsForAccount 读回 → 目标幽灵复活；调度器按 targets 遍历时
+			// 该账号 ClientFor 返回不存在 → 目标永不执行、静默失败。凭据表由所有登录
+			// 路径写（LoginByPassword/issueSession），是"确实登录过"的更强真理源——
+			// 仅用 accounts 表（SaveAccountName 只在完整登录 issueSession 写）会误伤
+			// 用 authenticateDirect 直连建立会话的已登录账号。
+			creds, err := d.Store.LoadCredentials()
+			if err != nil {
+				writeJSON(w, 1, nil, "读取凭据失败: "+err.Error())
+				return
+			}
+			found := false
+			for _, c := range creds {
+				if c.Account == q {
+					found = true
+					break
+				}
+			}
+			if !found {
+				writeJSON(w, 1, nil, "账号不存在，无法设置目标")
+				return
+			}
 			acct = q
 		}
 	}

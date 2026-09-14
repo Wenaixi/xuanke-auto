@@ -1517,3 +1517,29 @@ func TestAdminDeleteRejectsUnnormalizedAccount(t *testing.T) {
 		t.Fatalf("账号名含空白应整体拒绝，现响应为 %v 且 store 中 12345 已被删除", j)
 	}
 }
+
+// TestSetTargetsUnknownAccountDoesNotFabricate B15-M4：管理员对不存在账号设置目标必须拒绝。
+// 此前 handleSetTargets 对 `?account=` 透传的任意字符串都无条件 SetTargetsForAccount——
+// 未知账号名既不在 Store 账号表、也不在 Accounts 客户端注册表，目标会被写进孤儿行
+// （store.targets 无主数据；重启恢复时 LoadTargetsForAccount 读回 → 目标幽灵复活），
+// 同时调度器 startChains 按 targets 遍历时对孤儿账号 ClientFor 返回不存在，目标永不执行。
+// 契约：账号名必须真实存在（Store 已知账号名），否则整体拒绝（未知账号）。
+func TestSetTargetsUnknownAccountDoesNotFabricate(t *testing.T) {
+	d := newTestDeps(t)
+	// 先以正常登录在 store 落一个真实账号（SaveAccountName 由 issueSession 调用，属真实链）
+	adminTok := d.sessions.CreateAdmin("admin")
+	req := httptest.NewRequest("PUT", "/api/targets?account=nonexistent",
+		strings.NewReader(`{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操","priority":0}]}`))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	// 修复前：code:0 目标已保存（孤儿行诞生）→ 红灯；修复后：code:1 拒绝
+	if j["code"].(float64) == 0 {
+		t.Fatalf("管理员对不存在的账号设置目标应被拒绝，却返回成功 %v", j)
+	}
+}

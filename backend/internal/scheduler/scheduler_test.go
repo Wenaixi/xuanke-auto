@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,8 +16,10 @@ import (
 
 // fakeStore 内存日志存储。
 type fakeStore struct {
-	mu  sync.Mutex
-	log []string
+	mu            sync.Mutex
+	log           []string
+	successRows   map[string]int // [acct\x00classID] 已落库的 success 行（B18-M2 测试用）
+	refusedRows   map[string]int // [acct\x00classID] 已落库的 refused 行（B18-M2 测试用）
 }
 
 func (f *fakeStore) AppendLog(acct string, classID int, action, result string, isOK bool) error {
@@ -26,10 +29,26 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 	return nil
 }
 
-func (f *fakeStore) SaveSuccess(acct string, classID int) error   { return nil }
+func (f *fakeStore) SaveSuccess(acct string, classID int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.successRows == nil {
+		f.successRows = map[string]int{}
+	}
+	f.successRows[acct+"\x00"+strconv.Itoa(classID)]++
+	return nil
+}
+func (f *fakeStore) SaveRefused(acct string, classID int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refusedRows == nil {
+		f.refusedRows = map[string]int{}
+	}
+	f.refusedRows[acct+"\x00"+strconv.Itoa(classID)]++
+	return nil
+}
 func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
-func (f *fakeStore) SaveRefused(acct string, classID int) error   { return nil }
 func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
 
 // syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
@@ -69,6 +88,7 @@ type fakeClient struct {
 	syncErr     error  // 时钟对齐失败时注入的错误
 	syncCalls   int    // 时钟对齐发起次数（B9-03 退避测试断言"失败期不反复发起"）
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
+	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，B18-M2 在飞竞态测试用）
 }
 
 // SyncServerTime 可控时钟对齐：返回预置偏差或错误（MAJOR-C 测试用）。
@@ -118,6 +138,12 @@ func (f *fakeClient) SelectClass(classID int) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.selectCalls[classID]++
+	if f.selectBlock != nil {
+		selectBlock := f.selectBlock
+		f.mu.Unlock()
+		selectBlock() // 锁外阻塞：模拟真实网络往返耗时，不持 fakeClient.mu
+		f.mu.Lock()
+	}
 	if err, ok := f.selectErr[classID]; ok && err != nil {
 		return "", err
 	}
@@ -688,6 +714,84 @@ func TestDeletedAccountStopsSubmitting(t *testing.T) {
 	fc.mu.Unlock()
 	if callsAfter != callsBefore {
 		t.Fatalf("删除后不应再提交：删除前 %d 次，删除后 %d 次", callsBefore, callsAfter)
+	}
+}
+
+// TestDeletedAccountInFlightDropsSuccess 验证删除账号与在飞 spawnChain 竞态下，
+// 成功分支必须在写 done/落库前复核账号仍存在——否则 SelectClass 网络往返期间
+// DeleteAccount 已清表，本链返回后 SaveSuccess 把已删账号的 success 行写回，
+// 重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态（B18-M2，第 18 轮）。
+func TestDeletedAccountInFlightDropsSuccess(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开
+	store := &fakeStore{}
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	s := New(fa, store, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 在 SelectClass 期间阻塞，模拟真实网络往返（最长 15s）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	fc.mu.Lock()
+	fc.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	fc.mu.Unlock()
+
+	// 等链进入网络往返（inflight 已置位，SelectClass 卡住）
+	s.mu.Lock()
+	_, inFlight := s.inflight["acct1"][61115]
+	s.mu.Unlock()
+	deadline := time.Now().Add(3 * time.Second)
+	for !inFlight && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+		s.mu.Lock()
+		_, inFlight = s.inflight["acct1"][61115]
+		s.mu.Unlock()
+	}
+	if !inFlight {
+		t.Fatal("自动链应已置位 inflight（SelectClass 网络往返中）")
+	}
+
+	// 链卡在往返期间，管理员删除账号：ClientFor 返回不存在
+	fa.mu.Lock()
+	fa.removed["acct1"] = true
+	fa.mu.Unlock()
+
+	// 放行网络调用 → 链返回成功
+	close(release)
+	select {
+	case <-entered:
+		// 已确认进入 SelectClass（阻塞钩子）后才放行——上面已置位 inflight，
+		// 若未进入钩子说明链执行偏晚；此处放行后等链走完
+	case <-time.After(3 * time.Second):
+		t.Fatal("自动链应已进入 SelectClass")
+	}
+
+	// 等链处理完毕（成功分支已执行）
+	waitDeleted := func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			s.mu.Lock()
+			_, inFlight = s.inflight["acct1"][61115]
+			s.mu.Unlock()
+			if !inFlight {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("在飞链应已完成（inflight 清理）")
+	}
+	waitDeleted()
+
+	// B18-M2 契约：账号已删除，success 行必须 NOT 落库
+	store.mu.Lock()
+	rows := store.successRows["acct1\x0061115"]
+	store.mu.Unlock()
+	if rows != 0 {
+		t.Fatalf("删除账号与在飞链竞态下不得落库 success 行（重启后假成功），实际 %d 行", rows)
 	}
 }
 
@@ -1510,6 +1614,15 @@ func TestCheckClassSelectable(t *testing.T) {
 	if _, ok := s.CheckClassSelectable("acct1", 99999); !ok {
 		t.Fatal("不在快照中的课程应放行（由平台返回具体错误）")
 	}
+	// B18-m1（第 18 轮）：快照超过 TTL 过期后复核必须放行——
+	// 旧快照可能已失真的名额/窗口数据绝不拦截用户真实操作（放行由平台最终把关，
+	// 与 ElectivesSnapshotFor 的过期回退语义对齐）。
+	s.mu.Lock()
+	s.acctDataAt["acct1"] = time.Now().Add(-(snapshotTTL + time.Second))
+	s.mu.Unlock()
+	if reason, ok := s.CheckClassSelectable("acct1", 61116); !ok {
+		t.Fatal("快照过期后应放行（不拿旧数据拦真实操作），被拒: " + reason)
+	}
 }
 
 func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
@@ -1736,44 +1849,45 @@ func TestReloginFailureKeepsBackoff(t *testing.T) {
 	}
 }
 
-// TestWindowClosedSelectStopsBombing 窗口关闭后（SelectClass 返回"已结束/无效"错误）的
-// spawnChain 完整路径：课程第一次命中 isWindowClosedError 记入 full，之后每 tick 不得
-// 再次调用 SelectClass（C-3 防轰炸主路径回归）。
-// B18-M1（第 18 轮）：真实平台关闭文案是"无效的课程ID"（不含"关闭/未开启/报名时间/
-// 已结束"任一匹配关键词）——错误文案匹配不中 → 不记 full → 复核路径 countList 空报
-// "课程无人数数据" → 永续轰炸。根因修复在 tick 守卫（WindowClosed 状态挂起提交），
-// 本测试用注入"真实关闭文案"验证整链在窗口关闭后停止轰炸。
+// TestWindowClosedSelectStopsBombing 窗口已确认关闭时（state.WindowClosed=true）tick 守卫
+// 直接挂起提交，SelectClass 0 次调用（C-3 防轰炸主路径回归）。
+// B18-M1（第 18 轮）：真实平台关闭文案"无效的课程ID"不在 isWindowClosedError 匹配集合，
+// 旧实现只靠文案记 full 挡不住 → 复核路径 countList 空报"课程无人数数据" → 永续轰炸；
+// 根因修复在 tick 守卫（WindowClosed 状态挂起提交，与 B11-A1 零值守卫并列）。
 func TestWindowClosedSelectStopsBombing(t *testing.T) {
-	fc := newFakeClient(true)
-	// B18-M1（第 18 轮）：改用平台真实关闭文案"无效的课程ID"——旧文案"已结束"命中
-	// isWindowClosedError 匹配集合，测不到真实形态（防轰炸契约缺口被掩盖）。
-	fc.selectErr[61115] = errors.New("无效的课程ID")
+	// 窗口关闭特征：空快照（平台关闭后 findElectivesData 返回空 publishes）+ 曾开过窗
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil
+	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
-	// B18-M1：预置"窗口已确认关闭"状态——真实时序中平台窗口关闭后探测返回空快照 +
-	// 开放时间已过 → state.WindowClosed=true；修复守卫挂起提交。测试直接置位模拟关闭。
+	// 预置"开过窗 + 已确认关闭"：真实时序=平台窗口关闭后探测返回空快照 + 开放时间已过
+	// → state.WindowClosed=true；首个 tick 的 probe() 会按真实判据维持该值（prevOpened 且
+	// 空发布，见 probe 的 WindowClosed 计算）。随后 tick 守卫命中 WindowClosed 挂起提交。
 	s.mu.Lock()
+	s.state.WindowOpened = true // B18-M1 语义自洽：关闭以"至少开过窗"为前提
 	s.state.WindowClosed = true
 	s.mu.Unlock()
 	s.Start()
 	defer s.Stop()
-
-	// 首轮：SelectClass 调用 ≥1 次并记入 full
+	// B18-M1（第 18 轮）：窗口已关闭 → tick 守卫直接挂起提交，SelectClass 0 次调用
+	// （比"首轮执行一次再靠 full 挡"更彻底）。
 	time.Sleep(80 * time.Millisecond)
 	fc.mu.Lock()
 	calls := fc.selectCalls[61115]
 	fc.mu.Unlock()
-	if calls < 1 {
-		t.Fatalf("首轮应至少调用 1 次 SelectClass，实际 %d", calls)
+	if calls != 0 {
+		t.Fatalf("窗口已关闭应挂起提交（0 次 SelectClass），实际 %d", calls)
 	}
 
-	// 再等 300ms（多个 tick）：full 已记入，后续必须 0 次新增调用
+	// 再等 300ms（多个 tick）：仍必须 0 次调用
 	time.Sleep(300 * time.Millisecond)
 	fc.mu.Lock()
 	callsAfter := fc.selectCalls[61115]
 	fc.mu.Unlock()
-	if callsAfter > calls {
-		t.Fatalf("窗口关闭后 full 应阻止后续提交，调用从 %d 增长到 %d——防轰炸失效", calls, callsAfter)
+	if callsAfter != 0 {
+		t.Fatalf("窗口已关闭应持续挂起提交（0 次 SelectClass），调用增长到 %d", callsAfter)
 	}
 }
 

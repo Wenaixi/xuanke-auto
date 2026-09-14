@@ -1110,6 +1110,17 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Lock()
 			delete(s.inflight[acct], t.ClassID)
 			if err == nil {
+				// B18-M2（第 18 轮）：写成功/落库前复核账号仍存在——管理员 DeleteAccount
+				// （先清 credentials/accounts/targets/success 表 + Accounts.Remove）与在飞
+				// spawnChain 网络往返（SelectClass 最长 15s）竞态时，本链在删除完成后才返回
+				// 成功，若不复核会 SaveSuccess/SaveRefused 把已删账号的 success 行写回，
+				// 重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态。重登完成路径已有
+				// 同款 ClientFor 复核（891 行），提交链成功分支此前漏了同一防线。
+				if _, ok := s.clients.ClientFor(acct); !ok {
+					log.Printf("[scheduler] 账号 %s 已被删除，放弃写成功落库", acct)
+					s.mu.Unlock()
+					return
+				}
 				if s.done[acct] == nil {
 					s.done[acct] = map[int]bool{}
 				}
@@ -1366,18 +1377,25 @@ func FormatOpenTime(s string) (time.Time, error) {
 // CheckClassSelectable 手动报名前的服务端复核（评审 M7）：
 // 基于该账号最近快照判定课程是否可报名——课程所在发布窗口未开放或课程已满员时
 // 提前拒绝并返回友好原因，避免无谓打教务平台拿生硬错误码。
-// 快照缺失（从未探测/过期）或课程不在快照中（无法判定）时放行，由平台最终把关。
+// 快照缺失（从未探测）或课程不在快照中（无法判定）时放行，由平台最终把关。
+// B18-m1（第 18 轮）：过期快照（超过 snapshotTTL 未刷新）一律按"无快照"放行——
+// 快照过期的判定依据是 acctDataAt 时间戳（与 ElectivesSnapshotFor 同源），
+// 不使用 acct 外的全局 lastData 兜底（跨年级帧可为任意账号，无参考价值）。
+// 过期快照放行语义：不拿旧数据拦用户真实操作（名额/窗口可能已变化），交给平台把关，
+// 与 ElectivesSnapshotFor 的过期快照回退语义对齐。
 func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason string, selectable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var data *zhidao.ElectivesData
+	var fresh bool
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			data = d
+			fresh = s.acctDataAt[acct] != (time.Time{}) && time.Since(s.acctDataAt[acct]) <= snapshotTTL
 		}
 	}
-	if data == nil {
-		return "", true // 无快照：无法复核，放行交给平台
+	if data == nil || !fresh {
+		return "", true // 无快照或已过期：无法复核，放行交给平台
 	}
 	for _, p := range data.Publishes {
 		for _, c := range p.Classes {

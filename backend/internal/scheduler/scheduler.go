@@ -249,6 +249,12 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 // 丢失一个 tick 间隔（300ms）而非整分钟。
 func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Lock()
+	// 无账号注册表（空库/账号全删）：直接放弃——AnyClient 拿不到客户端，同步无从发起。
+	// 防御 F12-B1：clients 为 nil 时若继续走 `s.clients.AnyClient()` 会空指针 panic。
+	if s.clients == nil {
+		s.mu.Unlock()
+		return
+	}
 	// 快路径（现在被成功推进）：距上次成功采样 ≥1min 才发起新同步
 	if !s.lastSyncTime.IsZero() && now.Sub(s.lastSyncTime) < time.Minute {
 		s.mu.Unlock()
@@ -278,8 +284,10 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.lastSyncStart = now
 	s.mu.Unlock()
 
-	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime（见 B7-M1）
-
+	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime（见 B7-M1）。
+	// F12-B1（第 12 轮）：先确认有可同步客户端再置位——此前无账号（空库/账号全删）或
+	// 客户端不支持同步时，syncing 被置 true 后无人复位，后续每个 tick 在 `if s.syncing`
+	// 处直接返回，时钟校准从启动起永久休眠、clockOffset 恒 0 且无任何错误日志。
 	if client, ok := s.clients.AnyClient(); ok {
 		if syncer, ok := client.(TimeSyncer); ok {
 			go func() {
@@ -304,8 +312,16 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
+			return
 		}
 	}
+	// 无客户端或不支持时钟同步：本次不发起，复位在途标记，等账号就绪后再同步。
+	// 此前此处直接 return，syncing 被置 true 后无人复位——空库部署的首个 300ms tick
+	// 就让时钟校准链路永久休眠（F12-B1 根因）。
+	s.mu.Lock()
+	s.syncing = false
+	s.lastSyncStart = time.Time{}
+	s.mu.Unlock()
 }
 
 // SetOpenTimeFn 设置运行时打开时间读取器（管理员热改配置后立即生效；传入 nil 恢复启动值）。

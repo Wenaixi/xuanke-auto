@@ -1085,6 +1085,41 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 	}
 }
 
+// TestClockSyncNoClientResetsSyncing F12-B1：无已登录账号（空库/账号全删）或客户端
+// 不支持时钟同步时，syncing 必须被复位——此前 syncing 置 true 后无人复位（复位只在
+// goroutine 内），后续每个 tick 在 `if s.syncing` 处直接返回，时钟校准从启动起永久休眠、
+// clockOffset 恒 0 且无任何错误日志。空库部署首个 300ms tick 即触发。
+func TestClockSyncNoClientResetsSyncing(t *testing.T) {
+	// 1. 无账号（clients=nil，AnyClient 返回 false）：syncing 应被复位且不发起同步
+	s := New(nil, &fakeStore{}, time.Now(), time.Second)
+	s.maybeSyncClock(time.Now())
+	s.mu.Lock()
+	busy := s.syncing
+	s.mu.Unlock()
+	if busy {
+		t.Fatal("无账号时 syncing 应被复位（否则时钟校准永久休眠）")
+	}
+
+	// 2. 账号就绪后再发起：此时应真正发起同步并成功落地（校准时序不受前次影响）
+	fc := newFakeClient(false)
+	fc.syncOffset = 5 * time.Second
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+	s2.maybeSyncClock(time.Now())
+	wait := time.Now().Add(5 * time.Second)
+	for {
+		s2.mu.Lock()
+		off := s2.clockOffset
+		s2.mu.Unlock()
+		if off == 5*time.Second {
+			break
+		}
+		if time.Now().After(wait) {
+			t.Fatal("账号就绪后应能发起并落地时钟同步")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestClockSyncSuccessClearsFailStreak 验证同步成功即清零连续失败计数（MAJOR-C）：
 // 网络抖动 1 次后恢复，不允许一次瞬断就累计成回退。
 func TestClockSyncSuccessClearsFailStreak(t *testing.T) {

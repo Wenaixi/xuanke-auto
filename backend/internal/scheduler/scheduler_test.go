@@ -1630,6 +1630,83 @@ func TestCheckClassSelectable(t *testing.T) {
 	}
 }
 
+// TestDeletedAccountManualInFlightDropsState 验证删除账号与在飞【手动报名/退选】竞态下，
+// MarkDone/RemoveDone 成功分支同样必须在写 done/落库前复核账号仍存在——否则 SelectClass/
+// ExitClass 网络往返（最长 15s）期间管理员 DeleteAccount 已清库表 + Accounts.Remove，
+// 本请求返回后（B20-01，第 20 轮）会把已删账号的 success/refused 行写回：
+// 重启后重新登录分别被 RestoreDone 恢复成"已报名成功"假状态 / RestoreRefused 恢复成
+// "已退选"令自动引擎永久跳过该课。B18-M2 只修了自动链，手动路径同样竞态整链开放。
+func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开
+	store := &fakeStore{}
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	s := New(fa, store, time.Now(), time.Hour)
+
+	// 预置目标与成功课程（模拟真实历史：done 已有该课，手动退选路径才能触发 RemoveDone）
+	classID := 61115
+	courseName := "健美操"
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
+	err := s.MarkDone("acct1", classID, courseName, "手动报名成功")
+	if err != nil {
+		t.Fatalf("预置 MarkDone 失败: %v", err)
+	}
+
+	// 删除账号：ClientFor 返回不存在
+	fa.mu.Lock()
+	fa.removed["acct1"] = true
+	fa.mu.Unlock()
+
+	// 账号已删除后到账手动报名成功 → MarkDone 不得写任何内存状态与库行
+	err = s.MarkDone("acct1", classID, courseName, "手动报名成功")
+	if err != nil {
+		t.Fatalf("MarkDone 不应报错（静默放弃落库）: %v", err)
+	}
+	store.mu.Lock()
+	if rows := store.successRows["acct1\x0061115"]; rows != 1 {
+		// 预置那次成功 1 行；删除后再次 MarkDone 必须不再 +1
+		store.mu.Unlock()
+		t.Fatalf("账号已删后手动报名成功不得再落库 success 行（重启假成功），实际 %d 行", rows)
+	}
+	store.mu.Unlock()
+	s.mu.Lock()
+	_, inDone := s.done["acct1"][classID]
+	idx := s.statusIndexLocked("acct1", classID)
+	var status string
+	if idx >= 0 {
+		status = s.state.Courses[idx].Status
+	}
+	s.mu.Unlock()
+	if !inDone {
+		t.Fatal("预置的成功课程仍应在 done（删除后追加标记被拒绝而非清空既有历史）")
+	}
+	if status != "success" {
+		t.Fatalf("预置的成功状态不应被删除后到账的 MarkDone 破坏，实际 %q", status)
+	}
+
+	// 删除后到账手动退选 → RemoveDone 不得落库 refused 行
+	err = s.RemoveDone("acct1", classID)
+	if err != nil {
+		t.Fatalf("RemoveDone 不应报错（静默放弃落库）: %v", err)
+	}
+	store.mu.Lock()
+	if rows := store.refusedRows["acct1\x0061115"]; rows != 0 {
+		store.mu.Unlock()
+		t.Fatalf("账号已删后手动退选成功不得落库 refused 行（重启后自动引擎永久跳过），实际 %d 行", rows)
+	}
+	store.mu.Unlock()
+	s.mu.Lock()
+	_, inRefused := s.refused["acct1"][classID]
+	_, dropped := s.done["acct1"][classID]
+	s.mu.Unlock()
+	if inRefused {
+		t.Fatal("账号已删后不应写 refused 内存态")
+	}
+	if !dropped {
+		t.Fatal("账号已删后不应改动预置的 done 既有历史")
+	}
+}
+
+// TestSchedulerManualSyncAndSubmitMutex 验证手动报名、退选状态协同与提交排他互斥锁 (Task 3)。
 func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	fs := &fakeStore{}
 	s := New(&fakeAccts{}, fs, time.Now(), time.Hour)

@@ -1518,9 +1518,19 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 
 // MarkDone 手动或外部操作成功后同步调度器状态：记入 done、清 full 与退避、置 success 状态并持久化。
 // 同步清理 inflight 位：手动报名成功前占用的提交锁位必须释放，否则下个自动链/手动操作永久 409。
+// B20-01（第 20 轮）：与 spawnChain 成功分支同款防线——管理员 DeleteAccount（先清凭据/库行 +
+// Accounts.Remove）与在飞手动报名（SelectClass 最长 15s）竞态时，删除完成后本请求才返回成功，
+// 若不复核会把已删账号的 success 行写回，重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态
+// （B18-M2 在自动链已根治，手动路径同样竞态整链开放）。账号已删则静默放弃落库，绝不写回。
 func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// B20-01：删除账号与在飞手动报名竞态防线——账号不再存在于客户端注册表即视为已删，
+	// 放弃全部状态写入（真实平台报名已发生，但账号已删，写回只会制造幽灵 success 行）。
+	if _, ok := s.clients.ClientFor(acct); !ok {
+		log.Printf("[scheduler] 账号 %s 已被删除，放弃手动报名落库", acct)
+		return nil
+	}
 	if s.done[acct] == nil {
 		s.done[acct] = make(map[int]bool)
 	}
@@ -1569,6 +1579,13 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// B20-01（第 20 轮）：与 MarkDone 同款防线——账号已删时手动退选成功同样不能写回
+	// refused 行（DeleteAccount 全量清理 + PurgeAccount 移除后的幽灵 refused 行会让
+	// 重新登录的账号被 RestoreRefused 恢复成"已退选"，自动引擎永久跳过该课）。
+	if _, ok := s.clients.ClientFor(acct); !ok {
+		log.Printf("[scheduler] 账号 %s 已被删除，放弃手动退选落库", acct)
+		return nil
+	}
 	if s.done[acct] != nil {
 		delete(s.done[acct], classID)
 	}

@@ -62,9 +62,10 @@ type fakeClient struct {
 	err         error
 	selectErr   map[int]error
 	selectCalls map[int]int
-	relogCalls  int // 重登回调调用次数（测试用）
+	relogCalls  int          // 重登回调调用次数（测试用）
 	syncOffset  time.Duration
 	syncErr     error  // 时钟对齐失败时注入的错误
+	syncCalls   int    // 时钟对齐发起次数（B9-03 退避测试断言"失败期不反复发起"）
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
 }
 
@@ -72,6 +73,7 @@ type fakeClient struct {
 func (f *fakeClient) SyncServerTime() (time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.syncCalls++
 	if f.syncErr != nil {
 		return 0, f.syncErr
 	}
@@ -914,6 +916,53 @@ func TestServerClockAlignment(t *testing.T) {
 	aligned := s.nowAligned()
 	if diff := aligned.Sub(time.Now()); diff < 4*time.Second || diff > 6*time.Second {
 		t.Fatalf("校准后时间应快约 5 秒, 实际差值: %v", diff)
+	}
+}
+
+// TestClockSyncNoRetryWithinBackoff B9-03：时钟对齐失败后必须有失败退避——
+// 失败期间每个 tick 绝不再重复发起 SyncServerTime（此前 lastSyncTime 恒零时
+// 快路径被绕过、每 300ms tick 都裸打同步，网络故障期轰炸）。
+func TestClockSyncNoRetryWithinBackoff(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.syncErr = errors.New("网络故障")
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+
+	// 1. 首发失败并等落地（syncing 复位）
+	s.maybeSyncClock(time.Now())
+	wait := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.syncing
+		s.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(wait) {
+			t.Fatal("首次失败同步未在 3 秒内落地")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	fc.mu.Lock()
+	calls := fc.syncCalls
+	fc.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("失败同步应只发起 1 次，实际 %d——退避期不得裸打同步", calls)
+	}
+
+	// 2. 仍处失败退避窗：模拟后续多个 tick（每拍 50ms、睡 50ms 等上一拍落地，
+	//    与真实 tick 节奏同构）。无失败退避时每拍必然再发起一次同步（计数涨到 6）；
+	//    有退避时全部被 30s 窗口拦下，计数必须保持 1。
+	for i := 0; i < 5; i++ {
+		s.maybeSyncClock(time.Now().Add(50 * time.Millisecond))
+		time.Sleep(50 * time.Millisecond)
+	}
+	fc.mu.Lock()
+	calls = fc.syncCalls
+	fc.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("失败退避期内后续 tick 不得再发起同步，实际累计 %d 次", calls)
 	}
 }
 

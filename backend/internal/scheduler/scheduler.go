@@ -145,6 +145,7 @@ type Scheduler struct {
 	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
 	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
 	lastSyncStart  time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
+	lastSyncFailAt time.Time                    // 上次同步失败时刻（B9-03 失败退避计时基准）
 	syncing        bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
 	syncFailStreak int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
 	lastPrewarm    time.Time                    // 上次连接池预热时间
@@ -252,6 +253,17 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 		s.mu.Unlock()
 		return
 	}
+	// B9-03（第 9 轮）：失败退避——上次同步失败后 30s 内不得再发起。
+	// 此前无失败退避：lastSyncTime 只在成功时推进，一旦同步失败（网络故障/平台拒绝）
+	// 该闸门永久"从未成功"，每个 tick（300ms）都试图发起、每次都被 syncing 挡下后
+	// 立即重新置位，SyncServerTime goroutine 以 300ms 节奏轰炸，绕开登录频率闸门、
+	// 堆积在途请求、烧 token 与平台限流预算。现在失败落地即记录 lastSyncFailAt，
+	// 30s 窗口内 maybeSyncClock 直接返回；窗口过后才允许下一次尝试，
+	// 与 relogin 的 30s 基础节流对齐——失败期时钟校准整体退化为按分钟重试。
+	if !s.lastSyncFailAt.IsZero() && now.Sub(s.lastSyncFailAt) < 30*time.Second {
+		s.mu.Unlock()
+		return
+	}
 	// 防重入：上一轮同步仍在进行（未落地），本 tick 不叠加。
 	// B8-M1（第 8 轮）：此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
 	// 中 syncing 恒被置 true、inflight 恒 true——死代码，每个 tick（300ms）在同步失败期
@@ -276,6 +288,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				s.syncing = false
 				if err != nil {
 					s.syncFailStreak++
+					s.lastSyncFailAt = time.Now() // B9-03：失败落地即记录，退避 30s
 					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
 					if s.syncFailStreak >= 3 {
 						s.clockOffset = 0
@@ -286,6 +299,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				}
 				s.clockOffset = offset
 				s.syncFailStreak = 0
+				s.lastSyncFailAt = time.Time{} // B9-03：成功即清失败退避（瞬断不拖延后续校准）
 				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()

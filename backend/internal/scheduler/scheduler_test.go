@@ -955,15 +955,20 @@ func TestProbeIntervalZeroOpenTime(t *testing.T) {
 // 杜绝窗口关闭后仍 2 秒高频盯守平台（浪费请求 + 日志刷屏）；
 // 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。
 func TestProbeIntervalWindowClosed(t *testing.T) {
-	// 已过开放时间 + 空快照 → WindowClosed=true → 降回 30s
+	// 已过开放时间 + 曾开过窗 + 空快照 → WindowClosed=true → 降回 30s
+	// B18-M1（第 18 轮）：关闭判定加入"至少开过窗"前提——未开过窗即空快照（学期无发布/
+	// 平台异常）不是"窗口已关闭"；测试预置 WindowOpened=true 模拟"开过再关"的真实形态。
 	fc := newFakeClient(false)
 	fc.mu.Lock()
 	fc.data.Publishes = nil
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
+	s.mu.Lock()
+	s.state.WindowOpened = true // 开过窗（B18-M1 前提）
+	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
-		t.Fatal("空快照应标记窗口关闭")
+		t.Fatal("空快照 + 曾开过窗应标记窗口关闭")
 	}
 	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
 		t.Fatalf("窗口关闭后应 30s 探测，实际 %v", got)
@@ -971,9 +976,22 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 
 	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（管理员热改新一轮的防守场景）
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
+	s2.mu.Lock()
+	s2.state.WindowOpened = true // B18-M1：开过窗
+	s2.mu.Unlock()
 	s2.probe() // 空快照 → WindowClosed=true
 	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
 		t.Fatalf("临门期应 2s 盯守（不受已关闭标记影响），实际 %v", got)
+	}
+
+	// B18-M1 新增反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"窗口已关闭"
+	s3 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s3.probe()
+	if s3.WindowClosed() {
+		t.Fatal("从未开过窗的空快照不应标记窗口已关闭（否则还没开窗就会挂起提交）")
+	}
+	if got := s3.probeIntervalFor(time.Now()); got != probeIntervalNear {
+		t.Fatalf("未开过窗的空快照应符合临门期 2s 盯守，实际 %v", got)
 	}
 }
 
@@ -1202,16 +1220,21 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 // TestWindowClosedState 选课窗口关闭（探测返回空快照）时，状态应暴露 window_closed=true
 // 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
 func TestWindowClosedState(t *testing.T) {
-	// 第 3 轮 C-3：空快照 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
+	// 第 3 轮 C-3：空快照 + 曾开过窗 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
+	// B18-M1（第 18 轮）：判定加入"至少开过窗"前提——未开过窗即空快照不算"已关闭"，
+	// 防止还没开窗就把提交挂起（开窗瞬间黄金期全停摆）；测试预置 WindowOpened=true。
 	fcEmpty := newFakeClient(false)
 	fcEmpty.mu.Lock()
 	fcEmpty.data.Publishes = nil
 	fcEmpty.mu.Unlock()
 	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.mu.Lock()
+	s.state.WindowOpened = true // B18-M1：开过窗
+	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
-		t.Fatal("空快照 + 开放时间已过探测后 window_closed 应为 true")
+		t.Fatal("空快照 + 曾开过窗 + 开放时间已过探测后 window_closed 应为 true")
 	}
 
 	// 正常数据但窗口未开：window_closed 必须为 false
@@ -1221,6 +1244,14 @@ func TestWindowClosedState(t *testing.T) {
 	s2.probe()
 	if s2.StateForAccount("acct1").WindowClosed {
 		t.Fatal("正常未开窗探测后 window_closed 应为 false")
+	}
+
+	// B18-M1 反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"已关闭"
+	s3 := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s3.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s3.probe()
+	if s3.StateForAccount("acct1").WindowClosed {
+		t.Fatal("从未开过窗的空快照不应标记 window_closed=true（还没开窗就挂起提交）")
 	}
 }
 
@@ -1596,13 +1627,16 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	fc.mu.Lock()
 	fc.data.Publishes = nil // 窗口关闭特征：空快照
 	fc.mu.Unlock()
-	// 开放时间已过 1 小时：符合"开放时间已过 + 空快照"的关闭判定
+	// 开放时间已过 1 小时：符合"开放时间已过 + 曾开过窗 + 空快照"的关闭判定
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.mu.Lock()
+	s.state.WindowOpened = true // B18-M1：开过窗
+	s.mu.Unlock()
 	s.probe() // 探测落地 WindowClosed 状态
 
 	if !s.WindowClosed() {
-		t.Fatal("开放时间已过 + 空快照应判定窗口已关闭")
+		t.Fatal("开放时间已过 + 曾开过窗 + 空快照应判定窗口已关闭")
 	}
 	got := s.probeIntervalFor(time.Now())
 	if got != probeIntervalFar {
@@ -1705,12 +1739,22 @@ func TestReloginFailureKeepsBackoff(t *testing.T) {
 // TestWindowClosedSelectStopsBombing 窗口关闭后（SelectClass 返回"已结束/无效"错误）的
 // spawnChain 完整路径：课程第一次命中 isWindowClosedError 记入 full，之后每 tick 不得
 // 再次调用 SelectClass（C-3 防轰炸主路径回归）。
+// B18-M1（第 18 轮）：真实平台关闭文案是"无效的课程ID"（不含"关闭/未开启/报名时间/
+// 已结束"任一匹配关键词）——错误文案匹配不中 → 不记 full → 复核路径 countList 空报
+// "课程无人数数据" → 永续轰炸。根因修复在 tick 守卫（WindowClosed 状态挂起提交），
+// 本测试用注入"真实关闭文案"验证整链在窗口关闭后停止轰炸。
 func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	fc := newFakeClient(true)
-	// 窗口关闭特征错误：平台对已关闭窗口的报名返回 code=1 "该课程已结束"
-	fc.selectErr[61115] = errors.New("该课程已结束，无法报名")
+	// B18-M1（第 18 轮）：改用平台真实关闭文案"无效的课程ID"——旧文案"已结束"命中
+	// isWindowClosedError 匹配集合，测不到真实形态（防轰炸契约缺口被掩盖）。
+	fc.selectErr[61115] = errors.New("无效的课程ID")
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	// B18-M1：预置"窗口已确认关闭"状态——真实时序中平台窗口关闭后探测返回空快照 +
+	// 开放时间已过 → state.WindowClosed=true；修复守卫挂起提交。测试直接置位模拟关闭。
+	s.mu.Lock()
+	s.state.WindowClosed = true
+	s.mu.Unlock()
 	s.Start()
 	defer s.Stop()
 

@@ -713,6 +713,16 @@ func (s *Scheduler) tick() {
 	if !opened && !now.After(open) {
 		return
 	}
+	// B18-M1（第 18 轮）：窗口已确认关闭（探测到空快照且开放时间已过，state.WindowClosed）
+	// 时挂起提交——平台对关闭后的报名返回 code=1"无效的课程ID"（真实关闭文案），不在
+	// isWindowClosedError 的"关闭/未开启/报名时间/已结束"匹配集合内 → 不记 full → 走实时
+	// 复核 → 窗口关闭后 countList 空 → IsClassFull 报"课程无人数数据" → 下个 tick 重打
+	// SelectClass，对未成功目标形成每 1s（黄金期 250ms）永续轰炸（防轰炸 C-3 契约缺口）。
+	// 以探测状态而非脆弱错误文案作为关闭判定：WindowClosed 已确认即挂起提交，与 B11-A1
+	// open 零值守卫并列，黄金期（开窗瞬间 WindowClosed=false）绝不影响。
+	if s.WindowClosed() {
+		return
+	}
 	// 提交重试闸门：开窗黄金期 250ms 高频冲刺，平时 1 秒
 	s.mu.Lock()
 	lastSubmit := s.lastSubmit
@@ -797,13 +807,20 @@ func (s *Scheduler) probe() {
 			break
 		}
 	}
+	// B18-M1（第 18 轮）：先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
+	// "至少开过窗"作为前提（见下），若在覆写后读取 prevOpened 拿到的恒是本次 opened 值。
+	prevOpened := s.state.WindowOpened
 	s.state.WindowOpened = opened
 	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
 	// 且开放时间已过 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
 	// C-3（第 3 轮）：去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
 	// 若只认"从未开过窗"则开过再关后 WindowClosed 恒 false，probeIntervalFor 的
 	// "开放时间已过 + WindowClosed → 降回 30s"分支永不命中，窗口关闭后仍 2s 高频探测。
-	s.state.WindowClosed = !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
+	// B18-M1（第 18 轮）：只在"至少开过窗"（opened 曾经为 true）后才标记关闭——
+	// 否则未开窗即空快照（学期无发布/平台异常）会误标已关闭，tick 提交守卫按
+	// WindowClosed 挂起提交，把"还没开窗待开"误停成"永不提交"（开窗瞬间探测推进、
+	// 黄金期全停摆）。已开过窗再关 = 窗口关闭的实质语义，未开过不算关闭。
+	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
 	// B10-05：prevWindowOpened 是写而不读的死字段（C-3 已去掉 !prevWindowOpened 条件），
 	// 删除避免误导后续维护者以为还有清提交闸门的路径。
 	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)

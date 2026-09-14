@@ -1013,6 +1013,17 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
+		// B21-03（第 21 轮）：账号已删竞态防线——B18-M2/B20-01 只护自动链/手动路径，
+		// 重登成功分支仍缺同款复核：管理员 DeleteAccount（清凭据表+Accounts.Remove）与
+		// 在途 Login（Vision 最坏 2 分钟）竞态，成功分支会无条件写回 tokenValid/reloginAt
+		// 内存态 + UpdateIDToken 落库把已删账号新 token 写回 credentials 表（重启后 Restore
+		// 重建客户端、凭据幽灵复活）。先复核客户端仍存在：已删则整个成功分支（含内存写与
+		// 落库）静默放弃，只清 relogging 标记。
+		if _, ok := s.clients.ClientFor(acct); !ok {
+			s.mu.Unlock()
+			log.Printf("[scheduler] 账号 %s 重登完成时已被删除，放弃状态写回与新 token 落库", acct)
+			return
+		}
 		if err == nil && relogged {
 			delete(s.reloginFail, acct)    // 成功清零失败计数，退避表归零
 			s.reloginAt[acct] = time.Now() // 成功后刷新完成时间，维持 30s 基础防抖限频

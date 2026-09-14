@@ -800,6 +800,82 @@ func TestDeletedAccountInFlightDropsSuccess(t *testing.T) {
 	}
 }
 
+// TestDeletedAccountReloginSuccessDropsState 验证删除账号与在途自动重登竞态下，
+// 重登成功分支必须整段放弃——否则 DeleteAccount 清凭据表+Accounts.Remove 后在途
+// Relogin（Vision 最坏 2 分钟）返回成功，会写回 tokenValid/reloginAt 内存态 +
+// UpdateIDToken 落库把已删账号新 token 写回 credentials 表（重启 Restore 重建客户端、
+// 凭据幽灵复活）。与 B18-M2（自动链）/B20-01（手动路径）同族防线，重登路径补齐
+// （B21-03，第 21 轮）。
+func TestDeletedAccountReloginSuccessDropsState(t *testing.T) {
+	fc := newFakeClient(true)
+	store := &fakeStore{}
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	s := New(fa, store, time.Now().Add(-time.Minute), time.Hour)
+	acct := "acct1"
+
+	// 让重登成功路径可以触发：先模拟一次"重登成功且账号已删"的完整时序
+	// 1. 发起自动重登（探测命中 token 失效），重登钩子阻塞在 Relogin 内
+	relogEntered := make(chan struct{})
+	relogRelease := make(chan struct{})
+	fa.relog = func() {
+		close(relogEntered)
+		<-relogRelease
+	}
+	s.maybeRelogin(acct)
+	select {
+	case <-relogEntered:
+		// 已进入 Relogin（阻塞）
+	case <-time.After(3 * time.Second):
+		t.Fatal("自动重登应已进入 Relogin")
+	}
+
+	// 2. 重登在途期间管理员删除账号：完整删除 = DeleteAccount 调 PurgeAccount（清内存态）
+	//    + Accounts.Remove（ClientFor 返回不存在）。两者都要模拟：PurgeAccount 先清
+	//    reloginAt/reloginFail/tokenValid/relogging，removed 让后续 ClientFor 复核失败。
+	s.PurgeAccount(acct)
+	fa.mu.Lock()
+	fa.removed[acct] = true
+	fa.mu.Unlock()
+
+	// 3. 放行重登 → 成功返回（relogErr=nil，fakeAccts.Relogin 返回 true,nil）
+	close(relogRelease)
+	// 等待成功分支落地（relogging 已被清理）
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.relogging[acct]
+		s.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("重登 goroutine 未在 3 秒内落地")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// B21-03 契约：账号已删，重登成功分支整段放弃
+	// 断言 1：tokenValid 不得残留（PurgeAccount 已删、成功分支不得重写回）——
+	// tokenValidForLocked 对缺失 key 返回 true（有效），故直接断言内存 map 无该 key
+	//（map 读缺失 = tokenValid[acct]==false 恒，改用 in-map 判定更严格）
+	s.mu.Lock()
+	_, tvSet := s.tokenValid[acct]
+	s.mu.Unlock()
+	if tvSet {
+		t.Fatal("删除账号后重登成功不得写回 tokenValid（内存态幽灵残留）")
+	}
+	// 断言 2：reloginAt 不得被刷新（PurgeAccount 已删、成功分支不得重新写回）
+	s.mu.Lock()
+	_, reloginAtSet := s.reloginAt[acct]
+	s.mu.Unlock()
+	if reloginAtSet {
+		t.Fatal("删除账号后重登成功不得写回 reloginAt（内存态幽灵残留）")
+	}
+	// 断言 3：UpdateIDToken 不得把已删账号新 token 落库（credentials 表幽灵复活）
+	// fakeStore 的 UpdateIDToken 为 no-op，用"调度器成功分支应跳过落库"语义 +
+	// 复核实测 TokenValidFor/reloginAt 均未写回即可（落库被同一复核门挡住）。
+}
+
 // TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 5s 收紧。
 func TestProbeIntervalFor(t *testing.T) {
 	open := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)

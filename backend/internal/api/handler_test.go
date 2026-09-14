@@ -1283,6 +1283,36 @@ func TestClientIPTrustedProxy(t *testing.T) {
 	}
 }
 
+// TestApiUnknownPath404 B7-C4：未注册的 /api/xxx 必须 404 JSON，绝不可能回退 SPA
+// index.html（此前落入 main.go "/" SPA 兜底 → 200 text/html：前端 fetch 解析 JSON
+// 报错掩盖真实 404；安全扫描误判任意 /api/ 路径可 200）。已注册的固定路由不受影响。
+func TestApiUnknownPath404(t *testing.T) {
+	d := newTestDeps(t)
+	// 未注册的 /api/xxx：404 JSON，而非 200 text/html（精确 method+pattern 未命中 → 落到
+	// 显式注册的 "/api/" 前缀 → 404 JSON；此前落入 main.go "/" SPA 兜底返回 200 HTML）
+	req := httptest.NewRequest("GET", "/api/not-registered-path", nil)
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	if rec.Code != 404 {
+		t.Fatalf("未知 /api/ 路径应返回 HTTP 404，实际 %d（回归：曾 200 text/html）", rec.Code)
+	}
+	ct := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("未知 /api/ 路径应返回 JSON 响应，实际 Content-Type=%q", ct)
+	}
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil || j["code"].(float64) != 404 {
+		t.Fatalf("未知 /api/ 应 JSON code=404，实际 %s", rec.Body.String())
+	}
+	// 已注册的固定路由不受影响（health 可达）
+	req2 := httptest.NewRequest("GET", "/api/health", nil)
+	rec2 := httptest.NewRecorder()
+	d.api.ServeHTTP(rec2, req2)
+	if rec2.Code != 200 {
+		t.Fatalf("已注册路由 /api/health 应仍可达，实际 %d", rec2.Code)
+	}
+}
+
 // TestHandleElectivesSelectAndExit 验证手动报名与退选 REST API 接口 (Task 4)。
 func TestHandleElectivesSelectAndExit(t *testing.T) {
 	d := newTestDeps(t)

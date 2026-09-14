@@ -173,6 +173,15 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleLogout)(w, r)
 	})
+	// B7-C4（第 7 轮）：未知 /api/ 路径显式 404——此前未注册的 /api/xxx 落入
+	// main.go 的 mux.Handle("/", SpaHandler) 兜底，返回 index.html（HTTP 200 text/html）：
+	// 前端 fetch 拿到 200 HTML 解析 JSON 报错掩盖真实 404，且被安全扫描误判"任意路径可 200"。
+	// 显式注册 "/api/" 前缀后，所有已注册的精确 method+pattern 优先命中，未匹配的 /api/xxx
+	// 一律 HTTP 404 + JSON body，绝不再回退 SPA。
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // 业务代码恒 200 约定不适用于"端点不存在"——真实 404 语义才对
+		writeJSON(w, 404, nil, "接口不存在")
+	})
 
 	return recoverMiddleware(securityHeaders(mux))
 }

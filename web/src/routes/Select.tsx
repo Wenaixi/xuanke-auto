@@ -678,15 +678,21 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         <div className="h-20 sm:h-16" aria-hidden />
 
         {/* 退选二次确认极简黑白 Modal (复刻官网 layer.confirm("确认退选该选修课?")) */}
+        {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
         {exitModalClass && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exit-modal-title"
+          >
             <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
                   <AlertTriangle className="h-4 w-4" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-sm font-medium text-white tracking-wide">确认退选该选修课？</h3>
+                  <h3 id="exit-modal-title" className="text-sm font-medium text-white tracking-wide">确认退选该选修课？</h3>
                   <p className="text-xs text-neutral-400 leading-relaxed">
                     课程：<span className="text-white font-mono">{exitModalClass.course_name}</span>
                     <br />

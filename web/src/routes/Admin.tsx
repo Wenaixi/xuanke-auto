@@ -158,15 +158,21 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
         </Tabs>
 
         {/* N3：删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
+        {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
         {pendingDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-acct-modal-title"
+          >
             <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
                   <AlertTriangle className="h-4 w-4" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-sm font-medium text-white tracking-wide">确认删除该账号？</h3>
+                  <h3 id="delete-acct-modal-title" className="text-sm font-medium text-white tracking-wide">确认删除该账号？</h3>
                   <p className="text-xs text-neutral-400 leading-relaxed break-all">
                     账号：<span className="text-white font-mono">{pendingDelete}</span>
                     <br />

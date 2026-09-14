@@ -9,6 +9,7 @@ import { Badge } from "../components/ui/Badge"
 import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
+import { useTickingCountdown } from "../lib/useTickingCountdown"
 import {
   ArrowLeft,
   ArrowDownWideNarrow,
@@ -40,32 +41,6 @@ function priorityName(p: number): string {
   return p === 0 ? "首选" : `备选 ${p}`
 }
 
-// 选课开放倒计时解析：返回天/时/分/秒与是否已过期
-function parseCountdown(target: string | null): {
-  days: string
-  hours: string
-  minutes: string
-  seconds: string
-  isExpired: boolean
-} {
-  if (!target) {
-    return { days: "00", hours: "00", minutes: "00", seconds: "00", isExpired: true }
-  }
-  const diff = new Date(target).getTime() - Date.now()
-  if (diff <= 0) {
-    return { days: "00", hours: "00", minutes: "00", seconds: "00", isExpired: true }
-  }
-  const pad = (n: number) => n.toString().padStart(2, "0")
-  const total = Math.floor(diff / 1000)
-  return {
-    days: pad(Math.floor(total / 86400)),
-    hours: pad(Math.floor((total % 86400) / 3600)),
-    minutes: pad(Math.floor((total % 3600) / 60)),
-    seconds: pad(total % 60),
-    isExpired: false,
-  }
-}
-
 export default function Select({ account, sessionToken, onDone }: Props) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -81,6 +56,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
       // F5-05（第 5 轮）：窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
       // 清空，继续 10s 高频打 findElectivesData 纯浪费；与 /state 同信号降 30s，全站统一。
+      // F9-05（第 9 轮）澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
+      // electives 自身响应（ElectivesData）无 window_closed 字段，且 /state 每 2s 刷新
+      // 触发组件重渲染，react-query 用最新闭包重调度轮询间隔，闭包永不陈旧。
       const pubs = query.state.data?.publishes ?? []
       const inRange = pubs.some((p) => p.in_date_range)
       if (stateData?.window_closed) return 30000
@@ -142,12 +120,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
 
-  // 本地每秒刷新倒计时，确保数字秒级平滑跳动
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  // 本地每秒刷新倒计时：F8-04/F9-07 收敛到 lib/useTickingCountdown 自 tick 组件，
+  // 整页只重渲染倒计时一处，Tab 徽章"已锁定"计数随 selected 变化即时更新，无需每秒重算。
 
   // 进入页面时自动回显已保存的目标课程（含多备选优先级）。
   // M-9（第 3 轮）：函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽
@@ -325,7 +299,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     stateData?.open_time && stateData.open_time !== "0001-01-01T00:00:00Z"
       ? stateData.open_time
       : null
-  const cd = parseCountdown(openTimeStr)
+  // F9-07（第 9 轮）：统一用 lib 共享 useTickingCountdown——与 Dashboard 同一实现、
+  // 秒级自 tick 只重建倒计时一处，删除 Select 旧的 parseCountdown + 每秒 setTick 双份。
+  const cd = useTickingCountdown(openTimeStr)
 
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">

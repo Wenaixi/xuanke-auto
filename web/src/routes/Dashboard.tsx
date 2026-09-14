@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
 import type { Account, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
 import { Badge } from "../components/ui/Badge"
+import { useTickingCountdown } from "../lib/useTickingCountdown"
 import {
   Activity,
   ArrowUpRight,
@@ -23,32 +23,6 @@ interface Props {
   sessionToken: string
   onLogout: () => void
   onGoSelect: () => void
-}
-
-function useTickingCountdown(target: string | null) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  // 目标变化时回到 "now"（首次挂载 / 窗口开启瞬间）；过期即全 00
-  const diff = target ? new Date(target).getTime() - now : 0
-  if (diff <= 0) {
-    return { days: "00", hours: "00", minutes: "00", seconds: "00", isExpired: true }
-  }
-  const totalSeconds = Math.floor(diff / 1000)
-  const d = Math.floor(totalSeconds / 86400)
-  const h = Math.floor((totalSeconds % 86400) / 3600)
-  const m = Math.floor((totalSeconds % 3600) / 60)
-  const s = totalSeconds % 60
-  const pad = (n: number) => n.toString().padStart(2, "0")
-  return {
-    days: pad(d),
-    hours: pad(h),
-    minutes: pad(m),
-    seconds: pad(s),
-    isExpired: false,
-  }
 }
 
 // 优先级序号转展示名：0=首选，1=备选 1，2=备选 2
@@ -83,11 +57,17 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   const { data: logs } = useQuery({
     queryKey: ["logs", sessionToken],
     queryFn: () => api<LogEntry[]>("/logs", { session: sessionToken }),
+    // F9-05（第 9 轮）澄清：logs 降频读组件闭包 state（/state 查询数据）即新鲜——
+    // /state 每 3s 刷新（或窗口关闭降频 30s 后低频刷新），数据一变组件重渲染，
+    // react-query 用最新闭包重调度本查询的轮询间隔，不存在"闭包停旧值永不降频"。
+    // 窗口关闭瞬间 /state 先返回 window_closed=true，下一次日志轮询即按 30s 走。
     refetchInterval: () => (state?.window_closed ? 30000 : 3000),
   })
 
   // F8-04（第 8 轮）：删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
   // 日志列表/状态卡片不再每秒全量重建。数组改为 hooks 层的派生常量，杜绝重复计算
+  // F9-07（第 9 轮）：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
+  // 且 effect 依赖 [] 时 interval 内读 Date.now() 而非闭包 state——绝不随 target 卡旧值。
   const courses = state?.courses ?? []
   const openTimeStr =
     state?.open_time && state.open_time !== "0001-01-01T00:00:00Z" ? state.open_time : null

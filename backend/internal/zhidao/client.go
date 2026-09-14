@@ -602,6 +602,8 @@ func (c *Client) SelectClass(classID int) (string, error) {
 }
 
 // ExitClass 退选。请求体与报名一致（form classId），路径为 exitElectivesClass。
+// B11-A5（第 11 轮）：doRequest 对 code=-1 已统一返回 ErrUnauthorized（服务端会话过期），
+// 本函数与 SelectClass 仅需把 code!=0 的其余业务错误原样回传，无需特判。
 func (c *Client) ExitClass(classID int) (string, error) {
 	form := url.Values{}
 	form.Set("classId", fmt.Sprintf("%d", classID))

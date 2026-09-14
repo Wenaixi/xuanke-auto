@@ -12,8 +12,8 @@
   --border-invert: #ffffff;
 
   --fg: #ffffff;
-  --fg-muted: #ffffff;
-  --fg-dim: #b4b4c0;
+  --fg-muted: #a1a1aa;
+  --fg-dim: #71717a;
 
   /* 单色语义灰阶映射（纯黑白极简，剔除所有高饱和彩色杂质） */
   --emerald: #ffffff;

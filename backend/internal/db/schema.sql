@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS success (
   PRIMARY KEY (account, class_id)
 );
 
+-- 已手动退选课程（B9-02：重启后自动引擎仍绝不抢回；重设目标时由调度器清行）
+CREATE TABLE IF NOT EXISTS refused (
+  account TEXT NOT NULL,
+  class_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (account, class_id)
+);
+
 -- 系统配置（管理员热重载持久化，k/v 存储）
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,

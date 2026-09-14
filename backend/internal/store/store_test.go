@@ -70,6 +70,42 @@ func TestSuccessRecords(t *testing.T) {
 	}
 }
 
+// TestRefusedRecords B9-02：已退选记录的 Save/Delete/Load 往返 + 按账号隔离 +
+// DeleteRefused 清空全部（重设目标语义）。
+func TestRefusedRecords(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.SaveRefused("acct1", 61115); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveRefused("acct1", 61115); err != nil { // 幂等
+		t.Fatal(err)
+	}
+	if err := s.SaveRefused("acct1", 61205); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveRefused("acct2", 61276); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadRefused()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["acct1"]) != 2 || len(got["acct2"]) != 1 {
+		t.Fatalf("已退选记录异常: %+v %v", got, err)
+	}
+	// 重设目标：清空该账号全部退选（acct2 不受影响）
+	if err := s.DeleteRefused("acct1"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.LoadRefused()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["acct1"]) != 0 || len(got["acct2"]) != 1 {
+		t.Fatalf("DeleteRefused 后记录异常: %+v %v", got, err)
+	}
+}
+
 func TestTargetsByAccount(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.SaveAccountName("acct1"); err != nil {

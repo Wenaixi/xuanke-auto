@@ -29,6 +29,8 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 func (f *fakeStore) SaveSuccess(acct string, classID int) error   { return nil }
 func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
+func (f *fakeStore) SaveRefused(acct string, classID int) error   { return nil }
+func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
 
 // syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
 // 若用裸 bytes.Buffer 会与测试主协程并发读写（读 String / 写 Write）触发 -race；加锁彻底解除。

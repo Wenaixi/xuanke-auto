@@ -108,6 +108,8 @@ type Store interface {
 	SaveSuccess(acct string, classID int) error
 	UpdateIDToken(acct, idToken string) error     // 自动重登后落库新 token
 	DeleteSuccess(acct string, classID int) error // B8-M2（第 8 轮）：手动退选后删除 success 行
+	SaveRefused(acct string, classID int) error   // B9-02（第 9 轮）：手动退选记库，重启后自动引擎仍不抢回
+	DeleteRefused(acct string) error              // B9-02：重设目标清空该账号全部退选标记
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -326,13 +328,18 @@ func (s *Scheduler) openTimeNow() time.Time {
 }
 
 // SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
-// 用户重新设定目标即"主动重新选它"：清空该账号 refused 标记——被手动退选的课程
-// 只有在用户重新设为目标时才被自动引擎重新接管（A2：绝不静默抢回）。
+// 用户重新设定目标即"主动重新选它"：清空该账号 refused 标记（含库内持久化行）——
+// 被手动退选的课程只有在用户重新设为目标时才被自动引擎重新接管（A2：绝不静默抢回）。
 func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acctTargets[acct] = targets
 	delete(s.refused, acct)
+	if s.store != nil {
+		// B9-02：重设目标同步清空库内退选行——否则重启恢复（LoadRefused 走 DeleteRefused
+		// 前的这句）会重新把旧退选灌回来，与"主动重新选它"矛盾。
+		_ = s.store.DeleteRefused(acct)
+	}
 	// 仅重建该账号对应的课程状态（保留其他账号）
 	keep := s.state.Courses[:0]
 	for _, c := range s.state.Courses {
@@ -373,6 +380,29 @@ func (s *Scheduler) RestoreDone(done map[string][]int) {
 		}
 	}
 	s.rebuildCoursesLocked()
+}
+
+// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（B9-02）：
+// 必须在 SetTargetsForAccount（会 delete refused + 清库行）之后调用，顺序保证
+// 重启恢复的"重设目标"不覆盖本次注入；成功后由重建（rebuildCoursesIfRefused）驱动状态文案。
+func (s *Scheduler) RestoreRefused(refused map[string][]int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for acct, ids := range refused {
+		if s.refused[acct] == nil {
+			s.refused[acct] = map[int]bool{}
+		}
+		for _, id := range ids {
+			s.refused[acct][id] = true
+		}
+	}
+	// 已恢复为目标的课若命中 refused（理论不应发生，防御注入），状态文案对齐手动退选。
+	for i := range s.state.Courses {
+		c := &s.state.Courses[i]
+		if s.refusedHas(c.Account, c.ClassID) && c.Status == "pending" {
+			c.Result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
+		}
+	}
 }
 
 // rebuildCoursesLocked 依据 done 集合重建课程状态（需持有锁）。
@@ -1342,6 +1372,10 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 		// B8-M2（第 8 轮）：删除 success 行——否则重启后该课被 RestoreDone 恢复成
 		// "已报名成功"，用户当日的退选决定被静默撤销（与 CLAUDE.md 契约文档对齐）
 		_ = s.store.DeleteSuccess(acct, classID)
+		// B9-02（第 9 轮）：持久化 refused——此前只写内存，重启后 refused 全丢，
+		// SetTargetsForAccount（重启恢复路径）会 delete(s.refused, acct)，
+		// 自动引擎把用户手动退选掉的课当新目标重新抢回，退选意图丢失。
+		_ = s.store.SaveRefused(acct, classID)
 		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true)
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，记入 refused——自动引擎不再接管", acct, classID)

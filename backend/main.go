@@ -136,6 +136,13 @@ func main() {
 			sched.SetTargetsForAccount(a, ts)
 		}
 	}
+	// B9-02（第 9 轮）：恢复已手动退选记录——必须在 SetTargetsForAccount（清库行）
+	// 之后注入，否则重设目标恢复路径会覆盖退选持久化。
+	if refused, err := st.LoadRefused(); err != nil {
+		log.Printf("[main] 读取已退选记录失败: %v", err)
+	} else if len(refused) > 0 {
+		sched.RestoreRefused(refused)
+	}
 	sched.Start()
 
 	// 全局重登频率闸门的分钟推进器：每 30 秒检查一次窗口翻页，翻页时放行队列中的重登。

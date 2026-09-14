@@ -156,6 +156,37 @@ func (s *Store) LoadSuccess() (map[string][]int, error) {
 	return out, rows.Err()
 }
 
+// SaveRefused 记录某账号某课程已手动退选（幂等，B9-02 持久化 refused）。
+func (s *Store) SaveRefused(acct string, classID int) error {
+	_, err := s.db.Exec("INSERT OR IGNORE INTO refused (account, class_id) VALUES (?, ?)", acct, classID)
+	return err
+}
+
+// DeleteRefused 清空某账号的全部已退选记录（重设目标 = 主动重新接管，B9-02）。
+func (s *Store) DeleteRefused(acct string) error {
+	_, err := s.db.Exec("DELETE FROM refused WHERE account = ?", acct)
+	return err
+}
+
+// LoadRefused 读取全部已退选记录（map[账号][]classID，重启恢复用，B9-02）。
+func (s *Store) LoadRefused() (map[string][]int, error) {
+	rows, err := s.db.Query("SELECT account, class_id FROM refused")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]int{}
+	for rows.Next() {
+		var a string
+		var cid int
+		if err := rows.Scan(&a, &cid); err != nil {
+			return nil, err
+		}
+		out[a] = append(out[a], cid)
+	}
+	return out, rows.Err()
+}
+
 // AppendLog 追加报名日志（account 标识来源账号，日志按账号隔离）。
 func (s *Store) AppendLog(acct string, classID int, action, result string, isOK bool) error {
 	ok := 0
@@ -339,7 +370,7 @@ func (s *Store) LoadSettings() (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// DeleteAccount 管理员删除账号：清其凭据/账号名/目标/成功记录/激活状态。
+// DeleteAccount 管理员删除账号：清其凭据/账号名/目标/成功记录/已退选记录/激活状态。
 // 报名日志保留（审计用途），仅重新登录即可重建凭据与客户端。
 func (s *Store) DeleteAccount(acct string) error {
 	tx, err := s.db.Begin()
@@ -358,6 +389,9 @@ func (s *Store) DeleteAccount(acct string) error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM success WHERE account = ?", acct); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM refused WHERE account = ?", acct); err != nil {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM activations WHERE account = ?", acct); err != nil {

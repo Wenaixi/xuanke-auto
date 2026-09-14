@@ -55,3 +55,55 @@ func TestRefusedNeverResubmitted(t *testing.T) {
 	}
 	t.Fatal("重新设为目标后自动引擎应在下个提交窗口恢复该课程")
 }
+
+// TestRefusedPersistedAcrossRestart B9-02：手动退选必须落库，重启（新调度器 +
+// 恢复顺序 SetTargetsForAccount → RestoreRefused）后自动引擎仍绝不抢回该课程。
+// 修复前 refused 只存内存：重启后 SetTargetsForAccount 清空、自动引擎把用户
+// 手动退选掉的课当新目标重新抢回——退选意图丢失（与 B8-M2 的"假成功"同根）。
+func TestRefusedPersistedAcrossRestart(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开，课程可报
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	if _, err := s.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+	if err := s.RemoveDone("acct1", 61115); err != nil {
+		t.Fatalf("RemoveDone 失败: %v", err)
+	}
+
+	// 断言库内持久化（fakeStore 缓存指针同一，RemoveDone 落库后立即可读）
+	if !s.refusedHas("acct1", 61115) {
+		t.Fatal("RemoveDone 后应记入 refused")
+	}
+
+	// 模拟重启：新调度器 + 与 main 相同的恢复顺序（SetTargetsForAccount 会清库行，
+	// 紧随其后的 RestoreRefused 再把持久化的退选注入回内存）
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s2.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s2.RestoreRefused(map[string][]int{"acct1": {61115}})
+	if !s2.refusedHas("acct1", 61115) {
+		t.Fatal("重启恢复后 refused 应保留")
+	}
+
+	// 阶段 1：refused 拦截——持续 tick，SelectClass 必须始终 0 次调用
+	tEnd := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(tEnd) {
+		s2.tick()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := fc.SelectClassCalls(61115); n != 0 {
+		t.Fatalf("重启后自动引擎不得抢回手动退选课，实际调用 SelectClass %d 次", n)
+	}
+
+	// 重新设为目标（用户主动接管）：refused 清库行 + 解除，恢复自动提交
+	s2.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		s2.tick()
+		if fc.SelectClassCalls(61115) > 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("重新设为目标后自动引擎应恢复该课程")
+}

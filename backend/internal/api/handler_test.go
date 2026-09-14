@@ -1313,6 +1313,45 @@ func TestApiUnknownPath404(t *testing.T) {
 	}
 }
 
+// TestAdminDeleteCodeNoBodyOK B7-M8/M9：DELETE /api/admin/codes 无 body（标准 REST 客户端
+// 默认行为）必须可用——此前强制 requireJSONBody 导致 curl/脚本删码必踩 403 可用性噪音。
+// 副作用 + 需要 body 的 POST 仍强制 JSON（跨站表单防挟持）；GET/DELETE 放行空 body。
+func TestAdminDeleteCodeNoBodyOK(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 造一个激活码：通过管理的 codes GET 不生成，需先真造一条
+	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":1,"uses":1}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("生成激活码失败: %d %v", code, j)
+	}
+	codes, _ := j["data"].([]any)
+	if len(codes) != 1 {
+		t.Fatalf("应生成 1 个码: %v", j)
+	}
+	theCode := codes[0].(string)
+	// 模拟标准 DELETE 无 body 请求（无 Content-Type）：应不再是 403——空 body 解码失败
+	// 返回明确业务错误（"请指定要删除的激活码"），REST 客户端不再被 JSON 门挡死
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/codes", nil)
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	if rec.Code == 403 {
+		t.Fatalf("无 body DELETE 不应被 403 拒绝（B7-M8 回归）：http=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var jr map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &jr); err != nil {
+		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+	}
+	if c, _ := jr["code"].(float64); c != 1 || !strings.Contains(fmt.Sprint(jr["msg"]), "请指定要删除的激活码") {
+		t.Fatalf("空 body DELETE 应返回明确的'请指定激活码'业务错误（而非 403）：%v", jr)
+	}
+	// 带 body 的正常删除：真删成功（清掉前面生成的码，保持测试幂等）
+	code, j = doJSONAdmin(t, d.api, "DELETE", "/api/admin/codes", `{"code":"`+theCode+`"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("带 body 删除激活码失败: %d %v", code, j)
+	}
+}
+
 // TestHandleElectivesSelectAndExit 验证手动报名与退选 REST API 接口 (Task 4)。
 func TestHandleElectivesSelectAndExit(t *testing.T) {
 	d := newTestDeps(t)

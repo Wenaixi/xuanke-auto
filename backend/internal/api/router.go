@@ -122,11 +122,15 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("GET /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
+	// B7-M8/M9（第 7 轮）：生成/列表/删除三态同级路由。此前 DELETE 也强制 requireJSONBody，
+	// 但标准 REST 客户端 DELETE 默认无 body（Content-Type 缺失）→ 被 403 拒——管理员用
+	// curl/脚本删除激活码必然踩坑，且 DELETE 分支本就接受空 body（"无副作用无需强制 JSON"）。
+	// POST 仍是副作用+需要 body（强制 JSON 防跨站表单挟持），GET/DELETE 放行空 body。
 	mux.HandleFunc("POST /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, requireJSONBody(d.handleAdminCodes))(w, r)
 	})
 	mux.HandleFunc("DELETE /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, requireJSONBody(d.handleAdminCodes))(w, r)
+		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
 	// 管理员后台：配置热重载 / 运行状态 / 账号管理 / 日志总览（会话级管理员鉴权）
 	mux.HandleFunc("GET /api/admin/config", func(w http.ResponseWriter, r *http.Request) {

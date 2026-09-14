@@ -539,18 +539,24 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 0, codes, "生成成功")
 	case http.MethodDelete:
+		// B7-M8（第 7 轮）：无 body 的标准 REST DELETE 必须可用——空 body 解码失败直接按
+		// "未提供 code"返回明确错误即可（绝不 403；DELETE 无 body 场景不该被 JSON 门挡住）。
+		// 管理员用 curl -X DELETE /api/admin/codes（无 body）时得到"请指定激活码"而非
+		// 请求被 403 拒的可用性噪音。
 		var req struct {
 			Code string `json:"code"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
+		decodeErr := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req)
+		if decodeErr == nil && req.Code != "" {
+			if err := d.Store.DeleteActivationCode(strings.TrimSpace(req.Code)); err != nil {
+				writeJSON(w, 1, nil, "删除失败: "+err.Error())
+				return
+			}
+			writeJSON(w, 0, nil, "已删除")
 			return
 		}
-		if err := d.Store.DeleteActivationCode(strings.TrimSpace(req.Code)); err != nil {
-			writeJSON(w, 1, nil, "删除失败: "+err.Error())
-			return
-		}
-		writeJSON(w, 0, nil, "已删除")
+		// 空 body / 无 code：返回明确业务错误（REST 客户端需带 body 指定要删哪个码）
+		writeJSON(w, 1, nil, "请指定要删除的激活码（body: {\"code\":\"...\"}）")
 	default:
 		writeJSON(w, 405, nil, "方法不允许")
 	}

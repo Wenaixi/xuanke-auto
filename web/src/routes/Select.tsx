@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, selectElective, exitElective } from "../api/client"
-import type { Account, ClassItem, ElectivesData, Target, SchedulerState } from "../types"
+import type { Account, ClassItem, ElectivesData, Target, SchedulerState, Publish } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"

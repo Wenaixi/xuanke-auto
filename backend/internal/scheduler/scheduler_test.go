@@ -820,10 +820,14 @@ func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
+// B14-M1（第 14 轮）：原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
+// 恒 return，提交循环根本无法抵达（首段断言恒等 pending 超时必红，恒绿假象的另一面"恒红"）。
+// 改为过去时刻：守卫放行提交路径，而探测仍被 lastProbe 节流挡住（不 resetProbe），
+// 真正验证"提交不依赖探测节流"。本次为修复失效契约的测试，非业务代码改动（无红灯需先见）。
 func TestWindowOpenSubmitsWithoutProbeReset(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("connection reset") // 提交失败（网络类，会走实时人数复核路径）
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Second), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
 	defer s.Stop()
@@ -1241,7 +1245,11 @@ func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
 	}
 }
 
-// TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶与重登成功清零逻辑 (CRITICAL C2, C3)。
+// TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶（CRITICAL C2, C3）。
+// B14-I1（第 14 轮）：原后半段手写 `s.reloginFail[acct]=5; delete(...)` 直接测 Go
+// map 的 delete 语义（恒绿，与 F13-i1 同为"手写实现语义当断言"的坏味道）——删除。
+// 真实"失败保留增长 / 成功清零"路径由 TestReloginFailureKeepsBackoff /
+// TestReloginSuccessResetsBackoff 覆盖，此处不再重复。
 func TestReloginBackoffCappedAndReset(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
 	// 验证退避算法上限封顶与极大 n 防溢出
@@ -1251,19 +1259,6 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 			t.Fatalf("reloginBackoff(%d) = %v，不应小于0或超过 10 分钟", n, wait)
 		}
 	}
-
-	acct := "acct1"
-	s.mu.Lock()
-	s.reloginFail[acct] = 5
-	s.mu.Unlock()
-
-	// 模拟重登成功后必须清零
-	s.mu.Lock()
-	delete(s.reloginFail, acct)
-	if s.reloginFail[acct] != 0 {
-		t.Fatal("重登成功后 reloginFail 必须清零")
-	}
-	s.mu.Unlock()
 }
 
 // TestReloginFailureKeepsBackoff 已契约化"重登失败后 reloginFail 保留增长、成功才清零"

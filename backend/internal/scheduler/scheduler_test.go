@@ -89,6 +89,7 @@ type fakeClient struct {
 	syncCalls   int    // 时钟对齐发起次数（B9-03 退避测试断言"失败期不反复发起"）
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
 	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，B18-M2 在飞竞态测试用）
+	fullErr     error  // 实时人数复核错误（B19-03：命中 token 失效测试用）
 }
 
 // SyncServerTime 可控时钟对齐：返回预置偏差或错误（MAJOR-C 测试用）。
@@ -160,6 +161,10 @@ func (f *fakeClient) Token() string { return "new-token-999" }
 
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 	f.mu.Lock()
+	if f.fullErr != nil {
+		f.mu.Unlock() // 显式解锁：早退分支必须释放锁（B19-03 夹具死锁根因——漏了这行导致 Relogin 永久卡死）
+		return false, f.fullErr // B19-03：命中 token 失效等错误
+	}
 	if f.fullBlock != nil {
 		fullBlock := f.fullBlock
 		f.mu.Unlock()
@@ -2050,4 +2055,35 @@ func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("实时复核网络在飞期间 s.mu 仍被持有——锁外复核修复失效")
 	}
+}
+
+// TestRealtimeRecheckUnauthorizedTriggersRelogin 验证实时人数复核命中 token 失效
+// （findElectivesStudentCount 同样鉴权，code=-1）时：与 SelectClass 分支对称、立即触发
+// 自动重登（B19-03，第 19 轮）——此前复核错误被当普通失败处理、下个 tick 又重打失效
+// 报名接口，失效恢复路径被延迟到探测/手动路径才发现（token 失效数秒内黄金期空转）。
+// 修复前该路径 maybeRelogin 0 次（红灯），修复后 1 次（绿灯）。
+func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开
+	fc.mu.Lock()
+	fc.selectErr[61115] = errors.New("该课程已满员") // 报名失败 → 走实时复核路径
+	fc.fullErr = zhidao.ErrUnauthorized             // 复核命中 token 失效（学生数接口同样鉴权）
+	fc.mu.Unlock()
+	relogStart := make(chan bool)
+	relogDone := make(chan bool)
+	fa := &fakeAccts{c: fc, relog: func() {
+		relogStart <- true
+		<-relogDone
+	}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+
+	// 自动链应先走到报名失败 → 实时复核命中失效 → maybeRelogin
+	select {
+	case <-relogStart:
+	case <-time.After(3 * time.Second):
+		t.Fatal("实时复核命中 token 失效应触发自动重登")
+	}
+	close(relogDone) // 放行重登完成
 }

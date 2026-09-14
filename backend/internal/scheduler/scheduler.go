@@ -1236,6 +1236,21 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Unlock()
 			full, cErr := s.classFullRealtime(acct, t.ClassID)
 			s.mu.Lock()
+			// B19-03（第 19 轮）：实时复核命中 token 失效（学生数接口同样鉴权）——
+			// 与 SelectClass 分支对称触发自动重登（ErrUnauthorized 才是"重登中"语义），
+			// 否则本次失败被当普通失败处理、下个 tick 又重打报名接口（token 已失效的
+			// 报名必然再失败），失效恢复路径被延迟到探测/手动路径才发现。
+			if cErr != nil && errors.Is(cErr, zhidao.ErrUnauthorized) {
+				s.mu.Unlock()
+				s.maybeRelogin(acct)
+				s.mu.Lock()
+				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
+				if s.store != nil {
+					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 实时复核命中 token 失效，自动重登中", false)
+				}
+				s.mu.Unlock()
+				return
+			}
 			if cErr == nil && full {
 				s.markFullLocked(acct, t)
 				s.mu.Unlock()

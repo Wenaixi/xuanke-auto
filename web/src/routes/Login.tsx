@@ -72,7 +72,15 @@ export default function Login({ onLogin }: Props) {
       setPendingTicket("")
       onLogin(data.token, data.account)
     } catch (e: any) {
-      setActivateError(e.message || "激活失败，请检查激活码是否正确")
+      // F12-M3（第 12 轮）：激活失败分两个场景引导——后端票据 5 分钟单次，
+      // 过期/已用会报"激活票据无效或已过期"；此时账号其实已激活，重新登录即可
+      // 直进，用户可能误以为激活码有问题而反复点激活（恒失败）。
+      if (/激活票据无效或已过期/.test(e.message || "")) {
+        setPendingTicket("")
+        setActivateError("激活票据已过期或已使用，请取消后重新登录即可进入（本账号已开通）")
+      } else {
+        setActivateError(e.message || "激活失败，请检查激活码是否正确")
+      }
     } finally {
       setActivating(false)
     }

@@ -1284,6 +1284,11 @@ func TestCheckClassSelectable(t *testing.T) {
 	if _, err := s.ProbeForAccount("acct1"); err != nil {
 		t.Fatalf("填充快照失败: %v", err)
 	}
+	// B6-04：ProbeForAccount 不得写全局 lastProbe——它只归 probe()/ProbeNow 管理，
+	// 否则管理员穿透探测会吞掉全校探测节流闸门（开窗前点一次课程页 = 全校探测延后）。
+	if s.HasProbed() {
+		t.Fatal("ProbeForAccount 不应把 HasProbed 置 true（lastProbe 只归全校正规探测）")
+	}
 
 	// 窗口开启 + 可报名 → 放行
 	if reason, ok := s.CheckClassSelectable("acct1", 61115); !ok {

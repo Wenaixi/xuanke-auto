@@ -126,9 +126,9 @@ type Scheduler struct {
 	done             map[string]map[int]bool // [账号][classID] 已成功
 	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	refused          map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
-	lastProbe        time.Time
-	lastSubmit       time.Time             // 上次提交时间（submitAll 节流）
-	prevWindowOpened bool                  // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
+	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入（B6-04）
+	lastSubmit       time.Time               // 上次提交时间（submitAll 节流）
+	prevWindowOpened bool                    // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
 	lastData         *zhidao.ElectivesData // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
 	acctData         map[string]*zhidao.ElectivesData // [账号] 专属课程快照（年级物理隔离）
@@ -480,7 +480,11 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// B5-10（第 5 轮）：ProbeForAccount 只写该账号专属快照，不动全局 lastData/lastDataAt。
 	// 管理员 ?account=A 穿透探测若写全局帧会污染全局快照（年级不同的帧），
 	// 页面 ElectivesSnapshot 读全局帧时看到错年级课程——年级串线根因之一。
-	s.lastProbe = now
+	// B6-04（第 6 轮）：这里不再写 lastProbe——lastProbe 是全局探测节流闸门（tick 用），
+	// 管理员穿透探测 / 账号探测若写它，会让"全校正规探测"节流被旁路：开窗前管理员
+	// 手动点一次课程页，就按下一次正规探测（30s→2s 临门盯守被吞掉），窗口开启后
+	// tick 探测被节流闸门挡到 30s，黄金期提交失去即时确认。lastProbe 只归 probe()
+	// 与 ProbeNow 管理（全校维度），账号级探测不影响全校节流。
 	s.mu.Unlock()
 	return data, nil
 }

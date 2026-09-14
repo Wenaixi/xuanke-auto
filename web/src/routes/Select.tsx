@@ -281,13 +281,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 恒空）时也不能整包覆盖——targets 由 [publishes × selected] 联查构建，任一为空则
   // targets=[] 是一个"假清空"，会把已落库目标永久抹除。守卫"发布缺席 + 已有选中
   // 目标"=数据缺席绝非用户意图；只有 selected 全空（用户明确清空全部）才合法 PUT []。
-  const publishesMissing = publishesRef.current.length === 0 && selectedCount > 0
-  // F16-01（第 16 轮）：publishesMissing 是渲染期常量——防抖/flush 回调在 400ms 后
-  // 执行时读的是旧闭包值；若这期间发布集合整体重建（开窗瞬间平台清空又恢复，id 全变
-  // 但字段一样），build() 拿最新 publishesRef 联查 selected[旧 publish_id] → 全 undefined
-  // → targets=[] 假清空抹掉后端目标。根因修法：在消费时刻对 build 结果做"每个
-  // publish_id 都属于当前 publishesRef"的全数校验，任一漂移即置脏跳过——比把
-  // publishesMissing 改同步 ref 更短，且连"集合非空但 key 漂移"的偏态一并覆盖。
+  // F16-01（第 16 轮）：此守卫的渲染期常量判据会被防抖/flush 回调在 400ms 后读旧闭包
+  // 值；F17-02 已把判据全部移入消费时刻（见 flushTargets 与防抖回调内的
+  // "selectedCount>0 却构建出空集 = 假清空"守卫），渲染期常量已无引用，删除。
   const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
     const ids = new Set(pubs.map((p) => p.publish_id))
     // F17-01（第 17 轮）：空 targets 时 every 恒真——空集防御已由各消费点的

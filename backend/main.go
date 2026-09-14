@@ -133,11 +133,14 @@ func main() {
 			continue
 		}
 		if len(ts) > 0 {
-			sched.SetTargetsForAccount(a, ts)
+			// B10-01（第 10 轮）：重启恢复目标用 RestoreTargets（不清 refused）——
+			// 此前用 SetTargetsForAccount 会 delete refused + 删库行，重启后手动退选
+			// 记录全丢、自动引擎重新抢回（B9-02 被恢复顺序抵消）。
+			sched.RestoreTargets(a, ts)
 		}
 	}
-	// B9-02（第 9 轮）：恢复已手动退选记录——必须在 SetTargetsForAccount（清库行）
-	// 之后注入，否则重设目标恢复路径会覆盖退选持久化。
+	// B9-02 + B10-01：恢复已手动退选记录——RestoreTargets 不清库行，此处 LoadRefused
+	// 仍能读到全部退选；RestoreRefused 注入内存后不被任何后续步骤覆盖。
 	if refused, err := st.LoadRefused(); err != nil {
 		log.Printf("[main] 读取已退选记录失败: %v", err)
 	} else if len(refused) > 0 {

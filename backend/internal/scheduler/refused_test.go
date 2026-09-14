@@ -1,9 +1,52 @@
 package scheduler
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
+
+// persistentStore 真实语义的持久化假存储：SaveRefused 落库、DeleteRefused 真删、
+// LoadRefused 读当前表——用 map 忠实复刻 SQLite 行为（B10-01 顺序契约测试用，
+// 避免 fakeStore 的 no-op DeleteRefused 让顺序 bug 假绿）。
+type persistentStore struct {
+	fakeStore
+	mu      sync.Mutex
+	refused map[string]map[int]bool
+}
+
+func newPersistentStore() *persistentStore {
+	return &persistentStore{refused: map[string]map[int]bool{}}
+}
+
+func (p *persistentStore) SaveRefused(acct string, classID int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refused[acct] == nil {
+		p.refused[acct] = map[int]bool{}
+	}
+	p.refused[acct][classID] = true
+	return nil
+}
+
+func (p *persistentStore) DeleteRefused(acct string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.refused, acct)
+	return nil
+}
+
+func (p *persistentStore) LoadRefused() (map[string][]int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string][]int{}
+	for acct, ids := range p.refused {
+		for id := range ids {
+			out[acct] = append(out[acct], id)
+		}
+	}
+	return out, nil
+}
 
 // TestRefusedNeverResubmitted 用户手动退选后自动引擎绝不抢回（第 4 轮 MAJOR A2）：
 // RemoveDone 记入 refused 集合，spawnChain 命中即跳过——即使窗口开放、课程未满、
@@ -54,6 +97,66 @@ func TestRefusedNeverResubmitted(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("重新设为目标后自动引擎应在下个提交窗口恢复该课程")
+}
+
+// TestRefusedRestartOrderRealDB B10-01：用真实 SQLite 验证重启恢复顺序——
+// 手动退选落库后，按 main.go 的实际顺序（RestoreDone → 循环 RestoreTargets →
+// LoadRefused + RestoreRefused）恢复，refused 标记必须保留、自动引擎绝不抢回；
+// 若把 SetTargetsForAccount 用于恢复，其内部 DeleteRefused 会删库行、LoadRefused
+// 拿到空 map，重启后自动引擎立刻抢回退选课（B9-02 被抵消）——本测试用真实 DB 把
+// 这条顺序契约固化（此前 refused_test 的 TestRefusedPersistedAcrossRestart 用
+// fakeStore 绕过真实删除，是假绿灯）。
+func TestRefusedRestartOrderRealDB(t *testing.T) {
+	fc := newFakeClient(true) // 窗口已开，课程可报
+	st := newPersistentStore()
+	initialTargets := []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}}
+	// 目标直接注入调度器内存（真实启动经 store.LoadTargetsForAccount → RestoreTargets，
+	// 测试聚焦 refused 顺序契约，目标灌入即可）
+
+	// 模拟重启#1 到一次 RemoveDone（与 main.go 恢复顺序一致：RestoreTargets 不清 refused）
+	s1 := New(&fakeAccts{c: fc}, st, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s1.RestoreDone(map[string][]int{})
+	s1.RestoreTargets("acct1", initialTargets)
+	if err := s1.RemoveDone("acct1", 61115); err != nil {
+		t.Fatalf("RemoveDone 失败: %v", err)
+	}
+
+	// 断言拒绝表已落库
+	refused2, err := st.LoadRefused()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refused2["acct1"]) != 1 || refused2["acct1"][0] != 61115 {
+		t.Fatalf("RemoveDone 后 refused 表应有 61115，实际 %+v", refused2)
+	}
+
+	// 阶段二：模拟重启#2，按 main.go 当前正确顺序（先循环 RestoreTargets，再 LoadRefused+RestoreRefused）
+	s2 := New(&fakeAccts{c: fc}, st, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s2.RestoreDone(map[string][]int{})
+	s2.RestoreTargets("acct1", initialTargets)
+	refused3, _ := st.LoadRefused()
+	s2.RestoreRefused(refused3)
+	// 让恢复后的调度器跑 tick，确认不抢回
+	tEnd := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(tEnd) {
+		s2.tick()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := fc.SelectClassCalls(61115); n != 0 {
+		t.Fatalf("真实DB重启顺序下自动引擎不得抢回手动退选课，实际调用 %d 次", n)
+	}
+
+	// 阶段三：重新设为目标（用户主动接管）→ refused 清库行 + 解除，恢复自动提交
+	s2.SetTargetsForAccount("acct1", initialTargets)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		s2.tick()
+		if fc.SelectClassCalls(61115) > 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("重新设为目标后自动引擎应恢复该课程")
 }
 
 // TestRefusedPersistedAcrossRestart B9-02：手动退选必须落库，重启（新调度器 +

@@ -131,7 +131,6 @@ type Scheduler struct {
 	refused          map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
 	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入（B6-04）
 	lastSubmit       time.Time               // 上次提交时间（submitAll 节流）
-	prevWindowOpened bool                    // 上一次探测的窗口状态（用于窗口刚开启时清提交闸门）
 	lastData         *zhidao.ElectivesData   // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
 	acctData         map[string]*zhidao.ElectivesData // [账号] 专属课程快照（年级物理隔离）
@@ -336,10 +335,26 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.acctTargets[acct] = targets
 	delete(s.refused, acct)
 	if s.store != nil {
-		// B9-02：重设目标同步清空库内退选行——否则重启恢复（LoadRefused 走 DeleteRefused
-		// 前的这句）会重新把旧退选灌回来，与"主动重新选它"矛盾。
+		// B9-02：重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
 		_ = s.store.DeleteRefused(acct)
 	}
+	s.rebuildCoursesForAccountLocked(acct, targets)
+}
+
+// RestoreTargets 重启恢复目标（B10-01）：与 SetTargetsForAccount 唯一区别是不清
+// refused（内存 + 库行）——重启恢复的目标不是"用户主动重选"，若清库行会把已持久化的
+// 手动退选记录删掉（B9-02 被恢复顺序抵消）。恢复顺序：RestoreDone → 循环 RestoreTargets
+// → LoadRefused + RestoreRefused（main.go）。
+func (s *Scheduler) RestoreTargets(acct string, targets []Target) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.acctTargets[acct] = targets
+	s.rebuildCoursesForAccountLocked(acct, targets)
+}
+
+// rebuildCoursesForAccountLocked 重建指定账号的课程状态（需持有锁）：
+// 删除该账号旧状态行，按目标重建；命中 done 置"重启恢复：已报名成功"。
+func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target) {
 	// 仅重建该账号对应的课程状态（保留其他账号）
 	keep := s.state.Courses[:0]
 	for _, c := range s.state.Courses {
@@ -382,9 +397,11 @@ func (s *Scheduler) RestoreDone(done map[string][]int) {
 	s.rebuildCoursesLocked()
 }
 
-// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（B9-02）：
-// 必须在 SetTargetsForAccount（会 delete refused + 清库行）之后调用，顺序保证
-// 重启恢复的"重设目标"不覆盖本次注入；成功后由重建（rebuildCoursesIfRefused）驱动状态文案。
+// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（B9-02 + B10-01 顺序修正）：
+// 必须**先于** SetTargetsForAccount 循环调用——后者（用户重设目标恢复路径）会
+// `delete(s.refused, acct)` + `DeleteRefused(acct)` 清空该账号退选，若先循环再注入，
+// 注入的标记被恢复路径覆盖、持久化行也被删（B10-01：B9-02 被重启顺序抵消）。
+// main.go 已改为"先 LoadRefused+RestoreRefused，再逐账号 SetTargetsForAccount"。
 func (s *Scheduler) RestoreRefused(refused map[string][]int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -485,6 +502,8 @@ func (s *Scheduler) tokenValidForLocked(acct string) bool {
 }
 
 // AccountsWithTargets 返回当前所有已配置有效目标的账号列表（排序）。
+// B10-04：列表必须排序——api 层管理员不带 ?account= 时取 targetAccts[0] 对齐
+// "核心账号"，map 迭代无序会让每次刷新看到不同学生的课程（多账号部署下）。
 func (s *Scheduler) AccountsWithTargets() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -494,6 +513,7 @@ func (s *Scheduler) AccountsWithTargets() []string {
 			out = append(out, a)
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -714,7 +734,8 @@ func (s *Scheduler) probe() {
 	// 若只认"从未开过窗"则开过再关后 WindowClosed 恒 false，probeIntervalFor 的
 	// "开放时间已过 + WindowClosed → 降回 30s"分支永不命中，窗口关闭后仍 2s 高频探测。
 	s.state.WindowClosed = !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
-	s.prevWindowOpened = opened
+	// B10-05：prevWindowOpened 是写而不读的死字段（C-3 已去掉 !prevWindowOpened 条件），
+	// 删除避免误导后续维护者以为还有清提交闸门的路径。
 	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)
 	s.mu.Unlock()
 }

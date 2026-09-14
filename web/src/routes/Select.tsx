@@ -363,7 +363,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
           <div className="flex items-center gap-3">
             <Badge variant="outline" className="text-xs py-1 px-3 font-mono">
-              {account ? account : "默认"} · SELECTED {selectedCount}/{publishes.length}
+              {account ? account : "默认"} · SELECTED {selectedCount}
+              {publishes.length > 0 ? `/${publishes.length}` : ""}
             </Badge>
             <Button
               variant="outline"
@@ -461,7 +462,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           </div>
         )}
 
-        {/* 主选课 Tab 分段控制器 */}
+        {/* F14-03（第 14 轮）：窗口关闭/学期无发布空态——publishes 恒空时给出明确说明，
+            不再是"无提示空白主体"（此前徽章还误显 n/0） */}
+        {!isLoading && !isError && tabs.length === 0 && (
+          <div className="rounded-[var(--radius-lg)] glass border border-neutral-800 p-16 text-center text-xs text-neutral-400 flex flex-col items-center justify-center gap-3">
+            <span className="inline-block w-2 h-2 rounded-full bg-neutral-600" />
+            <span>当前无可选课程批次（选课窗口未开放或已关闭）</span>
+            <span className="text-neutral-600">窗口开放后课程列表将自动出现</span>
+          </div>
+        )}
+
+        {/* 主选课 Tab 分段控制器
+            F14-03（第 14 轮）：窗口关闭/学期无发布时 publishes 恒空 →
+            tabs.length===0，此前整个主区不渲染且顶部徽章显示 n/0；补空态与徽章分母兜底 */}
         {!isLoading && !isError && tabs.length > 0 && (
           <Tabs defaultValue={String(tabs[0].publish_id)} className="space-y-4">
             <TabsList className="w-full sm:w-auto flex flex-wrap h-auto gap-1.5 p-1 glass border border-neutral-800 rounded-[var(--radius-lg)]">

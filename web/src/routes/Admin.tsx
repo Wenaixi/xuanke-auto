@@ -44,6 +44,10 @@ interface Props {
 
 export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
+  // F12-M2（第 12 轮）：Tabs 受控化——defaultValue 只在首次挂载生效，管理员进出
+  // 学生大厅（Admin 卸载重挂）后 Tab 恒回落"激活码"，当前查看的 Tab 现场丢失；
+  // 提升为顶层受控值，跨挂载保留。
+  const [activeTab, setActiveTab] = useState("codes")
   // n8：复制反馈定时器句柄——连续复制不同码时先 clearTimeout 旧定时器，
   // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -113,7 +117,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
           </div>
         </header>
 
-        <Tabs defaultValue="codes">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="codes" className="flex items-center gap-1.5">
               <KeyRound className="h-3.5 w-3.5" />

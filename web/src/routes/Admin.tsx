@@ -61,12 +61,43 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
 
   const copy = async (code: string) => {
     try {
+      // F19-03（第 19 轮）：navigator.clipboard 非安全上下文会整体不可用——http://内网/
+      // 明文部署、iframe 嵌入、权限被拒时抛错落入 catch 提示"未授权剪贴板"，管理员复制
+      // 激活码整链失效。降级：手动构造 textarea 走已废弃的 document.execCommand("copy")
+      // 兜底（旧兼容路径，同步执行），仍失败才提示（且把完整激活码展示给管理员抄录）。
+      if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        throw new Error("clipboard API 不可用")
+      }
       await navigator.clipboard.writeText(code)
       setCopied(code)
       if (copyTimer.current) clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(""), 1500)
     } catch {
-      toast({ title: "复制失败", description: "浏览器未授权剪贴板", variant: "destructive" })
+      // execCommand 兜底：document 活跃才可能成功；text area 仅内存驻留不入 DOM 树
+      let ok = false
+      try {
+        const ta = document.createElement("textarea")
+        ta.value = code
+        ta.style.position = "fixed"
+        ta.style.opacity = "0"
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand("copy")
+        document.body.removeChild(ta)
+      } catch {
+        ok = false
+      }
+      if (ok) {
+        setCopied(code)
+        if (copyTimer.current) clearTimeout(copyTimer.current)
+        copyTimer.current = setTimeout(() => setCopied(""), 1500)
+        return
+      }
+      toast({
+        title: "复制失败，请手动抄录",
+        description: `浏览器未授权剪贴板权限（激活码：${code}）`,
+        variant: "destructive",
+      })
     }
   }
 

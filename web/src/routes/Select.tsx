@@ -258,6 +258,29 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       }
     }
   }
+  // 退出前立即保存挂起的目标改动：返回按钮的防抖窗口（<400ms）内最后一次点选
+  // 或重发退避排队中的改动，不在此刻落库就永失（F12-M1）。复用 lastJson 去重 +
+  // savingRef/dirtyRef 串行化，绝不与飞行中的 PUT 乱序覆盖。
+  const flushTargets = () => {
+    const targets: Target[] = []
+    for (const p of publishesRef.current) {
+      const list = selected[p.publish_id] ?? []
+      list.forEach((cls, i) => {
+        targets.push({
+          publish_id: p.publish_id,
+          class_id: cls.id,
+          course_name: cls.course_name,
+          priority: i,
+        })
+      })
+    }
+    targetRef.current = targets
+    if (savingRef.current) {
+      dirtyRef.current = true // 保存进行中：标记脏，让飞行中的 PUT 完成后补发本次快照
+      return
+    }
+    void saveNow()
+  }
   // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据。
   // F7-01（第 7 轮）：自动保存只由"用户改动"驱动——依赖只有 rev（用户点选自增），
   // publishes 改为经 ref 读取而非依赖。此前 publishes（轮询新对象引用）进依赖导致每次
@@ -333,7 +356,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             <Button
               variant="outline"
               size="sm"
-              onClick={onDone}
+              onClick={() => {
+                // F12-M1（第 12 轮）：返回前先 flush 挂起的防抖/重发目标保存——
+                // 直接 onDone 会卸载组件、400ms 防抖 timer 被清理，最后一次点选
+                // 到返回间隔 <400ms 时整批目标永不 PUT。
+                flushTargets()
+                onDone()
+              }}
               className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" />

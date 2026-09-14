@@ -135,7 +135,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
-  // 选课改动自增计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存
+  // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
+  // 注意：F7 修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
@@ -279,14 +280,21 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       }
     }
   }
-  // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据
+  // 保存期间用户又改了目标：立即补发一次（带最新快照），避免旧 PUT 后到覆盖新数据。
+  // F7-01（第 7 轮）：自动保存只由"用户改动"驱动——依赖只有 rev（用户点选自增），
+  // publishes 改为经 ref 读取而非依赖。此前 publishes（轮询新对象引用）进依赖导致每次
+  // 轮询都重跑 effect：窗口开启瞬间平台短暂清空 publishes → build() 产出 [] → 防抖 PUT
+  // {"targets":[]} 把服务端/调度器内存目标整体抹除，黄金期 250ms 冲刺空转；
+  // 窗口关闭后目标被永久抹除。发布列表收缩绝不等于用户意图清空目标。
+  const publishesRef = useRef<readonly Publish[]>(publishes)
+  publishesRef.current = publishes
   useEffect(() => {
     if (rev === 0) return
     // n14：用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
     resetRetry()
     const build = (): Target[] => {
       const targets: Target[] = []
-      for (const p of publishes) {
+      for (const p of publishesRef.current) {
         const list = selected[p.publish_id] ?? []
         list.forEach((cls, i) => {
           targets.push({
@@ -308,7 +316,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       void saveNow()
     }, 400)
     return () => clearTimeout(timer)
-  }, [rev, selected, publishes, sessionToken, toast])
+  }, [rev, selected, sessionToken, toast])
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 

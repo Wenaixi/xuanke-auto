@@ -87,4 +87,5 @@ jobs:
         shell: pwsh
         run: |
           cd backend
-          CGO_ENABLED=1 go build -v -ldflags="-s -w -H windowsgui" -o xuanke-ci-check.exe .
+          $env:CGO_ENABLED = '1'
+          go build -v -ldflags="-s -w -H windowsgui" -o xuanke-ci-check.exe .

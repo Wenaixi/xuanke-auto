@@ -43,13 +43,15 @@ jobs:
         shell: pwsh
         run: |
           cd backend
-          CGO_ENABLED=1 go build -ldflags="-s -w -H windowsgui" -o ../dist-release/xuanke-windows-amd64.exe .
+          $env:CGO_ENABLED = '1'
+          go build -ldflags="-s -w -H windowsgui" -o ../dist-release/xuanke-windows-amd64.exe .
 
       - name: Build Windows Console (CGO=1, native embedded ddddocr)
         shell: pwsh
         run: |
           cd backend
-          CGO_ENABLED=1 go build -ldflags="-s -w" -o ../dist-release/xuanke-windows-amd64-console.exe .
+          $env:CGO_ENABLED = '1'
+          go build -ldflags="-s -w" -o ../dist-release/xuanke-windows-amd64-console.exe .
 
       - name: Package Windows Archives
         shell: pwsh

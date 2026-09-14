@@ -62,6 +62,10 @@ export default function App() {
     saveSessions(next)
     setSessions(next)
     setInAdmin(false)
+    // F15-07（第 15 轮）：清除代理目标账号——管理员代理查看学生大厅退出后，重登同一
+    // 管理员若不重置 targetAccount，渲染会直接命中代理分支再次掉进学生 Select，
+    // 跳过管理页；登出即放弃代理态，重登后回到管理页。
+    setTargetAccount(null)
   }
 
   // 当前账号的会话被剔除后自动切到剩余账号（无账号则回登录页）

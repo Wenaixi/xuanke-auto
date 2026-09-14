@@ -248,12 +248,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       lastJson.current = json
       resetRetry() // 保存成功：清掉退避重发状态
     } catch (e: any) {
+      // F15-02（第 15 轮）：卸载后失败也绝不 toast——与 F13-C2"卸载后不轰炸"意图对齐
+      if (unmountedRef.current) return
       toast({
         title: "目标保存失败",
         description: e.message || "通信异常，请重试",
         variant: "destructive",
       })
-      if (unmountedRef.current) return // 已卸载：失败也不再安排重发
       //n14（第 3 轮）：失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
       //网络抖动/瞬时故障下不再退化为"尽力而为"，直至成功或用户新改动接管。
       dirtyRef.current = true
@@ -276,8 +277,17 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 目标的镜像、无需回写；而进页数据未就绪时 selected/publishes 为空，此时 PUT
   // {"targets":[]} 会把后端已有目标整包抹除（窗口关闭后 publishes 恒空时必现）。
   // 清空全部目标仍是用户改动（rev>0），仍正确落库。
+  // F15-01（第 15 轮）：rev>0 但 publishes 已空（窗口开启瞬间平台短暂清空 / 关闭后
+  // 恒空）时也不能整包覆盖——targets 由 [publishes × selected] 联查构建，任一为空则
+  // targets=[] 是一个"假清空"，会把已落库目标永久抹除。守卫"发布缺席 + 已有选中
+  // 目标"=数据缺席绝非用户意图；只有 selected 全空（用户明确清空全部）才合法 PUT []。
+  const publishesMissing = publishesRef.current.length === 0 && selectedCount > 0
   const flushTargets = () => {
     if (rev === 0) return
+    if (publishesMissing) {
+      dirtyRef.current = true // 发布缺席：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
+      return
+    }
     const targets: Target[] = []
     for (const p of publishesRef.current) {
       const list = selected[p.publish_id] ?? []
@@ -321,6 +331,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return targets
     }
     const timer = setTimeout(async () => {
+      // F15-01（第 15 轮）：与 flushTargets 同款守卫——防抖后实时读 publishes 为空且
+      // 已有选中目标时，构建出的 [] 是"假清空"，跳过本次保存保留脏（等发布恢复/下次
+      // 改动再落库）。防抖与 flush 两处复用同一守卫语义，只修一条腿仍会漏。
+      if (publishesMissing) {
+        dirtyRef.current = true
+        return
+      }
       targetRef.current = build()
       if (savingRef.current) {
         dirtyRef.current = true // 保存进行中：标记脏，完成后补发
@@ -389,14 +406,25 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           <div className="flex items-center gap-2 text-neutral-400 min-w-0">
             <Clock className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
             {/* N8：已开放状态以调度器 window_opened 为准（服务端有 ~640ms 校准偏差，
-                本地倒计时到点 ≠ 平台开窗）；window_opened 才显示"已开放"高亮 */}
+                本地倒计时到点 ≠ 平台开窗）；window_opened 才显示"已开放"高亮。
+                F15-03（第 15 轮）：此前 `|| cd.isExpired` 让窗口关闭后（open_time 为
+                过去时刻 → isExpired 恒 true）横幅永远显示"已开放"，与同屏 F14-03 空态卡
+                自相矛盾——isExpired 只是本地"倒计时走到 0"，不说明窗口开放或已关闭；
+                改为 window_closed 优先显"已关闭"，否则按 window_opened 判定。 */}
             {!stateData || !openTimeStr ? (
               <span>正在同步选课开放时间...</span>
-            ) : stateData.window_opened || cd.isExpired ? (
+            ) : stateData.window_closed ? (
+              <span className="text-neutral-400 font-medium flex items-center gap-1.5 whitespace-nowrap">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-500" />
+                选课窗口已关闭
+              </span>
+            ) : stateData.window_opened ? (
               <span className="text-white font-medium flex items-center gap-1.5 whitespace-nowrap">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 选课窗口已开放
               </span>
+            ) : cd.isExpired ? (
+              <span className="truncate">本地已到开窗点，等待平台窗口开放...</span>
             ) : (
               <span className="truncate">
                 距开放还有{" "}

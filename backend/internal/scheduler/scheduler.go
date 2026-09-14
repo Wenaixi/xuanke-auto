@@ -1114,6 +1114,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			}
 			// C-4（第 3 轮）：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
 			// 全局锁，黄金冲刺期里其它账号的探测/提交/时钟对齐全被锁死；锁外复核完再回锁收尾。
+			// F13-m2（第 13 轮）：锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1
+			// 串行）只发生在持锁段、不跨此网络段——黄金期不因 DB 写停顿网络往返；持锁写
+			// 窗口仅成功分支两行（微秒级），彻底消除需独立 DB goroutine，边际不动（观察项）。
 			s.mu.Unlock()
 			full, cErr := s.classFullRealtime(acct, t.ClassID)
 			s.mu.Lock()

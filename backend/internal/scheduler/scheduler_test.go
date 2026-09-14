@@ -1266,32 +1266,11 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 	s.mu.Unlock()
 }
 
-// TestReloginFailureResetsCounter 验证重登失败后失败计数复位为 1（而非保持封顶）：
-// Vision 服务持续故障 5 轮封顶后一旦恢复，账号必须能在基础 30s 间隔后再次尝试重登，
-// 绝不能因 reloginFail 恒为 5 而把账号永续锁死在 10 分钟退避 (CRITICAL M4)。
-func TestReloginFailureResetsCounter(t *testing.T) {
-	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
-	acct := "acct1"
-
-	// 模拟连续失败已到封顶 5 次
-	s.mu.Lock()
-	s.reloginFail[acct] = 5
-	s.mu.Unlock()
-
-	// 一次重登失败后，失败计数应复位为 1（下次可立即以基础间隔再试）
-	s.mu.Lock()
-	// 新增逻辑（GREEN 目标）：失败后 reloginFail 回到 1，不保留 5
-	s.reloginFail[acct] = 1
-	s.mu.Unlock()
-
-	if s.reloginFail[acct] != 1 {
-		t.Fatalf("重登失败后失败计数应复位为 1，实际 %d", s.reloginFail[acct])
-	}
-	// 复位后基础退避即 30s，保证 Vision 恢复后账号能较快重新尝试
-	if wait := s.reloginBackoff(s.reloginFail[acct]); wait != 30*time.Second {
-		t.Fatalf("失败 1 次后的退避应为基础 30s，实际 %v", wait)
-	}
-}
+// TestReloginFailureKeepsBackoff 已契约化"重登失败后 reloginFail 保留增长、成功才清零"
+// （C1，退避表逐次拉长防线）——真实失败路径从不清零为 1。
+// F13-i1（第 13 轮）：本测试测试"复位为 1"的语义，但实现任何失败路径都不复位为 1
+// （开发者当年手写两行"模拟实现"），是恒绿的无效测试——删除，由下方两个真实路径
+// 测试 TestReloginBackoffWindowBlocksManualTriggers / TestReloginFailureKeepsBackoff 覆盖。
 
 // TestSubmitAllUsesAlignedClock 验证提交时刻 lastSubmit 用对齐时钟写入（MAJOR-F）：
 // 时钟偏差下提交闸门比较两端（tick 的 nowAligned 与 lastSubmit）必须同基准，

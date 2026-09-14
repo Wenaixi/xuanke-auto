@@ -407,10 +407,13 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
     queryFn: () => api<AdminConfig>("/admin/config", { session: sessionToken }),
   })
 
-  // 后端配置加载后仅回填一次表单（key 为脱敏掩码，保存时留空=不改）
+  // 后端配置加载后回填表单。首次加载回填全部字段；配置保存成功后（configQuery.refetch）
+  // 更新 refetchKey → effect 重跑，把后端"实际生效值"回填（F7-02：后端对 open_time 等
+  // 可能静默忽略/规范化，若表单只回显一次，管理员看到的会是与生效配置分叉的陈旧值）。
+  const [configEpoch, setConfigEpoch] = useState(0) // 配置重新加载代际：每次自增触发回填
   const loaded = configQuery.data
   useEffect(() => {
-    if (loaded && !initializedRef.current) {
+    if (loaded) {
       initializedRef.current = true
       setBaseUrl(loaded.vision_base_url)
       setModel(loaded.vision_model)
@@ -419,7 +422,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       setOpenTime(loaded.open_time)
       setActivationOn(loaded.activation_enabled)
     }
-  }, [loaded])
+  }, [loaded, configEpoch])
 
   const save = async () => {
     setSaving(true)
@@ -437,6 +440,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       await api("/admin/config", { method: "PUT", session: sessionToken, body: JSON.stringify(body) })
       setApiKey("")
       configQuery.refetch()
+      setConfigEpoch((e) => e + 1) // F7-02：让 refetch 的返回值经 effect 回填到表单（与生效值对齐）
       toast({ title: "配置已保存", description: "已生效，无需重启服务" })
     } catch (e: any) {
       toast({ title: "保存失败", description: e.message || "通信异常", variant: "destructive" })

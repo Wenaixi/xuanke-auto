@@ -620,6 +620,30 @@ func TestAdminConfigHotReload(t *testing.T) {
 		t.Fatalf("无效打开时间不应接受: %v", j)
 	}
 
+	// F7-02（第 7 轮）：空 open_time 是"显式清空开放时间"，不再静默忽略——
+	// 必须真实生效（内存 + 落库 + admin config 回显全为空），调度器解除窗口机制。
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":""}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("清空开放时间应成功（不再静默忽略）: %d %v", code, j)
+	}
+	// 生效配置回显为空
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/config", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("读取配置失败: %d %v", code, j)
+	}
+	cfg2, _ := j["data"].(map[string]any)
+	if ot, _ := cfg2["open_time"].(string); ot != "" {
+		t.Fatalf("清空 open_time 后回显应为空串（此前假成功是残留旧值），实际 %q", ot)
+	}
+	// 落库也为空（重启恢复源与内存一致）
+	kv2, err := d.store.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv2["open_time"] != "" {
+		t.Fatalf("清空 open_time 后落库应为空串，实际 %q", kv2["open_time"])
+	}
+
 	// m8：带管理员会话 + 表单 Content-Type 的副作用请求必须被拒（CSRF 防线）。
 	// 路由层 requireJSONBody 对非 JSON 提交直接 403——跨站表单 POST 无法伪造 JSON 头。
 	// 本项目约定：业务码放 body.code，HTTP 状态恒定 200，故读 body 的 code 字段。

@@ -667,7 +667,17 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				changed = append(changed, "captcha_concurrency")
 			}
 			if req.OpenTime != nil {
-				if _, err := scheduler.FormatOpenTime(*req.OpenTime); err == nil {
+				if *req.OpenTime == "" {
+					// F7-02（第 7 轮）：显式空串 = 管理员"清空开放时间"，不再静默忽略。
+					// 此前空串被 FormatOpenTime 判为格式错误而静默丢弃：管理员清空时间点"保存并生效"
+					// 得到的是 code:0 假成功（时间点实际没变），调度器仍按旧时间执行（含已过期的
+					// 2026-09-13 09:00:00）而表单却显示为空——前后端与生效配置三处分叉。
+					// 空串落入 cfg.OpenTime=""，dispatchRuntimeConfig 会把打开时间清零 → 调度器
+					// openTimeNow() 归零后 WindowOpened/WindowClosed 判定不按时间点触发，等同
+					// "管理员手动解除窗口机制"，语义与 loadDotEnv"仅回填空值"一致。
+					c.OpenTime = ""
+					changed = append(changed, "open_time")
+				} else if _, err := scheduler.FormatOpenTime(*req.OpenTime); err == nil {
 					c.OpenTime = *req.OpenTime
 					changed = append(changed, "open_time")
 				}

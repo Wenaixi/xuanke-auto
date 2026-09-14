@@ -28,6 +28,8 @@ export async function api<T>(
   // 2 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不无限转圈（MAJOR-H 配套）。
   // M-10（第 3 轮）：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
   // 否则用兜底超时信号；此前 `...rest` 会把 ctrl.signal 被调用方 signal 静默覆盖。
+  // F7-09（第 7 轮）：abort 映射为友好文案——此前原生 AbortError("This operation was
+  // aborted") 直接进 toast，用户看不懂。
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
   try {
@@ -54,6 +56,13 @@ export async function api<T>(
     }
     if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
     return j.data
+  } catch (e) {
+    // F7-09：AbortError 无法识别（调用方 signal 或超时 abort 均触发）——统一映射为
+    // 超时友好文案，绝不把原生 "This operation was aborted" 泄漏给用户
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new ApiError(-2, "请求超时，请重试")
+    }
+    throw e
   } finally {
     clearTimeout(timer)
   }

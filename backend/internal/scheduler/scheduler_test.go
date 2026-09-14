@@ -929,6 +929,28 @@ func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 	}
 }
 
+// TestProbeIntervalZeroOpenTime B15-M2：open_time 为零值（全新部署未配置 / 管理员
+// PUT open_time="" 显式解除窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时，
+// probeIntervalFor 必须按 30s 常态探测——此前 `now.After(open.Add(-nearWindow))`
+// 对零值 open 恒 true 落入临门 2s 分支，且若快照非空（开窗前平台有课程但 in_date_range
+// 全 false）WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData，
+// 正是第 6 轮根因修复的"访问过于频繁"1 分钟熔断触发形态（提交已被 B11-A1 零值守卫挂起，
+// 但探测仍在 2s 高频，行为割裂）。
+func TestProbeIntervalZeroOpenTime(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
+	// 模拟管理员清空 open_time（F7-02 语义）：openTimeFn 返回零值
+	s.SetOpenTimeFn(func() time.Time { return time.Time{} })
+	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("open_time 为零值时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
+	}
+	// 反向对照：恢复未来开窗时间 → 临门期正常 2s 盯守（零值守卫不得误伤新一轮）
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
+	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
+		t.Fatalf("临门期应 2s 盯守，实际 %v", got)
+	}
+}
+
 // TestProbeIntervalWindowClosed 窗口已关闭（开放时间已过 + 快照空）时降回 30s 探测，
 // 杜绝窗口关闭后仍 2 秒高频盯守平台（浪费请求 + 日志刷屏）；
 // 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。

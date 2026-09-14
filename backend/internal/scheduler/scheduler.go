@@ -60,7 +60,15 @@ const (
 // 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
 // 窗口已关闭（开放时间已过且快照为空）时降回 30 秒——窗口结束后再高频盯守毫无意义，
 // 只会浪费请求并刷屏日志；若管理员热改开放时间到未来（新一轮），临门判断仍优先生效。
+// B15-M2（第 15 轮）：open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
+// 窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时提前返回远间隔——此前
+// `now.After(open.Add(-nearWindow))` 对零值 open 恒 true 落入临门 2s 分支，且快照非空时
+// WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
+// 提交已被 B11-A1 零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
+	if s.openTimeNow().IsZero() {
+		return probeIntervalFar
+	}
 	if now.After(s.openTimeNow().Add(-nearWindow)) {
 		if now.After(s.openTimeNow()) && s.WindowClosed() {
 			return probeIntervalFar // 开放时间已过且窗口关闭：降回 30s

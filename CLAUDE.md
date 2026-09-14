@@ -95,7 +95,9 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **验证码识别引擎二选一 + 并发限流（默认 1）**：`CaptchaRecognizer` 接口抽象——`VisionRecognizer`（硅基流动 Vision 云）/ `LocalDdddOcrRecognizer`（子进程调本机 Python ddddocr，免 API 密钥）。全局 Mutex+Cond 动态限流器（`captchaLimiter`：Acquire/Release/SetLimit 热收敛，管理员改并发即时生效，支持 3 秒内 20 次热调不死锁）；管理员「系统配置-识别引擎与并发」二选一切换并校验环境缺失自动回退 Vision；`captcha_engine`/`captcha_concurrency` 持久化 settings 重启恢复
 - **并发重登会话隔离加固（数据层 2 个 CRITICAL 连根拔除）**：
   1. **重登只信客户端内部账密**：`zhidao.ReloginIfNeeded` 与调用方传入的账号名完全解耦——客户端本身唯一绑定账号（`ensure` 分配、`Restore`/`SetCredentials` 注入），重登一律用客户端内部 `account/password` 登录自己，并发为多账号调用时绝不用空壳账密把别人的 token 写进别人的客户端（数据层 CRITICAL 1）；
-  2. **token_valid 读写串行化**：`scheduler.TokenValidFor` 与 `maybeRelogin` 统一用 `reloginMu` 串行化"决策是否重登/查询有效性"两段，消除并发重登时 `tokenValid`/`relogging` 读到的半态竞态（数据层 CRITICAL 2）。
+  2. **token_valid 读写串行化**：`scheduler.TokenValidFor` 与 `maybeRelogin` 统一用 `reloginMu` 串行化"决策是否重登/查询有效性"两段，消除并发重登时 `tokenValid`/`relogging` 读到的半态竞态（数据层 CRITICAL 2）；
+  3. **运行时登录也写账密（第 6 轮 CRITICAL 3 根治）**：`zhidao.Login` 成功分支同步 `SetCredentials(account,password,token)`——此前运行时账密登录（/api/login、`LoginByPassword`）从不注入内部账密，客户端只有 `Restore` 恢复路径有账密，导致 token 一失效 `ReloginIfNeeded` 永远报"未登录且无保存账密"、黄金期失效即全程停摆；修复后每个客户端始终只用自己的账密重登自己，绝不交叉污染。
+- **限流 IP 透传可信反代开关（第 6 轮 B6-05）**：登录/激活按 IP 分桶限流（5 次/分钟）只认 `RemoteAddr`；反代部署时学校 NAT 全校共桶互锁。`XUANKE_TRUSTED_PROXY=on` 且 RemoteAddr 为回环（真实本机反代）才信任 `X-Forwarded-For` 最右非空值——默认关闭，绝不盲信公网伪造 XFF（可刷爆他人限流桶/绕过自身限流）。
 - **窗口状态裸指针根治（调度器 MAJOR 3）**：`WindowOpened` 由返回 `*bool` 裸指针改为布尔值快照——调用方拿地址读不再被并发探测改写的内存（指针悬空竞态已根除），新增 `HasProbed` 供 admin/stats 区分"从未探测"与"探测结果为关"，`boolPtr` 残留已清除。
 
 ### 架构设计（模块化开发 + 单二进制嵌入交付）
@@ -108,6 +110,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **防逆向交付（garble 混淆）**：本地构建可用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 混淆 Windows 发布 exe（`-literals` 加密字符串字面量、`-tiny` 剥源码路径、`-ldflags` 剥符号表；实测 12.6MB → 24.7MB，strings 扫描零命中）。**注意**：CGO=1 与 garble 不兼容（garble 需 CGO=0），而 Windows 原生内嵌 ddddocr 必须 CGO=1——故自动发布流水线 release.yml 不再产出 garble 混淆版（Windows 交付即 CGO=1 原样构建；Linux/macOS 走 CGO=0 交叉编译，如需混淆可在本地手动执行）。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
 - **单二进制内嵌原生 ddddocr（彻底摆脱 Python 运行时依赖）**：ONNX 模型（common_old.onnx 13MB）+ 字符集（charsets_old.json 56KB）+ ONNX Runtime（onnxruntime.dll 16MB）经 `//go:embed` 编译进单个 exe；运行时懒加载把资源释出到 `%TEMP%\xuanke_ddddocr_assets`（dumpIfDiff 对比大小，无变化不重写），调用 `github.com/yangbin1322/go-ddddocr` 的 `Classification` 直接在进程内推理，单次识别 5~10ms。**构建双轨（build-tag）**：`native_ocr.go`（`//go:build windows && cgo`）走内嵌实现，`native_ocr_stub.go`（`!windows || !cgo`）返回 false/nil 自动回退本地 Python 桥接或 Vision——Linux/macOS 与 CGO=0 交叉编译不受影响。**引擎优先级**：router 对 `XUANKE_CAPTCHA_ENGINE=ddddocr` 先试 `NativeDdddOcrAvailable()` → 回退本地 Python → 再回退 Vision。**注意**：CGO=1 与 garble 混淆不兼容（garble 需 CGO=0），Windows 发布版必须用 CGO=1 原样构建，Linux/macOS 才走 garble。
 - **选课窗口关闭后平台行为（实测）**：窗口结束后 `findElectivesData` 返回 `code:0` 但 `publishes`/`electivesData` 全空（并非 token 失效 code=-1）；`parseElectives` 对此直接返回空快照，`FindElectives` 不再因空快照落后陷入学期列表兜底重试（兜底拿不到更多课程，纯浪费时间）；`selectElectivesClass` 对已关闭窗口返回 `code:1` 报名错误，调度器新增 `isWindowClosedError`（匹配"关闭/未开启/报名时间/已结束"）按满员记入 `full` 集合，窗口关闭后不再每个 tick 反复轰炸报名接口。
+- **全校探测节流闸门（第 6 轮 B6-04）**：`scheduler.lastProbe` 全校 30s 探测节流闸门**只归 spring 正规探测 `probe()`/`ProbeNow` 写入**；管理员穿透探测 `ProbeForAccount` 概不旁路——开窗前管理员点一次课程页若吞掉闸门，全校探测即被高频轰炸触发平台熔断（课程拉空）。
 - **日志系统与窗口关闭防御（2026-09-13 全链路补齐）**：
   - **探测日志**：`probe()` 每次成功输出"探测成功：%d 个发布，窗口状态 %v（已关闭 %v）"；`ProbeForAccount` 空快照输出"探测返回空课程快照（选课窗口关闭或学期无发布）"——"课程为什么为空"从日志一眼可查。
   - **窗口关闭状态暴露**：`SchedulerState.WindowClosed`（json `window_closed`）——快照为空且从未开过窗=已关闭，随 `/state` 下发；`handleState` 已透传。
@@ -187,6 +190,7 @@ cd backend && go test ./...（含 scheduler -race）；cd web && npm run build�
    - 触发时机：代码推送（push）至 `master` 或 `main` 分支，以及针对该分支的 Pull Request；自动忽略纯文档（.md）改动；支持并发任务自动取消旧运行（concurrency）。
    - 前端质检：基于 Node.js 22 + npm 缓存，执行 `npm ci` 与 `npm run build`（tsc 类型检查与 Vite 打包），验证前端编译完整性并将静态资产产物自动落盘至 `backend/web/dist`。
    - 后端质检：基于 Go 稳定版 + go.sum 依赖缓存，执行全量单元测试（`go test -v ./...`），并进行单二进制可执行文件打包编译验证（`CGO_ENABLED=0 go build`），确保 `//go:embed` 静态资产正确内嵌。
+   - **PowerShell 前缀赋值陷阱（第 6 轮 F6-01 实证）**：Windows job（build/交叉编译）里 `CGO_ENABLED=1 go build` 是 **CommandNotFoundException（exit 127，非终止）**——go build 漏执行或 CGO=0 静默降级，CI 假绿 + Windows 版实际没内嵌 ddddocr。一律用 `$env:CGO_ENABLED='1'` 前缀（ci.yml + release.yml 两个 Windows build step 已修正）。
 
 2. **Tag 自动化多架构打包与发布（.github/workflows/release.yml）**：
    - 触发时机：推送版本标签 `git push origin v*`（例如 `v1.0.0`）；支持 `workflow_dispatch` 手动触发。

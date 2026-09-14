@@ -62,6 +62,10 @@ export default function Login({ onLogin }: Props) {
   }
 
   const activate = async () => {
+    // F21-04（第 21 轮）：激活入口补幂等守卫——与 submit() 的 F19-02 `if (loading) return`
+    // 对称：激活按钮 disabled 依赖 React 渲染落地有延迟，连按两次可在 disabled 生效前
+    // 发出两个重复激活请求（后到的响应处理 onLogin 会把会话挤成旧值）。
+    if (activating) return
     if (!activationCode.trim()) {
       setActivateError("请输入激活码喵~")
       return

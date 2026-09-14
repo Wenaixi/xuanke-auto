@@ -193,12 +193,21 @@ export default function App() {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
                   const others = accounts.filter((a) => a !== adminName)
                   setInAdmin(false)
-                  // 第 4 轮（D4）：无其他学生账号时回登录页（避免停在 Admin 的"学生端"死路）——
-                  // 否则 current 仍是 adminName，渲染条件 `inAdmin || current === adminName` 恒真。
+                  // 第 4 轮（D4）+ F21-05（第 21 轮）：无其他学生账号时回登录页——
+                  // 否则 current 仍是 adminName，渲染条件 `inAdmin || current === adminName` 恒真，
+                  // D4 的"回登录页"从未生效。但"仅 setCurrent("")"会被 account-reselect effect
+                  // 立即弹回 accounts[0]（仍是 admin），Admin 继续显示。改为完整登出语义：
+                  // 无学生账号 = 管理员退出全部会话，清空 sessions + current → 渲染落到
+                  // 登录页且 effect 不再弹回；有学生账号则直接切到它（setInAdmin 已 false，
+                  // 若该学生也恰是 adminName 由 effect 兜底）。
                   if (others.length > 0) {
                     setCurrent(others[0])
                   } else {
+                    const next: Sessions = {}
+                    saveSessions(next)
+                    setSessions(next)
                     setCurrent("")
+                    setTargetAccount(null)
                   }
                 }}
               />

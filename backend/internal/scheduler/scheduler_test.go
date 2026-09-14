@@ -885,6 +885,46 @@ func TestSubmitIntervalSprint(t *testing.T) {
 	}
 }
 
+// TestSubmitSuspendedWhenOpenTimeCleared B11-A1：管理员显式清空 open_time（F7-02 语义
+// 解除窗口机制，runtime.reparse 置 OpenTimeParsed 为零值）后，tick 必须挂起提交——
+// 此前 !opened && !now.After(open) 在 open=零值 时恒 false，提交循环永续放行，
+// 对"已满员/已成功"目标每 1s 仍刷平台报名接口（空快照下 full 保守不解封、done/refused
+// 只拦一小部分，窗口关闭后防轰炸的 C-3 防线被 open 零值绕过）。
+func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+	// 配置目标账号（无目标时 submitAll 空转不产生调用，测不出零值守卫的作用）
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	// 注入"窗口已开启"状态，模拟已经历过开窗阶段（open 清空前 WindowOpened=true）
+	s.mu.Lock()
+	s.state.WindowOpened = true
+	s.mu.Unlock()
+	// 清空 open_time：SetOpenTimeFn 返回零值时间（管理员 PUT open_time="" 后 runtime.reparse 的行为）
+	s.SetOpenTimeFn(func() time.Time { return time.Time{} })
+
+	// 跑足够多轮 tick（每轮 50ms，共约 1.2s，远超 1s 常态提交间隔）
+	tEnd := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(tEnd) {
+		s.tick()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := fc.SelectClassCalls(61115); n != 0 {
+		t.Fatalf("open_time 清空后不得继续提交，实际调用 SelectClass %d 次", n)
+	}
+
+	// 反向对照：open_time 恢复未来时刻（新一轮窗口）且窗口未开启 → 同样挂起提交
+	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(2*time.Hour), time.Second)
+	s2.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s2.mu.Lock()
+	s2.state.WindowOpened = false
+	s2.mu.Unlock()
+	s2.tick()
+	time.Sleep(50 * time.Millisecond)
+	if n := fc.SelectClassCalls(61115); n != 0 {
+		t.Fatalf("窗口未开启时不得提交，实际调用 SelectClass %d 次", n)
+	}
+}
+
 // TestProbeIntervalWindowClosed 窗口已关闭（开放时间已过 + 快照空）时降回 30s 探测，
 // 杜绝窗口关闭后仍 2 秒高频盯守平台（浪费请求 + 日志刷屏）；
 // 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。

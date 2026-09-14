@@ -676,6 +676,12 @@ func (s *Scheduler) tick() {
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
+	// B11-A1（第 11 轮）：open 为零值（管理员 PUT open_time="" 显式解除窗口机制，F7-02）
+	// 时恒满足 !now.After(open) → 提交循环永续放行。此时窗口机制已被显式解除，
+	// 但提交仍可能对"已满员/已成功"目标反复刷平台报名接口——挂起提交，绝不放行。
+	if open.IsZero() {
+		return
+	}
 	if !opened && !now.After(open) {
 		return
 	}

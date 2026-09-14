@@ -370,6 +370,12 @@ func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target
 			status = "success"
 			result = "重启恢复：已报名成功"
 		}
+		// B10-03：重设目标且该课仍被拒绝（用户退选）时，done 恢复成功文案会掩盖
+		// 退选意图——refused 优先，强制 pending。
+		if s.refusedHas(acct, t.ClassID) {
+			status = "pending"
+			result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
+		}
 		s.state.Courses = append(s.state.Courses, CourseStatus{
 			Account:    acct,
 			PublishID:  t.PublishID,

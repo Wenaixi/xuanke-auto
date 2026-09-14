@@ -76,6 +76,7 @@ func requireJSONBody(next http.HandlerFunc) http.HandlerFunc {
 
 // Register 注册所有 API 路由到 mux，并返回包装了安全中间件的根 handler。
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
+// encrypt/decrypt 用于敏感配置（vision_key）加密入库/解密读回；Decrypt 字段仅注入备用（B10-08 起未消费）。
 func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	accts *accounts.Manager, sessions *session.Store, openTime, adminToken, adminName string,
 	activationEnabled bool, encrypt, decrypt func(string) (string, error), rt *runtime.Store) http.Handler {

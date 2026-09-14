@@ -290,11 +290,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // publishesMissing 改同步 ref 更短，且连"集合非空但 key 漂移"的偏态一并覆盖。
   const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
     const ids = new Set(pubs.map((p) => p.publish_id))
+    // F17-01（第 17 轮）：空 targets 时 every 恒真——空集防御已由各消费点的
+    // "联查产物为空 + 已有选中 = 假清空"守卫覆盖（防抖回调 + flushTargets 双闸）。
     return targets.every((t) => ids.has(t.publish_id))
   }
   const flushTargets = () => {
     if (rev === 0) return
-    if (publishesMissing) {
+    // F17-01（第 17 轮）：与防抖回调同款消费时刻守卫（同 F15-01 意图，判据从渲染期
+    // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
+    // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。
+    if (publishesRef.current.length === 0 && selectedCount > 0) {
       dirtyRef.current = true // 发布缺席：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
       return
     }
@@ -309,6 +314,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           priority: i,
         })
       })
+    }
+    // F17-01（第 17 轮）：统一"用户有勾选但联查产物为空 = 假清空"守卫——目标集由
+    // [publishes × selected] 联查构建，任一为空即 targets=[]。F15-01 判据是渲染期
+    // publishesMissing（回调时读旧闭包）；F16-01 的 every 校验对空 targets 恒真。
+    // 这里在消费时刻校验"selectedCount>0 却构建出空集"：数据缺席/错位绝非用户清空
+    // 意图，保留脏跳过；selectedCount 只随用户改动所在渲染更新，只会偏保守绝不放过。
+    if (targets.length === 0 && selectedCount > 0) {
+      dirtyRef.current = true // 联查为空：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
+      return
     }
     // F16-01：发布集合在"渲染→回调"窗口内重建（id 漂移）时，targets 的 publish_id 已
     // 不属于当前发布集 → 这份快照是错位假清空，绝不 PUT，置脏等下次正确联查再落库。
@@ -347,14 +361,26 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return targets
     }
     const timer = setTimeout(async () => {
-      // F15-01（第 15 轮）：与 flushTargets 同款守卫——防抖后实时读 publishes 为空且
-      // 已有选中目标时，构建出的 [] 是"假清空"，跳过本次保存保留脏（等发布恢复/下次
-      // 改动再落库）。防抖与 flush 两处复用同一守卫语义，只修一条腿仍会漏。
-      if (publishesMissing) {
+      // F15-01 + F17-01（第 17 轮）：防抖回调在 400ms 后执行，读到的是渲染期旧闭包
+      // （publishesMissing 恒为本次渲染推算值）。若这期间发布集被清空（开窗瞬间平台
+      // 清空 / 窗口关闭），旧守卫失效且 targetsUseCurrentPublishes 对空 targets 恒真，
+      // build() 拿空 publishesRef 产出 [] 即"假清空"照常 PUT 抹掉后端目标。
+      // 于是在消费时刻用最新 publishesRef 判"发布缺席 + 已有选中"——数据缺席绝非用户
+      // 意图，跳过本次保存保留脏（等发布恢复/下次改动再落库）；selectedCount 只可能
+      // 偏保守（用户已清空时为假阳守卫，安全方向），绝不会放过真实假清空。
+      if (publishesRef.current.length === 0 && selectedCount > 0) {
         dirtyRef.current = true
         return
       }
       const next = build()
+      // F17-01（第 17 轮）：防抖消费时刻同款"联查产物为空 = 假清空"守卫——F16-01 的
+      // every 校验对空 targets 恒真，必须独立判"selectedCount>0 却产出空集"。仅在
+      // 发布全缺席（构建来源为空的极限情况）时，selectedCount 可能滞后于本次清空
+      // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
+      if (next.length === 0 && selectedCount > 0) {
+        dirtyRef.current = true
+        return
+      }
       // F16-01：防抖消费时刻同样过"发布 id 全数校验"——publishesMissing 是渲染期旧值，只在
       // load 时一次，防抖回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
       if (!targetsUseCurrentPublishes(next, publishesRef.current)) {

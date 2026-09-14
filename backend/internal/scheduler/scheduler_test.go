@@ -1732,6 +1732,92 @@ func TestReleaseFullIfFreedKeepsFullOnUnknown(t *testing.T) {
 	}
 }
 
+// TestSetTargetsPurgesStaleState 验证重设目标只清 refused（B19-02，第 19 轮定案）：
+// done/full/rateLimited/inflight **全部保留**——done 是跨目标的持久历史事实
+// （RestoreDone 注入/手动报名 MarkDone 写入），重设清掉会把已成功课程重新提交
+// （TestRestoreDoneSkipsResubmit 固化）；full/rateLimited 是真实防轰炸状态，清了
+// 会让自动链立刻重打刚被平台拒绝的课（自愈由快照解封/退避过期提供）；inflight 防
+// 双包（网络往返完成自清）。删账号的**全量清理**归 PurgeAccount（本文件下方测试）。
+func TestSetTargetsPurgesStaleState(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+
+	// 预置各种运行态（模拟历史状态）
+	s.mu.Lock()
+	s.done[acct] = map[int]bool{classID: true}
+	s.full[acct] = map[int]bool{classID: true}
+	s.rateLimited[acct] = map[int]time.Time{classID: time.Now().Add(time.Minute)}
+	s.inflight[acct] = map[int]bool{classID: true}
+	s.mu.Unlock()
+
+	// 重设目标：上述全部必须保留（见测试注释的契约）
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+
+	s.mu.Lock()
+	if !s.doneHas(acct, classID) {
+		s.mu.Unlock()
+		t.Fatal("重设目标必须保留 done（历史成功事实，RestoreDone 恢复契约不可凿穿）")
+	}
+	if !s.fullHas(acct, classID) {
+		s.mu.Unlock()
+		t.Fatal("重设目标必须保留 full（真实满员状态，清除会让自动链立刻重打被拒课程）")
+	}
+	if !s.isRateLimitedLocked(acct, classID, time.Now()) {
+		s.mu.Unlock()
+		t.Fatal("重设目标必须保留 rateLimited（风控退避中，清除会立刻重打触发熔断）")
+	}
+	if !s.inflightHas(acct, classID) {
+		s.mu.Unlock()
+		t.Fatal("重设目标必须保留 inflight（网络在飞防双包，清除会导致并发重复发包）")
+	}
+	s.mu.Unlock()
+	// refused 必须清空：用户重新设为目标即重新接管，自动引擎恢复执行
+	s.mu.Lock()
+	s.refused[acct] = map[int]bool{classID: true}
+	s.mu.Unlock()
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refusedHas(acct, classID) {
+		t.Fatal("重设目标必须清空 refused（用户重新接管，自动引擎应恢复执行）")
+	}
+}
+
+// TestPurgeAccount 验证管理员删除账号后调度器全量清理（B19-02，第 19 轮）：
+// done/full/rateLimited/inflight/acctTargets 全部清除——重建账号绝不残留旧状态。
+func TestPurgeAccount(t *testing.T) {
+	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
+	acct := "acct1"
+	classID := 61115
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: "健美操", Priority: 0}})
+	s.mu.Lock()
+	s.done[acct] = map[int]bool{classID: true}
+	s.full[acct] = map[int]bool{classID: true}
+	s.inflight[acct] = map[int]bool{classID: true}
+	s.rateLimited[acct] = map[int]time.Time{classID: time.Now().Add(time.Minute)}
+	s.mu.Unlock()
+
+	s.PurgeAccount(acct)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.acctTargets[acct]) != 0 {
+		t.Fatal("PurgeAccount 应清空该账号目标")
+	}
+	if s.doneHas(acct, classID) || s.fullHas(acct, classID) || s.inflightHas(acct, classID) ||
+		s.isRateLimitedLocked(acct, classID, time.Now()) {
+		t.Fatal("PurgeAccount 应清空全部运行态（done/full/rateLimited/inflight）")
+	}
+	// 状态行也不得残留
+	for _, c := range s.state.Courses {
+		if c.Account == acct {
+			t.Fatalf("PurgeAccount 后不得残留账号 %s 的状态行", acct)
+		}
+	}
+}
+
 // TestWindowClosedProbeDropsToFar 窗口开过再关（开放时间已过 + 空快照）后，探测间隔必须
 // 降回 30s（C-3 C2a 残留）：此前 WindowClosed 带 !prevWindowOpened 判定导致"开过再关"恒 false，
 // 窗口关闭后仍 2s 高频探测——修复后以"开放时间已过 + 空快照"为关闭判定。
@@ -1754,6 +1840,37 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	got := s.probeIntervalFor(time.Now())
 	if got != probeIntervalFar {
 		t.Fatalf("窗口开过再关后探测间隔应降回 30s，实际 %v", got)
+	}
+}
+
+// TestGhostWindowClockFailuresSuspend 验证从未开过窗的空快照 + 时钟连续失败 ≥3 时
+// 判定"幽灵窗口已关闭"（B19-01，第 19 轮）：packaged 默认 open_time 已过 + 平台空快照
+// 环境下，WindowClosed() 必须为 true（tick 守卫挂起提交 + 探测降回 30s），
+// 自愈由时钟成功恢复（syncFailStreak 归零）提供。
+func TestGhostWindowClockFailuresSuspend(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil // 幽灵窗口形态：空快照且从未开过窗
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	// 模拟时钟连续失败 ≥3：只置进度计数（WindowClosed 兜底判定只用 syncFailStreak +
+	// 开放时间已过；syncFailedWindow 为写而不读的失败时刻留档，测试不依赖）
+	s.mu.Lock()
+	s.syncFailStreak = 3
+	s.mu.Unlock()
+	if !s.WindowClosed() {
+		t.Fatal("时钟失败 ≥3 + 空快照 + 开放时间已过应判定幽灵窗口已关闭（挂起提交 + 探测降频）")
+	}
+	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("幽灵窗口应 30s 探测（不再 2s 烧平台），实际 %v", got)
+	}
+
+	// 反向断言：时钟恢复（syncFailStreak 归零）后幽灵窗口解除——窗口若真开启应及时发起
+	s.mu.Lock()
+	s.syncFailStreak = 0
+	s.mu.Unlock()
+	if s.WindowClosed() {
+		t.Fatal("时钟恢复后幽灵窗口判定应解除（syncFailStreak 归零自愈）")
 	}
 }
 

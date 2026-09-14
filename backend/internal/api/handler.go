@@ -910,8 +910,11 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "删除失败: "+err.Error())
 		return
 	}
-	// 调度器与账号注册表同步隔离：清空内存目标（下个 tick 不再提交）+ 移除客户端。
-	d.Sched.SetTargetsForAccount(acct, nil)
+	// B19-02（第 19 轮）：删账号路径必须走 PurgeAccount 全量清理（含 done/tokenValid/
+	// relogin 族/acctData），而非 SetTargetsForAccount(nil)——后者只清 refused，残留
+	// done 会让重建账号显示"重启恢复：已报名成功"假成功、full/rateLimited 让自动链静默跳过、
+	// inflight 阻塞手动报名。PurgeAccount 与 DeleteAccount 事务（清库行）配成"内存+库"双清。
+	d.Sched.PurgeAccount(acct)
 	d.Accounts.Remove(acct)
 	// 吊销该账号签发的全部会话（MAJOR-A）：被删账号既有浏览器令牌立即失效，
 	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。

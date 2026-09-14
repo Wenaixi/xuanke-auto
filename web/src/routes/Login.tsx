@@ -29,6 +29,11 @@ export default function Login({ onLogin }: Props) {
   const [activateError, setActivateError] = useState("")
 
   const submit = async () => {
+    // F19-02（第 19 轮）：提交入口先查进行中标记——按钮 disabled 靠 React 状态渲染
+    // 落地有延迟，连按两次 Enter/快速双击可在 `disabled` 生效前发出两个重复登录请求：
+    // 教务多份并发登录会互相挤掉会话（旧 token 失效），且验证码识别并发放大平台限流
+    // 压力。loading 本身就是"上一发在飞"的可靠判据，入口幂等短路。
+    if (loading) return
     if (!account.trim() || !password) {
       setError("请完整输入教学账号与登录密码喵~")
       return

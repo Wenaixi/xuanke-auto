@@ -477,9 +477,10 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	}
 	s.acctData[acct] = data
 	s.acctDataAt[acct] = now
+	// B5-10（第 5 轮）：ProbeForAccount 只写该账号专属快照，不动全局 lastData/lastDataAt。
+	// 管理员 ?account=A 穿透探测若写全局帧会污染全局快照（年级不同的帧），
+	// 页面 ElectivesSnapshot 读全局帧时看到错年级课程——年级串线根因之一。
 	s.lastProbe = now
-	s.lastData = data
-	s.lastDataAt = now
 	s.mu.Unlock()
 	return data, nil
 }
@@ -756,6 +757,19 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			log.Printf("[scheduler] 账号 %s 无保存账密，无法自动重登（请手动重新登录）", acct)
 		}
 	}()
+}
+
+// MarkTokenValid 手动登录成功时恢复该账号的 token 有效性标记（B5-01）：
+// tokenValid 唯一的自动清零路径是 maybeRelogin 自动重登成功分支；若自动重登
+// 长期失败（Vision 故障 / 无保存账密"请手动重新登录"），用户手动登录成功后仍显示
+// "已失效·自动恢复中"无恢复路径。手动登录成功路径（issueSession）调用本方法，
+// 清 tokenValid 失效标记与重登失败计数，前端 /state 立即恢复"有效"。
+func (s *Scheduler) MarkTokenValid(acct string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tokenValid, acct)
+	delete(s.reloginFail, acct)
+	delete(s.relogging, acct)
 }
 
 // reloginResult 重登结果（异步回传到 tick 主循环统一处理）。
@@ -1216,6 +1230,12 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 		s.done[acct] = make(map[int]bool)
 	}
 	s.done[acct][classID] = true
+	// B5-07（第 5 轮）：手动报名成功同样解除 refused——用户手动重选（成功）即表达
+	// "我要这门课"，自动引擎应恢复接管（此前 refused 只在 SetTargetsForAccount 清空，
+	// 手动重选成功但未重设目标时 refused 卡死，窗口重开后自动引擎永久跳过该课）。
+	if s.refused[acct] != nil {
+		delete(s.refused[acct], classID)
+	}
 	if s.inflight[acct] != nil {
 		delete(s.inflight[acct], classID)
 	}

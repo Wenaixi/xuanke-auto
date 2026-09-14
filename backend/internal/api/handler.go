@@ -187,7 +187,9 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeJSON(w, 1, nil, "激活码无效或已用尽")
+		// B5-08（第 5 轮）：ConsumeActivationCode 现在对"激活码无效/用尽/该账号已激活"
+		// 统一返回 (false, nil)——已激活账号不再扣次，文案如实区分，避免"激活成功"假象。
+		writeJSON(w, 1, nil, "激活码无效、已用尽或该账号已激活")
 		return
 	}
 	d.issueSession(w, acct)
@@ -199,6 +201,10 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 		log.Printf("[api] 保存账号名失败: %v", err)
 	}
 	sess := d.Sessions.Create(acct)
+	// B5-01（第 5 轮）：手动登录成功即恢复调度器的 token 有效性标记——若此前自动重登
+	// 失败（Vision 故障/无保存账密）导致 tokenValid 卡在失效，手动重新登录是本系统的
+	// 另一条合法恢复路径，恢复后前端 /state 立即回"有效"（不再永久"已失效·自动恢复中"）。
+	d.Sched.MarkTokenValid(acct)
 	d.Store.AppendLog(acct, 0, "login", "账号 "+acct+" 登录成功", true)
 	writeJSON(w, 0, map[string]string{"token": sess, "account": acct}, "登录成功")
 }
@@ -519,17 +525,16 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		codes := make([]string, 0, req.Count)
-		// A8（第 4 轮）：先全量生成再一起落库——避免循环中途落库，rand 失败 panic（recover 500）
-		// 时前 N-1 个码已入库但响应被吞，产生无人知晓、可被分发的"隐身码"滞留激活码表。
-		// 全部生成成功后再入库：任何失败都不产生半批滞留。
+		// A8（第 4 轮）+ B5-02（第 5 轮）：先全量生成、再单事务一起落库——
+		// ①循环中途 rand panic（recover 500）不再让前 N-1 个码滞留；
+		// ②落库本身原子（CreateActivationCodes 单事务），任一条 INSERT 失败整体回滚，
+		// 彻底杜绝"部分入库 + 响应报错"的隐身码场景。任何失败都不产生半批滞留。
 		for i := 0; i < req.Count; i++ {
 			codes = append(codes, newActivationCode())
 		}
-		for _, code := range codes {
-			if err := d.Store.CreateActivationCode(code, req.Uses); err != nil {
-				writeJSON(w, 1, nil, "生成激活码失败: "+err.Error())
-				return
-			}
+		if err := d.Store.CreateActivationCodes(codes, req.Uses); err != nil {
+			writeJSON(w, 1, nil, "生成激活码失败: "+err.Error())
+			return
 		}
 		writeJSON(w, 0, codes, "生成成功")
 	case http.MethodDelete:

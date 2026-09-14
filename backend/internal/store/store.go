@@ -210,6 +210,23 @@ func (s *Store) CreateActivationCode(code string, totalUses int) error {
 	return err
 }
 
+// CreateActivationCodes 批量新建激活码（B5-02）：全部码在同一事务内原子落库——
+// 任一条 INSERT 失败整体回滚，绝不产生"前 N-1 个已入库、响应报错"的隐身码滞留。
+// SQLite 单写者串行化，事务无并发锁成本；失败时调用方得到一致性错误并重试整批。
+func (s *Store) CreateActivationCodes(codes []string, totalUses int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, code := range codes {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO activation_codes (code, total_uses) VALUES (?, ?)", code, totalUses); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // IsActivated 查询账号是否已激活。
 func (s *Store) IsActivated(acct string) (bool, error) {
 	var n int
@@ -238,7 +255,18 @@ func (s *Store) ConsumeActivationCode(code, acct string) (bool, error) {
 	if n == 0 {
 		return false, nil // 激活码不存在或次数已用尽
 	}
-	if _, err := tx.Exec("INSERT OR IGNORE INTO activations (account) VALUES (?)", acct); err != nil {
+	// B5-08（第 5 轮）：已激活账号绝不重复扣次。INSERT OR IGNORE 对已激活账号静默跳过，
+	// 但这里仍返回 (true, nil)——次数被扣、账号无变化、前端显示"激活成功"实未生效。
+	// 先查询是否已激活：已激活直接返回 (false, nil) 且不扣次（事务回滚），
+	// 让前端提示"该账号已激活"，杜绝双扣。
+	var nAct int
+	if err := tx.QueryRow("SELECT count(*) FROM activations WHERE account = ?", acct).Scan(&nAct); err != nil {
+		return false, err
+	}
+	if nAct > 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec("INSERT INTO activations (account) VALUES (?)", acct); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()

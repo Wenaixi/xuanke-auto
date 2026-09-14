@@ -218,6 +218,16 @@ export default function Login({ onLogin }: Props) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="activate-dialog-title"
+          // F20-03（第 20 轮）：补 Esc 关闭——F7-03 注释承诺"Esc 关闭回归键盘可达性"但
+          // 实现从未落地（裸 div 无 keydown 处理），键盘用户只能 Tab 到"取消"按钮；
+          // 与取消按钮同逻辑（清待激活账号/票据/错误），激活中不响应防误关。
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !activating) {
+              setPendingAccount("")
+              setPendingTicket("")
+              setActivateError("")
+            }
+          }}
         >
           <div className="w-full max-w-sm rounded-[var(--radius-lg)] glass-strong border border-neutral-700 shadow-2xl">
             <div className="p-6 pb-4">

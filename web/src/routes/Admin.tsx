@@ -65,6 +65,8 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
       // 明文部署、iframe 嵌入、权限被拒时抛错落入 catch 提示"未授权剪贴板"，管理员复制
       // 激活码整链失效。降级：手动构造 textarea 走已废弃的 document.execCommand("copy")
       // 兜底（旧兼容路径，同步执行），仍失败才提示（且把完整激活码展示给管理员抄录）。
+      // F20-02（第 20 轮）：textarea 不设 readOnly 时部分浏览器会从可编辑区弹出软键盘或
+      // 选择行为异常导致 execCommand 返回 false——补 readOnly 加固复制兜底稳定性。
       if (!navigator.clipboard || !navigator.clipboard.writeText) {
         throw new Error("clipboard API 不可用")
       }
@@ -80,6 +82,8 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
         ta.value = code
         ta.style.position = "fixed"
         ta.style.opacity = "0"
+        // F20-02（第 20 轮）：readOnly 固化，防可编辑区干扰选中/复制
+        ta.readOnly = true
         document.body.appendChild(ta)
         ta.select()
         ok = document.execCommand("copy")
@@ -197,12 +201,16 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
 
         {/* N3：删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
         {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
+        {/* F20-04（第 20 轮）：补 Esc 关闭——与 Login 激活弹窗对齐，键盘可达性闭环 */}
         {pendingDelete && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-acct-modal-title"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !deleting) setPendingDelete(null)
+            }}
           >
             <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">

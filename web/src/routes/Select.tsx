@@ -133,21 +133,34 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 外部 `selected` 导致数据重取后回显永久失效的问题。
   // 第 4 轮：用户已编辑过目标（rev>0）时跳过回显——用户"清空全部目标"后 2s 轮询
   // 返回的旧 courses 若再次回填，会把清空静默撤销并重新保存旧目标（回显与防抖保存竞态）。
+  // F19-01（第 19 轮）：回显的 courses 可能携带"不属于当前发布集合"的 publish_id（旧学期
+  // 残留/发布集合整体重建后后端 /state courses 仍按旧 publish_id 下发）——此前照单全收
+  // 构建的 initial 也带幽灵 publish_id；此时 flushTargets/防抖保存的 targetsUseCurrentPublishes
+  // 校验必失败，一路置脏跳过（安全方向：绝不假清空），但也永远不落库——目标被静默"锁死"
+  // 在读不出的旧条目上，用户改不了也存不上。修复：回显即过滤，只用当前 publishes 集合内的
+  // publish_id 构建 initial（与消费时刻校验同一判据），幽灵条目根本进不了 selected。
   useEffect(() => {
     if (rev > 0) return
-    if (stateData?.courses && stateData.courses.length > 0) {
-      setSelected((prev) => {
-        if (Object.values(prev).some((arr) => arr.length > 0)) return prev
-        const initial: Record<number, ClassItem[]> = {}
-        const ordered = [...stateData.courses].sort((a, b) => a.priority - b.priority)
-        for (const c of ordered) {
-          const item: ClassItem = { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem
-          ;(initial[c.publish_id] ??= []).push(item)
-        }
-        return initial
-      })
-    }
-  }, [stateData, rev])
+    const courses = stateData?.courses
+    if (!courses || courses.length === 0) return
+    // F19-01：effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
+    // 与 F18-01 同款构建中断陷阱——绝不能反向引用 effect 之后声明的 publishes。
+    const pubs = data?.publishes ?? []
+    if (pubs.length === 0) return
+    const currentIds = new Set(pubs.map((p) => p.publish_id))
+    setSelected((prev) => {
+      if (Object.values(prev).some((arr) => arr.length > 0)) return prev
+      const initial: Record<number, ClassItem[]> = {}
+      const ordered = [...courses]
+        .sort((a, b) => a.priority - b.priority)
+        .filter((c) => currentIds.has(c.publish_id)) // F19-01：幽灵 publish_id 不进 selected
+      for (const c of ordered) {
+        const item: ClassItem = { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem
+        ;(initial[c.publish_id] ??= []).push(item)
+      }
+      return initial
+    })
+  }, [stateData, data, rev])
 
   const publishes = data?.publishes ?? []
 

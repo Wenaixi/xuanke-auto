@@ -40,6 +40,10 @@ type SchedulerState struct {
 	WindowClosed bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
 	TokenValid   bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
 	Courses      []CourseStatus `json:"courses"`
+	// EmptyProbeRuns B20-02（第 20 轮）："空快照且从未开窗"的连续探测轮数——WindowClosed
+	// 视同关闭判据之一（探测量变），由 probe() 入账推进、开窗/非空快照归零；零值=尚未连续
+	// 探测到 3 轮（首探 1 次、二探 2 次都不算）。json 省略：前端/外部无需感知内部量变。
+	EmptyProbeRuns int `json:"-"`
 }
 
 // 探测分阶段间隔：平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒紧密盯守。
@@ -706,7 +710,24 @@ func (s *Scheduler) WindowClosed() bool {
 	if s.syncFailStreak >= 3 && !s.openTimeNow().IsZero() {
 		return true
 	}
+	// B20-02（第 20 轮）：视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
+	// 恒 false，B19-01 时钟兜底覆盖不到）+ 探测返回空快照 ≥3 次：平台窗口从未开启/已关闭且
+	// 从未被确认开过（B18-M1 主判据 requirement 不满足 + B19-01 时钟正常时兜底不触发），
+	// 2s 探测/1s 提交恒高频轰炸 findElectivesData + 报名接口（防轰炸契约闭环缺口）。
+	// 首次探测（acctDataAt 全空）不计数、不误伤；runs≥3 即连续三轮空快照确证"从未开过"，
+	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、管理员热改开放时间，success 探测
+	// 数据后势必推开始 open 实况、emptyRuns 归零自愈。
+	if !s.openTimeNow().IsZero() && !s.state.WindowOpened && s.state.EmptyProbeRuns >= 3 {
+		return true
+	}
 	return false
+}
+
+// emptyRunsFor 统计该开放时间下"空快照且未开窗"的连续探测轮数——由 probe() 在每次探测
+// 结果入账时同步推进，判据与探测轮数对齐（无时钟依赖）。闭源：仅有 WindowClosed/probe 使用。
+func (s *Scheduler) emptyRunsFor(open time.Time) int {
+	_ = open
+	return s.state.EmptyProbeRuns
 }
 
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
@@ -886,6 +907,15 @@ func (s *Scheduler) probe() {
 	// WindowClosed 挂起提交，把"还没开窗待开"误停成"永不提交"（开窗瞬间探测推进、
 	// 黄金期全停摆）。已开过窗再关 = 窗口关闭的实质语义，未开过不算关闭。
 	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
+	// B20-02（第 20 轮）：探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
+	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
+	// 注意绝不触碰 state.WindowClosed（由 B18-M1/B19-01 判据独占）：这里只维护量变计数，
+	// WindowClosed() 读取它做"视同关闭"兜底——不写 state.WindowClosed 避免误标真实关闭。
+	if !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow()) {
+		s.state.EmptyProbeRuns++
+	} else {
+		s.state.EmptyProbeRuns = 0
+	}
 	// B10-05：prevWindowOpened 是写而不读的死字段（C-3 已去掉 !prevWindowOpened 条件），
 	// 删除避免误导后续维护者以为还有清提交闸门的路径。
 	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)

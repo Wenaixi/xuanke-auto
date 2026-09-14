@@ -1925,6 +1925,60 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	}
 }
 
+// TestGhostWindowEmptyProbesSuspend 验证从未开过窗的空快照 + 时钟接口正常时，连续
+// 空快照探测 ≥3 轮后必须判定"幽灵窗口已关闭"（B20-02，第 20 轮）——B19-01 的时钟
+// 兜底覆盖不到该形态（syncFailStreak 恒 0），此前 WindowClosed() 恒 false：
+// tick 提交段 1s 周期 SelectClass（平台回 code=1"无效的课程ID"）+ 实时复核 StudentCounts
+// 空 → 下轮重打，probeIntervalFor 恒 2s 高频探测，防轰炸契约闭环缺口。
+// 量变判据：EmptyProbeRuns≥3 且从未开窗且开放时间已过 → 视同关闭；开窗/非空快照/未到
+// 开放时间即归零自愈（不误伤开窗前正常空快照的临门盯守）。
+func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil // 幽灵窗口形态：空快照且从未开过窗
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+
+	// 连续探测入账前（EmptyProbeRuns=0）：不得误判关闭（首次探测 / 开窗前正常空快照）
+	if s.WindowClosed() {
+		t.Fatal("从未连续探测到空快照前不得视同关闭（首探不计数）")
+	}
+	// 入账 1-2 轮：仍未达 3 轮阈值，不得误判（连续两次空快照可能是平台抖动）
+	s.mu.Lock()
+	s.state.EmptyProbeRuns = 2
+	s.mu.Unlock()
+	if s.WindowClosed() {
+		t.Fatal("连续 2 轮空快照不应视同关闭（阈值 3）")
+	}
+	// 第 3 轮空快照：触发幽灵窗口判定
+	s.mu.Lock()
+	s.state.EmptyProbeRuns = 3
+	s.mu.Unlock()
+	if !s.WindowClosed() {
+		t.Fatal("连续 3 轮空快照 + 开放时间已过 + 从未开窗应视同关闭（挂起提交 + 探测降频）")
+	}
+	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("幽灵窗口应 30s 探测（不再 2s 烧平台），实际 %v", got)
+	}
+
+	// 反向断言 1：开窗后（state.WindowOpened=true）无论空快照轮数多少都不视同关闭
+	s.mu.Lock()
+	s.state.WindowOpened = true
+	s.mu.Unlock()
+	if s.WindowClosed() {
+		t.Fatal("窗口已开（曾确证开启）后不得视同关闭——黄金期提交/探测绝不挂起")
+	}
+
+	// 反向断言 2：空快照轮数归零（非空快照探测入账）后幽灵窗口判定解除
+	s.mu.Lock()
+	s.state.WindowOpened = false
+	s.state.EmptyProbeRuns = 0
+	s.mu.Unlock()
+	if s.WindowClosed() {
+		t.Fatal("EmptyProbeRuns 归零（窗口若真开、探测拿到非空快照）后应解除")
+	}
+}
+
 // TestGhostWindowClockFailuresSuspend 验证从未开过窗的空快照 + 时钟连续失败 ≥3 时
 // 判定"幽灵窗口已关闭"（B19-01，第 19 轮）：packaged 默认 open_time 已过 + 平台空快照
 // 环境下，WindowClosed() 必须为 true（tick 守卫挂起提交 + 探测降回 30s），

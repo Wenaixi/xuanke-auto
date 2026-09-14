@@ -647,7 +647,12 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	if data != nil && len(data.Publishes) == 0 {
 		log.Printf("[scheduler] 账号 %s 探测返回空课程快照（选课窗口关闭或学期无发布），按空数据处理", acct)
 	}
-	now := time.Now()
+	// B20-03（第 20 轮）：时间基准统一——探测时间戳写入侧改用对齐钟（与 tick 判读
+	// `now.Sub(lastProbe)` / `ElectivesSnapshotFor` 的 `time.Since(acctDataAt)` / 提交节流
+	// `submitIntervalFor` 同一时间基）。此前写入用本地 `time.Now()`、读用对齐钟，
+	// 与 B16-M1 已消灭的"写入本地/读对齐"混用模式同族（偏差 ~640ms 对 2s/30s 节流与
+	// `now.After(open)` 窗口判点无实质错误，但契约不自洽）。
+	now := s.nowAligned()
 	s.mu.Lock()
 	if s.acctData == nil {
 		s.acctData = make(map[string]*zhidao.ElectivesData)
@@ -750,7 +755,8 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 		}
 		return nil, err
 	}
-	now := time.Now()
+	// B20-03（第 20 轮）：时间基准统一——与 ProbeForAccount 同款，写入侧用对齐钟
+	now := s.nowAligned()
 	s.mu.Lock()
 	s.lastProbe = now
 	s.lastData = data
@@ -839,7 +845,9 @@ func (s *Scheduler) probe() {
 	s.probing = true
 	s.mu.Unlock()
 
-	now := time.Now()
+	// B20-03（第 20 轮）：时间基准统一——与 ProbeForAccount/ProbeNow 同款，写入侧用
+	// 对齐钟（判读侧 tick `now.Sub(lastProbe)` 已在对齐钟下，避免两套时间基混用）
+	now := s.nowAligned()
 	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照。
 	// F12-B2 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
 	// 每账号各起 goroutine 调 ProbeForAccount 不受保护——临门/开窗期 probeIntervalNear

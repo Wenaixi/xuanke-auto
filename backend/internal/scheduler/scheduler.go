@@ -829,14 +829,14 @@ func (s *Scheduler) maybeRelogin(acct string) {
 	}
 	log.Printf("[scheduler] 账号 %s 触发自动重登（原因：教务 token 失效，连续失败 %d 次）", acct, s.reloginFail[acct])
 	s.relogging[acct] = true // 标记重登中
+	// F12-B3：tokenValid 失效标记在此处置位、且与决策同持两把锁——发起重登即"token
+	// 已知失效"，本就不该等 goroutine 开头再补写。此前 goroutine 开头才置位：用户手动
+	// 登录成功（MarkTokenValid 清 tokenValid/relogging/reloginFail）与在途重登并发时，
+	// 置位会覆写已被清理的标记，前端 /state 短暂回"已失效·自动恢复中"后 jitter。
+	s.tokenValid[acct] = true
 	s.mu.Unlock()
 
 	go func() {
-		// 重登期间对平台屏蔽该账号提交（无效 token 请求纯浪费 + 熔断风险）
-		s.mu.Lock()
-		s.tokenValid[acct] = true
-		s.mu.Unlock()
-
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
@@ -886,6 +886,13 @@ func (s *Scheduler) maybeRelogin(acct string) {
 // "已失效·自动恢复中"无恢复路径。手动登录成功路径（issueSession）调用本方法，
 // 清 tokenValid 失效标记与重登失败计数，前端 /state 立即恢复"有效"。
 func (s *Scheduler) MarkTokenValid(acct string) {
+	// F12-B3：MarkTokenValid 与 TokenValidFor/maybeRelogin 对齐锁序（reloginMu→s.mu）——
+	// 此前只持 s.mu：手动登录成功（issueSession 恢复路径）会清 tokenValid/reloginFail/
+	// relogging，但"发起决策"那段仍在 reloginMu 下、且 goroutine 开头曾把 tokenValid
+	// 覆写回 true，两条路径无法串行化 → 手动登录与在途自动重登并发时状态闪动。
+	// 现在同步取锁，decision 段内完成清除，与重登发起/查询有效性串行，杜绝半态读。
+	s.reloginMu.Lock()
+	defer s.reloginMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.tokenValid, acct)

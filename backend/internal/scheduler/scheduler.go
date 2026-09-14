@@ -107,6 +107,7 @@ type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
 	UpdateIDToken(acct, idToken string) error // 自动重登后落库新 token
+	DeleteSuccess(acct string, classID int) error // B8-M2（第 8 轮）：手动退选后删除 success 行
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -251,19 +252,20 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 		s.mu.Unlock()
 		return
 	}
-	// 防止重入：上一轮同步仍在进行（未落地），本 tick 不叠加
-	if !s.syncing {
-		s.syncing = true
-		s.lastSyncStart = now
-	}
-	inflight := s.syncing
-	if inflight {
-		s.lastSyncStart = now // 上一次在途失败/未落地：把发起时刻往前推，成功后回写
-	}
-	s.mu.Unlock()
-	if !inflight {
+	// 防重入：上一轮同步仍在进行（未落地），本 tick 不叠加。
+	// B8-M1（第 8 轮）：此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
+	// 中 syncing 恒被置 true、inflight 恒 true——死代码，每个 tick（300ms）在同步失败期
+	// 都会再 spawn 一个 SyncServerTime goroutine（绕开登录频率闸门、堆积在途、streak 并发
+	// 累加诱发瞬断复位风暴）。现在在途即直接返回，真正的单飞语义。
+	if s.syncing {
+		s.mu.Unlock()
 		return
 	}
+	s.syncing = true
+	s.lastSyncStart = now
+	s.mu.Unlock()
+
+	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime（见 B7-M1）
 
 	if client, ok := s.clients.AnyClient(); ok {
 		if syncer, ok := client.(TimeSyncer); ok {
@@ -1320,6 +1322,9 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 		s.state.Courses[idx].Result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 	}
 	if s.store != nil {
+		// B8-M2（第 8 轮）：删除 success 行——否则重启后该课被 RestoreDone 恢复成
+		// "已报名成功"，用户当日的退选决定被静默撤销（与 CLAUDE.md 契约文档对齐）
+		_ = s.store.DeleteSuccess(acct, classID)
 		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true)
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，记入 refused——自动引擎不再接管", acct, classID)

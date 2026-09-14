@@ -3,6 +3,7 @@ package scheduler
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ func (f *fakeStore) AppendLog(acct string, classID int, action, result string, i
 
 func (f *fakeStore) SaveSuccess(acct string, classID int) error { return nil }
 func (f *fakeStore) UpdateIDToken(acct, idToken string) error    { return nil }
+func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
 
 // syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
 // 若用裸 bytes.Buffer 会与测试主协程并发读写（读 String / 写 Write）触发 -race；加锁彻底解除。
@@ -185,6 +187,26 @@ func (f *fakeAccts) ClientFor(acct string) (Client, bool) {
 	return f.c, true
 }
 func (f *fakeAccts) AnyClient() (Client, bool) { return f.c, true }
+
+// fakeStore 里补一个「可断言的最后删除」钩子：RemoveDone 是否真的调了 DeleteSuccess。
+type deletingStore struct {
+	*fakeStore
+	mu      sync.Mutex
+	deleted []string // "acct:classID" 记录
+}
+
+func (d *deletingStore) DeleteSuccess(acct string, classID int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleted = append(d.deleted, fmt.Sprintf("%s:%d", acct, classID))
+	return nil
+}
+
+func (d *deletingStore) deletedList() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.deleted...)
+}
 func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
 	return "acct1", f.c, true
 }
@@ -912,16 +934,38 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
 	s.SetClockOffsetForTest(5 * time.Second) // 先模拟一次成功校准带来的偏差
 
-	// 连续 3 次同步失败
+	// 连续 3 次同步失败。B8-M1（第 8 轮）：重入防抖——上轮仍在途时后续调用直接返回，
+	// 不再 spawn 爆炸并发；每次发起前需等待上一轮 goroutine 落地（syncing 复位）。
+	// 测试驱动的 waiting 循环：每轮用「等待在该发起时刻之后成功发起的那次」而非盲目叠加。
+	// 第 3 次调用后：本轮可能触发回退（offset=0）或仍停留在失败计数阶段，统一由
+	// 下面的 wait-for-reset 收尾，故每轮内等待仅判定「该轮已发起」，不强卡 streak。
 	for i := 0; i < 3; i++ {
 		fc.mu.Lock()
 		fc.syncErr = errors.New("网络故障")
 		fc.mu.Unlock()
 		s.maybeSyncClock(time.Now().Add(time.Duration(i) * time.Minute))
+		// 等待该轮发起落地：syncing 已复位 + 累计失败计数增长（第 3 轮后计数可能已被清零）
+		desired := i + 1
+		if i >= 2 {
+			desired = 0 // 第 3 轮后失败计数可能已触发回退而清零，不强卡 streak
+		}
+		wait := time.Now().Add(5 * time.Second)
+		for {
+			s.mu.Lock()
+			streak := s.syncFailStreak
+			over := s.syncing
+			s.mu.Unlock()
+			if !over && streak >= desired {
+				break
+			}
+			if time.Now().After(wait) {
+				t.Fatalf("第 %d 轮同步 goroutine 未在 5 秒内落地（syncing=%v streak=%d）", i+1, over, streak)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
-	// 等待后台同步 goroutine 全部结束：第 3 次失败触发回退（offset=0）后计数被重置，
-	// 以「偏差已复位」作为完成信号
+	// 等第 3 次失败触发的回退落地（offset=0 且日志出现警告）——以「偏差已复位」作为完成信号
 	wait := time.Now().Add(5 * time.Second)
 	for {
 		s.mu.Lock()

@@ -78,6 +78,7 @@ export default function Login({ onLogin }: Props) {
       if (/激活票据无效或已过期/.test(e.message || "")) {
         setPendingTicket("")
         setActivateError("激活票据已过期或已使用，请取消后重新登录即可进入（本账号已开通）")
+        setActivationCode("")
       } else {
         setActivateError(e.message || "激活失败，请检查激活码是否正确")
       }

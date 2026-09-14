@@ -44,9 +44,10 @@ interface Props {
 
 export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
   const [copied, setCopied] = useState("")
-  // F12-M2（第 12 轮）：Tabs 受控化——defaultValue 只在首次挂载生效，管理员进出
-  // 学生大厅（Admin 卸载重挂）后 Tab 恒回落"激活码"，当前查看的 Tab 现场丢失；
-  // 提升为顶层受控值，跨挂载保留。
+  // F12-M2（第 12 轮）：Tabs 受控化——defaultValue 只在首次挂载生效，管理员 Tab 间
+  // 切换后状态现场保留；受控 value 只决定激活项，不破坏 Radix Tabs 键盘 roving focus。
+  // 注：进出学生大厅（Admin 卸载重挂）后 useMemo 仍会重置为"codes"——如需跨挂载保留
+  // 需提升到 App 层或 localStorage（见 review-round13 F13-M2）。
   const [activeTab, setActiveTab] = useState("codes")
   // n8：复制反馈定时器句柄——连续复制不同码时先 clearTimeout 旧定时器，
   // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）

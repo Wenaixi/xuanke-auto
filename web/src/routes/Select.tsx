@@ -196,16 +196,23 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // "旧 PUT 后到覆盖新数据"的乱序丢失；内存 target 与后端最终一致。
   // C-1（第 3 轮）：body 必须包成后端 TargetsRequest 期望的 {"targets":[...]} 对象——
   // 此前发裸数组 100% 解码失败（后端 json 解码进 struct 直接报错），目标永远存不进库。
-  const lastJson = useRef("")
+    const lastJson = useRef("")
   const targetRef = useRef<Target[]>([])
   const savingRef = useRef(false)
   const dirtyRef = useRef(false)
+  // F13-C2（第 13 轮）：已卸载标记——组件卸载后（返回控制台）绝不再发起新的网络请求
+  // 或重发退避。此前卸载 cleanup 只清"当时挂着"的退避 timer，flush 补发失败后再
+  // scheduleRetry 挂的新 timer 无人清理 → 组件卸载后 2/4/8/16/16s 最多 5 次孤儿请求，
+  // 每次失败都全局 toast 轰炸已回到 Dashboard 的用户。卸载后重试也毫无意义（目标
+  // 后端已有、改动已尽力）——直接停手。
+  const unmountedRef = useRef(false)
   // n14（第 3 轮）：失败重发状态——attempt 累计连续失败次数、timer 为退避重发定时器。
   // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
   const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
   // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
   useEffect(
     () => () => {
+      unmountedRef.current = true
       if (retryState.current.timer) clearTimeout(retryState.current.timer)
     },
     []
@@ -226,6 +233,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }, delay)
   }
   const saveNow = async () => {
+    if (unmountedRef.current) return // 已卸载（返回控制台）：不再发起/继续重试
     savingRef.current = true
     try {
       const targets = targetRef.current
@@ -236,6 +244,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         body: JSON.stringify({ targets }),
         session: sessionToken,
       })
+      if (unmountedRef.current) return // 卸载后成功也不落 lastJson（避免干扰后续）
       lastJson.current = json
       resetRetry() // 保存成功：清掉退避重发状态
     } catch (e: any) {
@@ -244,12 +253,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         description: e.message || "通信异常，请重试",
         variant: "destructive",
       })
+      if (unmountedRef.current) return // 已卸载：失败也不再安排重发
       //n14（第 3 轮）：失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
       //网络抖动/瞬时故障下不再退化为"尽力而为"，直至成功或用户新改动接管。
       dirtyRef.current = true
       scheduleRetry()
     } finally {
       savingRef.current = false
+      if (unmountedRef.current) return // 已卸载：不再补发
       // 保存期间用户又改了目标（且非失败重试态）：立即补发一次最新快照，
       // 避免旧 PUT 后到覆盖新数据。失败重发走上面的退避定时器，不在此紧循环。
       if (dirtyRef.current && retryState.current.attempt === 0) {
@@ -261,7 +272,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 退出前立即保存挂起的目标改动：返回按钮的防抖窗口（<400ms）内最后一次点选
   // 或重发退避排队中的改动，不在此刻落库就永失（F12-M1）。复用 lastJson 去重 +
   // savingRef/dirtyRef 串行化，绝不与飞行中的 PUT 乱序覆盖。
+  // F13-C1（第 13 轮）：无用户改动（rev===0）时绝不整包覆盖——回显数据本就是后端
+  // 目标的镜像、无需回写；而进页数据未就绪时 selected/publishes 为空，此时 PUT
+  // {"targets":[]} 会把后端已有目标整包抹除（窗口关闭后 publishes 恒空时必现）。
+  // 清空全部目标仍是用户改动（rev>0），仍正确落库。
   const flushTargets = () => {
+    if (rev === 0) return
     const targets: Target[] = []
     for (const p of publishesRef.current) {
       const list = selected[p.publish_id] ?? []

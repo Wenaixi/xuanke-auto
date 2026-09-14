@@ -743,7 +743,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "没有可应用的有效配置项")
 			return
 		}
-		d.Store.AppendLog("admin", 0, "config", "更新配置: "+strings.Join(changed, ", "), true)
+		d.Store.AppendLog(d.AdminNameValue(), 0, "config", "更新配置: "+strings.Join(changed, ", "), true)
 		writeJSON(w, 0, AdminConfigView{
 			ActivationEnabled:  cfg.ActivationEnabled,
 			VisionBaseURL:      cfg.VisionBaseURL,
@@ -888,7 +888,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 	// 吊销该账号签发的全部会话（MAJOR-A）：被删账号既有浏览器令牌立即失效，
 	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。
 	d.Sessions.RevokeAccount(req.Account)
-	d.Store.AppendLog("admin", 0, "delete_account", "删除账号 "+req.Account, true)
+	d.Store.AppendLog(d.AdminNameValue(), 0, "delete_account", "删除账号 "+req.Account, true)
 	writeJSON(w, 0, nil, "已删除账号 "+req.Account)
 }
 

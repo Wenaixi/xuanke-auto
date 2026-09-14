@@ -1466,3 +1466,54 @@ func TestHandleElectivesSelectUnauthorizedRelogin(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestAdminDeleteRejectsUnnormalizedAccount B15-M5：管理员删除带尾随空格的账号名必须拒绝。
+// 此前 handleAdminDeleteAccount 只做 `strings.TrimSpace(req.Account) != ""` 的判空，
+// 未把 trim 后的账号回写——前端一次空格失手（如 "12345 " 或粘贴带换行）会被 trim 后
+// 删除真实账号 12345，响应却显示"已删除 "12345 ""（假删除成功：store 里账号列表/news
+// 已没了 12345，但客户端仍挂着 "12345 " 标签，调度器照旧尝试提交、Operate 访问空客户端）。
+// 契约：账号名含首尾空白必须整体拒绝（要求服务端在 trim 后仍与原始值逐字节一致）。
+func TestAdminDeleteRejectsUnnormalizedAccount(t *testing.T) {
+	d := newTestDeps(t)
+	// 第一步：先建会话、再用 store 真实 API 落一条账号 12345 的凭据。
+	// 删除请求对"账号是否存在"的判定以持久化层为准——mock zhidao 的 /login 未实现
+	// (default 返回 unknown)，authenticateDirect 只 ensure 了内存客户端、不落凭据，
+	// 用它当判据会恒假失败；DeleteAccount 真正删的也是 credentials/accounts/targets/success。
+	authenticateDirect(t, d, "12345")
+	if err := d.store.SaveCredential("12345", "enc", "tok-new"); err != nil {
+		t.Fatal(err)
+	}
+	// 第二步：以管理员会话发起删除请求，但账号名带尾随空格（前端一次空格失手）
+	adminTok := d.sessions.CreateAdmin("admin")
+	body := `{"account":" 12345 "}`
+	req := httptest.NewRequest("DELETE", "/api/admin/accounts", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	// 第三步（核心断言）：响应必须是"账号无效或不可删除"（code:1）——空格账号整体拒绝，
+	// 绝不能 trim 后删除真实账号 12345 并返回 code:0。修复前 handler 做 `acct := TrimSpace`
+	// 后回写删除，此断言必然失败（红灯）。
+	if j["code"].(float64) == 0 {
+		t.Fatalf("账号名含空白应被整体拒绝，却返回删除成功 %v", j)
+	}
+	// 第四步：store 中的 12345 必须完整幸存（被删除即 FAIL）
+	creds, err := d.store.LoadCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range creds {
+		if c.Account == "12345" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("账号名含空白应整体拒绝，现响应为 %v 且 store 中 12345 已被删除", j)
+	}
+}

@@ -874,22 +874,27 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Account) == "" || d.IsAdminAccountName(req.Account) {
+	acct := strings.TrimSpace(req.Account)
+	// B15-M5（第 15 轮）：账号名含首尾空白必须整体拒绝（trim 后仍与原值逐字节一致才放行）。
+	// 此前只 `TrimSpace != ""` 判空——前端一次空格失手（"12345 " 粘贴带换行）后 trim 出的
+	// "12345" 被当作删除目标，真实账号被删、响应却显示"已删除账号 12345"（假删除成功：
+	// 前端挂着 "12345 " 标签，store 里 12345 已消失，调度器照旧尝试提交空客户端）。
+	if acct == "" || acct != req.Account || d.IsAdminAccountName(acct) {
 		writeJSON(w, 1, nil, "账号无效或不可删除")
 		return
 	}
-	if err := d.Store.DeleteAccount(req.Account); err != nil {
+	if err := d.Store.DeleteAccount(acct); err != nil {
 		writeJSON(w, 1, nil, "删除失败: "+err.Error())
 		return
 	}
 	// 调度器与账号注册表同步隔离：清空内存目标（下个 tick 不再提交）+ 移除客户端。
-	d.Sched.SetTargetsForAccount(req.Account, nil)
-	d.Accounts.Remove(req.Account)
+	d.Sched.SetTargetsForAccount(acct, nil)
+	d.Accounts.Remove(acct)
 	// 吊销该账号签发的全部会话（MAJOR-A）：被删账号既有浏览器令牌立即失效，
 	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。
-	d.Sessions.RevokeAccount(req.Account)
-	d.Store.AppendLog(d.AdminNameValue(), 0, "delete_account", "删除账号 "+req.Account, true)
-	writeJSON(w, 0, nil, "已删除账号 "+req.Account)
+	d.Sessions.RevokeAccount(acct)
+	d.Store.AppendLog(d.AdminNameValue(), 0, "delete_account", "删除账号 "+acct, true)
+	writeJSON(w, 0, nil, "已删除账号 "+acct)
 }
 
 // handleAdminLogs 全量日志总览（不按账号过滤）。

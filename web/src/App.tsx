@@ -94,13 +94,23 @@ export default function App() {
       if (current === adminName && inAdmin && lostAccount !== adminName) {
         return
       }
+      // F7-05（第 7 轮）：updater 内夹带 saveSessions 副作用属反模式——React 并发下 updater
+      // 可能在非提交阶段被调用（StrictMode 下甚至加倍）。setSessions 的 updater 保持纯
+      // 函数（只算 next）；localStorage 落盘在 setSessions 之后对 clean 快照单独执行。
+      let removedNext = false
       setSessions((prev) => {
         if (!prev[lostAccount]) return prev
         const next = { ...prev }
         delete next[lostAccount]
-        saveSessions(next)
+        removedNext = true
         return next
       })
+      if (removedNext) {
+        const snap = loadSessions()
+        const next = { ...snap }
+        delete next[lostAccount]
+        saveSessions(next)
+      }
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)

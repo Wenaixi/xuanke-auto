@@ -119,6 +119,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
+  // F18-03（第 18 轮）：激活 Tab 受控兜底——发布集合整体重建（开窗瞬间平台清空又
+  // 恢复、publish_id 全变）时，非受控 defaultValue 只首次生效、激活 Tab 对应的 Trigger
+  // 从列表消失后 Radix Tabs 无 fallback，主区空白直到用户手点。受控 value 跟随
+  // tabs[0]，发布重建即回落首个 Tab，绝不悬空。
+  const [activeTab, setActiveTab] = useState<string | null>(null)
 
   // 本地每秒刷新倒计时：F8-04/F9-07 收敛到 lib/useTickingCountdown 自 tick 组件，
   // 整页只重渲染倒计时一处，Tab 徽章"已锁定"计数随 selected 变化即时更新，无需每秒重算。
@@ -549,7 +554,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             F14-03（第 14 轮）：窗口关闭/学期无发布时 publishes 恒空 →
             tabs.length===0，此前整个主区不渲染且顶部徽章显示 n/0；补空态与徽章分母兜底 */}
         {!isLoading && !isError && tabs.length > 0 && (
-          <Tabs defaultValue={String(tabs[0].publish_id)} className="space-y-4">
+          <Tabs
+            value={activeTab ?? String(tabs[0].publish_id)}
+            onValueChange={setActiveTab}
+            className="space-y-4"
+          >
             <TabsList className="w-full sm:w-auto flex flex-wrap h-auto gap-1.5 p-1 glass border border-neutral-800 rounded-[var(--radius-lg)]">
               {tabs.map((t) => (
                 <TabsTrigger

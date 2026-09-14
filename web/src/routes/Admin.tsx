@@ -439,6 +439,10 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   }, [loaded, configEpoch])
 
   const save = async () => {
+    // F18-02（第 18 轮）：配置加载完成前绝不保存——表单未回填时保存会用初始空值
+    // 整体覆盖生效配置（open_time 清空 = B11-A1 调度器挂起提交、激活码机制误开、Vision
+    // 配置清空），按钮已 disabled 锁定，此处再兜一道（加载失败停留初始值的手快路径）。
+    if (!loaded) return
     setSaving(true)
     try {
       const body: Record<string, unknown> = {
@@ -606,7 +610,18 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         </CardContent>
       </Card>
 
-      <Button variant="primary" size="sm" onClick={save} disabled={saving} className="h-10 px-5 text-xs">
+      {!loaded && (
+        <p className="text-[11px] text-amber-400/90">
+          配置加载中——表单尚未回填，保存按钮已锁定，避免用初始空值覆盖生效配置
+        </p>
+      )}
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={save}
+        disabled={saving || !loaded}
+        className="h-10 px-5 text-xs"
+      >
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin text-black" /> : null}
         <span>保存并生效</span>
       </Button>

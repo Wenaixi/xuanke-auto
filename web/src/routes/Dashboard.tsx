@@ -426,7 +426,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           <Card className="rounded-[var(--radius-lg)] glass border border-neutral-800 overflow-hidden shadow-none">
             <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 flex items-center justify-between font-mono">
               <span>EVENT STREAM</span>
-              <span>RECENT 50</span>
+              {/* F7-08（第 7 轮）：后端 LoadLogs 上限 100 条，文案与真实数量对齐（此前 RECENT 50 失真） */}
+              <span>RECENT 100</span>
             </div>
 
             <div className="p-4 max-h-64 overflow-y-auto text-xs space-y-2">

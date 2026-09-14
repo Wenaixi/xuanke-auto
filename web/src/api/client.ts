@@ -10,9 +10,13 @@ export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
 export class ApiError extends Error {
   code: number
-  constructor(code: number, msg: string) {
+  // F11-A1（第 11 轮）：ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
+  // 必须透传给 Login.tsx 才能随激活请求回传；此前只存 code，票据在抛错处丢失。
+  data?: unknown
+  constructor(code: number, msg: string, data?: unknown) {
     super(msg)
     this.code = code
+    this.data = data
   }
 }
 
@@ -58,9 +62,9 @@ export async function api<T>(
       window.dispatchEvent(
         new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
       )
-      throw new ApiError(j.code, j.msg || "会话已失效")
+      throw new ApiError(j.code, j.msg || "会话已失效", j.data)
     }
-    if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败")
+    if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败", j.data)
     return j.data
   } catch (e) {
     // F7-09：AbortError 无法识别（调用方 signal 或超时 abort 均触发）——统一映射为

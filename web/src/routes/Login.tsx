@@ -18,6 +18,10 @@ export default function Login({ onLogin }: Props) {
 
   // 激活码模态框状态：登录返回 code=1001 时弹出
   const [pendingAccount, setPendingAccount] = useState("")
+  // F11-A1（第 11 轮）：票据必须随激活请求回传——后端 handleActivate 要求 ticket 非空
+  // 且 ConsumeTicket 校验绑定账号；此前 1001 分支只存账号把 data.ticket 丢弃，激活永远
+  // 返回"激活票据无效或已过期"，激活码机制整链不可用。取消激活时一并清掉。
+  const [pendingTicket, setPendingTicket] = useState("")
   const [activationCode, setActivationCode] = useState("")
   const [activating, setActivating] = useState(false)
   // 激活错误独立状态（n7）：激活失败不清污染主登录表单的 error——
@@ -32,7 +36,7 @@ export default function Login({ onLogin }: Props) {
     setLoading(true)
     setError("")
     try {
-      const data = await api<{ token: string; account: string; adminName?: string }>("/login", {
+      const data = await api<{ token: string; account: string; adminName?: string; ticket?: string }>("/login", {
         method: "POST",
         body: JSON.stringify({ account: account.trim(), password }),
       })
@@ -40,8 +44,9 @@ export default function Login({ onLogin }: Props) {
       onLogin(data.token, data.account, data.adminName)
     } catch (e: any) {
       if (e.code === 1001) {
-        // 账号未激活：弹出激活码输入模态框
+        // 账号未激活：弹出激活码输入模态框（F11-A1：同时保存票据供激活回传）
         setPendingAccount(account.trim())
+        setPendingTicket((e.data?.ticket as string) || "")
         setActivationCode("")
       } else {
         setError(e.message || "登录认证失败，请检查账号密码是否正确")
@@ -61,9 +66,10 @@ export default function Login({ onLogin }: Props) {
     try {
       const data = await api<{ token: string; account: string }>("/activate", {
         method: "POST",
-        body: JSON.stringify({ account: pendingAccount, code: activationCode.trim() }),
+        body: JSON.stringify({ account: pendingAccount, code: activationCode.trim(), ticket: pendingTicket }),
       })
       setPendingAccount("")
+      setPendingTicket("")
       onLogin(data.token, data.account)
     } catch (e: any) {
       setActivateError(e.message || "激活失败，请检查激活码是否正确")
@@ -261,8 +267,9 @@ export default function Login({ onLogin }: Props) {
                 <button
                   type="button"
                   onClick={() => {
-                    // n7：取消激活——清除待激活账号与激活错误，主表单错误保持干净
+                    // n7：取消激活——清除待激活账号/票据与激活错误，主表单错误保持干净
                     setPendingAccount("")
+                    setPendingTicket("")
                     setActivateError("")
                   }}
                   disabled={activating}

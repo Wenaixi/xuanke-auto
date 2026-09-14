@@ -2086,32 +2086,116 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 // 判定"幽灵窗口已关闭"（B19-01 时钟兜底 + B21-01 使其真实可达）：packaged 默认
 // open_time 已过 + 平台空快照 + syncFailStreak 持续累计 ≥3，WindowClosed() 必须为 true
 // （tick 守卫挂起提交 + 探测降回 30s），自愈由时钟成功恢复（streak 归零）提供。
+// B22-02（第 22 轮）：测试改为用真实 maybeSyncClock 让 streak 真实累计到 3——
+// 此前手动注入 3 是恒假绿形态（B21-01 死代码实证的对应测试），现验证判据真实可达。
+// maybeSyncClock 每次失败后落地 lastSyncFailAt（30s 退避）且 syncing 复位在异步
+// goroutine 内，故每次发起前清退避、发起后轮询等 syncing 落地，模拟三次独立失败。
 func TestGhostWindowClockFailuresSuspend(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.mu.Lock()
 	fc.data.Publishes = nil // 幽灵窗口形态：空快照且从未开过窗
 	fc.mu.Unlock()
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
-	// B21-01：判据读 syncFailStreak（≥3 即幽灵窗口，生产代码在 maybeSyncClock 失败分支
-	// 累计、成功分支清零）。此前该字段在失败分支内被立即清零、外部永远读不到 3（死代码），
-	// 测试是手动注入模拟——现在 streak 持续累计，判据真实可达。前置进样保证测试不依赖
-	// 时钟备选路径。
-	s.mu.Lock()
-	s.syncFailStreak = 3
-	s.mu.Unlock()
-	if !s.WindowClosed() {
-		t.Fatal("时钟失败 ≥3 + 空快照 + 开放时间已过应判定幽灵窗口已关闭（挂起提交 + 探测降频）")
-	}
-	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
-		t.Fatalf("幽灵窗口应 30s 探测（不再 2s 烧平台），实际 %v", got)
+
+	// 发起一次真实时钟同步并等待异步 goroutine 落地（fail=true 注入时钟失败）。
+	// 每轮前清 lastSyncFailAt 突破 30s 退避——生产时序中三次失败天然间隔 ≥30s，
+	// 测试用清退避模拟"多轮独立失败"的时间流逝。
+	runSyncAndWait := func(s *Scheduler, fail bool) {
+		fc.mu.Lock()
+		if fail {
+			fc.syncErr = errors.New("clock down")
+		} else {
+			fc.syncErr = nil
+		}
+		fc.mu.Unlock()
+		s.mu.Lock()
+		s.lastSyncFailAt = time.Time{}
+		s.mu.Unlock()
+		s.maybeSyncClock(time.Now())
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			s.mu.Lock()
+			done := !s.syncing
+			s.mu.Unlock()
+			if done {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("同步 goroutine 未在超时内复位 syncing")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 
-	// 反向断言：时钟恢复（syncFailStreak 归零）后幽灵窗口解除——窗口若真开启应及时发起
+	// 场景 A：真实时钟同步连续失败 3 次 → streak 真实累计到 3 → 幽灵窗口判定触发
+	sA := New(&fakeAccts{c: fc, relogErr: errors.New("vision down")}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	for i := 0; i < 3; i++ {
+		runSyncAndWait(sA, true)
+	}
+	if !sA.WindowClosed() {
+		t.Fatal("真实时钟失败累计 3 次 + 空快照 + 开放时间已过应判定幽灵窗口已关闭")
+	}
+
+	// 场景 B：同步成功 streak 归零 → 幽灵窗口解除（自愈）
+	runSyncAndWait(sA, false)
+	if sA.WindowClosed() {
+		t.Fatal("时钟恢复（syncFailStreak 归零）后幽灵窗口判定应解除")
+	}
+
+	// 场景 C：同一幽灵窗口形态下 probeIntervalFor 必须 30s（不再 2s 烧平台）
+	sC := New(&fakeAccts{c: fc, relogErr: errors.New("vision down")}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	for i := 0; i < 3; i++ {
+		runSyncAndWait(sC, true)
+	}
+	if got := sC.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("幽灵窗口应 30s 探测（不再 2s 烧平台），实际 %v", got)
+	}
+	if !sC.WindowClosed() {
+		t.Fatal("时钟失败 3 次后 WindowClosed 必须为 true（探测降频的前提）")
+	}
+}
+
+// TestManualSnapshotFallbackOnlyWhenOwnFresh 验证快照回退语义（B22-01，第 22 轮）：
+// ElectivesSnapshotFor 的全局帧回退只许发生在"该账号确实没探测过 / 有全局帧可回退"时——
+// 账号已配置目标后 probe() 每 30s 必刷新其专属快照；若专属快照缺失且全局帧非空，回退
+// 返回的全局帧可能是首个注册账号的年级（混合年级部署下年级串线），绝不可当"自己年级"
+// 渲染给用户。fallback 返回 true 时该账号年级帧已新鲜；false 时 handleElectives 会走
+// ProbeForAccount 真取本账号年级帧。
+func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+
+	// 预置：调度器已探测过全局帧（lastData = 高三帧，仅 1 门体育）且"目标账号"acct1 已配置目标
 	s.mu.Lock()
-	s.syncFailStreak = 0
+	s.lastData = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
+		{PublishID: 9, PublishName: "高三体育", InDateRange: false, Classes: []zhidao.Class{
+			{ID: 61999, CourseName: "高三排球", SelectedCount: 0, MaxCount: 36},
+		}},
+	}}
+	s.lastDataAt = time.Now()
+	s.acctTargets["acct1"] = []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}}
 	s.mu.Unlock()
-	if s.WindowClosed() {
-		t.Fatal("时钟恢复后幽灵窗口判定应解除（syncFailStreak 归零自愈）")
+
+	// 断言 1：目标账号专属快照缺失时，绝不回退全局帧（fallback 返回 false → handleElectives
+	// 走 ProbeForAccount 真取本账号年级帧）——这是 B22-01 修复后的语义
+	if _, ok := s.ElectivesSnapshotFor("acct1"); ok {
+		t.Fatal("目标账号专属快照缺失时不得回退全局帧（跨年级帧可能被错误渲染给该账号）")
+	}
+
+	// 断言 2：专属快照写入后（模拟 ProbeForAccount 成功），ElectivesSnapshotFor 返回该账号帧
+	s.mu.Lock()
+	s.acctData["acct1"] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
+		{PublishID: 1, PublishName: "高二年体育", InDateRange: false, Classes: []zhidao.Class{
+			{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
+		}},
+	}}
+	s.acctDataAt["acct1"] = time.Now()
+	s.mu.Unlock()
+	data, ok := s.ElectivesSnapshotFor("acct1")
+	if !ok {
+		t.Fatal("账号专属快照已写入且新鲜时 ElectivesSnapshotFor 必须返回该账号帧")
+	}
+	if len(data.Publishes) == 0 || data.Publishes[0].PublishID != 1 {
+		t.Fatal("ElectivesSnapshotFor 返回的不是该账号专属帧（年级串线）")
 	}
 }
 

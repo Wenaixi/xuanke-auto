@@ -616,6 +616,23 @@ func (s *Scheduler) AccountsWithTargets() []string {
 func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// B22-01（第 22 轮）：目标账号（已配置目标）必须用该账号专属年级快照渲染，
+	// 绝不无条件回退全局 lastData——probe() 只对 AccountsWithTargets() 遍历刷新
+	// per-account 帧，有目标的账号 30s 内必有其专属帧；专属帧缺失 = 账号刚登录/
+	// 探测尚未完成，此时回退返回的全局帧可能是首个注册账号（m.order[0]）的年级帧，
+	// 混合年级部署下（高二 82 门/高三 1 门文档实证）会把错年级 1 门课渲染给高二学生，
+	// 且永不触发本账号 ProbeForAccount——年级串线全开。这里返回 false 让
+	// handleElectives 走 ProbeForAccount 真取该账号年级帧；无目标账号（仅浏览/手动
+	// 报名）保持回退全局帧（快、无网络开销，且手动复核 CheckClassSelectable 不读全局帧）。
+	if _, hasTargets := s.acctTargets[acct]; acct != "" && hasTargets {
+		if d, ok := s.acctData[acct]; ok && d != nil {
+			snappedAt := s.acctDataAt[acct]
+			if !snappedAt.IsZero() && time.Since(snappedAt) <= snapshotTTL {
+				return d, true
+			}
+		}
+		return nil, false
+	}
 	if acct != "" && s.acctData != nil {
 		if data, ok := s.acctData[acct]; ok && data != nil {
 			if time.Since(s.acctDataAt[acct]) <= snapshotTTL {

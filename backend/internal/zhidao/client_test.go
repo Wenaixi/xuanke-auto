@@ -244,20 +244,37 @@ func TestReloginIfNeeded(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// B6-01（第 6 轮）：运行时登录（/api/login）后客户端内部必须有账密——自动重登
+	// ReloginIfNeeded 直接可用的回归测试。修复前：Login 成功分支不写 c.account/c.password，
+	// 依赖 SetCredentials 的旧断言（ReloginIfNeeded 手动 SetCredentials 后可用）无法覆盖
+	// 线上真实路径——每次账密登录后自动重登永远报"未登录且无保存账密"。
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetCredentials("acct", "pwd", "old-token")
+	if _, err := c.Login("acct", "pwd"); err != nil {
+		t.Fatalf("运行时登录失败: %v", err)
+	}
+	// 登录成功后立即触发自动重登：必须可用（修复前报"未登录且无保存账密"）
+	// （Login 成功本身含 1 次 doLogin 提交，故此处总提交数为 2）
+	relogged, err := c.ReloginIfNeeded()
+	if err != nil || !relogged {
+		t.Fatalf("运行时登录后的自动重登应可用: %v %v", relogged, err)
+	}
+	if atomic.LoadInt32(&reloginCalls) != 2 {
+		t.Fatalf("重登应恰好触发 1 次（加初始登录共 2 次 doLogin），实际 %d", reloginCalls)
+	}
 
-	// 第一次请求失败（token 失效）
-	if _, err := c.doRequest(http.MethodPost, "/electives/select", nil, ""); err == nil {
+	// 重启恢复路径（Restore 经 SetCredentials 注入）：保持原语义回归
+	restoreC := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	restoreC.SetCredentials("acct", "pwd", "old-token")
+	if _, err := restoreC.doRequest(http.MethodPost, "/electives/select", nil, ""); err == nil {
 		t.Fatal("期望失败")
 	}
 	// 显式重登一次
-	relogged, err := c.ReloginIfNeeded()
+	relogged, err = restoreC.ReloginIfNeeded()
 	if err != nil || !relogged {
 		t.Fatalf("重登失败: %v %v", relogged, err)
 	}
 	// 重登后 token 更新，再次请求成功
-	body, err := c.doRequest(http.MethodPost, "/electives/select", nil, "")
+	body, err := restoreC.doRequest(http.MethodPost, "/electives/select", nil, "")
 	if err != nil {
 		t.Fatalf("重登后请求失败: %v", err)
 	}
@@ -268,8 +285,8 @@ func TestReloginIfNeeded(t *testing.T) {
 	if j.Code != 0 {
 		t.Fatalf("重登后 code=%d", j.Code)
 	}
-	if atomic.LoadInt32(&reloginCalls) != 1 {
-		t.Fatalf("最多重登 1 次，实际 %d", reloginCalls)
+	if atomic.LoadInt32(&reloginCalls) != 3 {
+		t.Fatalf("最多重登 2 次（初始登录 + 重登 + doRequest 前共 3 次 doLogin），实际 %d", reloginCalls)
 	}
 }
 

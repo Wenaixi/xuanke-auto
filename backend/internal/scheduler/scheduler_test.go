@@ -1537,6 +1537,62 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	}
 }
 
+// TestReloginBackoffWindowBlocksManualTriggers B9-01：连续失败进入指数退避后，
+// 退避窗口内再次触发 maybeRelogin 必须被挡下（不发起新重登、不清退避表）。
+// 修复前的 api 层手动路径（B8-M7）在命中 ErrUnauthorized 时先调 MarkTokenValid
+// 再调 MaybeRelogin——MarkTokenValid 会 delete reloginFail（它只该用于"手动登录成功"
+// 的 issueSession），指数退避恒从 30s 重来，Vision 持续故障时平台锁号防线被击穿。
+func TestReloginBackoffWindowBlocksManualTriggers(t *testing.T) {
+	fc := newFakeClient(false)
+	fa := &fakeAccts{c: fc}
+	fa.relogErr = errors.New("vision down")
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	acct := "acct1"
+
+	// 连续 3 次失败（每次重置节流闸门立即发起，退避增长到 120s）
+	for i := 0; i < 3; i++ {
+		s.resetReloginAtForTest(acct)
+		s.maybeRelogin(acct)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			s.mu.Lock()
+			r := s.relogging[acct]
+			s.mu.Unlock()
+			if !r {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	s.mu.Lock()
+	failBefore := s.reloginFail[acct]
+	s.mu.Unlock()
+	if failBefore < 3 {
+		t.Fatalf("前置失败计数应 ≥3，实际 %d", failBefore)
+	}
+
+	// 现处退避窗口内（reloginAt 未重置）：手动路径再触发多次，不得发起新重登
+	fc.mu.Lock()
+	callsBefore := fc.relogCalls
+	fc.mu.Unlock()
+	for i := 0; i < 5; i++ {
+		s.maybeRelogin(acct)
+		time.Sleep(20 * time.Millisecond)
+	}
+	fc.mu.Lock()
+	callsAfter := fc.relogCalls
+	fc.mu.Unlock()
+	if callsAfter != callsBefore {
+		t.Fatalf("退避窗口内触发不得发起重登：%d -> %d", callsBefore, callsAfter)
+	}
+	s.mu.Lock()
+	n := s.reloginFail[acct]
+	s.mu.Unlock()
+	if n != failBefore {
+		t.Fatalf("手动触发路径不得清退避表：%d -> %d", failBefore, n)
+	}
+}
+
 // TestReloginFailureKeepsBackoff 重登失败后 reloginFail 计数必须保留增长（不无条件复位为 1），
 // 指数退避表才能逐次拉长，Vision 持续故障时登录频率越来越低（C1）。
 // 修复前：发起时 1→2，失败后无条件复位 1，计数恒 1→2→1→2 振荡，退避表永不增长。

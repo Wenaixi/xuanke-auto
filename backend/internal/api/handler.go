@@ -300,11 +300,13 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	// 4. 调用教务平台真实报名接口
 	msg, err := client.SelectClass(req.ClassID)
 	if err != nil {
-		// B8-M7（第 8 轮）：token 失效时手动报名/退选同样触发自动重登——
+		// B8-M7（第 8 轮）+B9-01（第 9 轮）：token 失效时手动报名/退选同样触发自动重登——
 		// 此前手动路径把"未登录"原文直接抛给前端，不会走 maybeRelogin，后台要等
-		// 探测/自动链发现失效才重登（UX 断裂：用户手动点时报错却无人自愈）
+		// 探测/自动链发现失效才重登（UX 断裂：用户手动点时报错却无人自愈）。
+		// B9-01：只调 MaybeRelogin，绝不先调 MarkTokenValid——后者只该用于"手动登录成功"
+		// 的 issueSession 恢复路径，在这里会 delete reloginFail 击穿指数退避（Vision 持续
+		// 故障时退避恒从 30s 重来，平台锁号防线失效）。失效标记由 maybeRelogin 自身置位。
 		if errors.Is(err, zhidao.ErrUnauthorized) {
-			d.Sched.MarkTokenValid(acct)
 			d.Sched.MaybeRelogin(acct)
 			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
 			return
@@ -359,7 +361,8 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	// 3. 调用教务平台真实退选接口
 	msg, err := client.ExitClass(req.ClassID)
 	if err != nil {
-		// B8-M7（第 8 轮）：token 失效路径同样自动重登（与报名路径对称）
+		// B8-M7（第 8 轮）+B9-01（第 9 轮）：token 失效路径同样自动重登（与报名路径对称；
+		// 只调 MaybeRelogin，绝不先调 MarkTokenValid——后者会击穿重登指数退避，见报名分支注释）
 		if errors.Is(err, zhidao.ErrUnauthorized) {
 			d.Sched.MarkTokenValid(acct)
 			d.Sched.MaybeRelogin(acct)

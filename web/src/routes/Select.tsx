@@ -228,10 +228,18 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
   const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
   // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
+  // F20-01（第 20 轮）：挂载时复位 unmountedRef——StrictMode 开发态会对组件执行
+  // mount→unmount→remount 两遍，原实现只有置 true 的 cleanup、二次挂载时已卸载标记
+  // 恒真，saveNow/scheduleRetry 全部短路，目标改动静默丢失且无任何报错。重挂载后
+  // 复位到 false，本轮会话保存链路恢复正常；真正卸载时 cleanup 依旧置位停手（F13-C2
+  // 卸载后防孤儿重试契约不变）。
   useEffect(
-    () => () => {
-      unmountedRef.current = true
-      if (retryState.current.timer) clearTimeout(retryState.current.timer)
+    () => {
+      unmountedRef.current = false
+      return () => {
+        unmountedRef.current = true
+        if (retryState.current.timer) clearTimeout(retryState.current.timer)
+      }
     },
     []
   )

@@ -236,6 +236,13 @@ func (c *Client) Login(account, password string) (string, error) {
 			log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, submitErr)
 			continue // 验证码可能已失效：刷新验证码重识别
 		}
+		// B6-01（第 6 轮）：登录成功即把账密写入客户端内部——运行时登录（/api/login、
+		// LoginByPassword）此前从未 SetCredentials，客户端内部只有 Restore 路径有账密，
+		// 导致线上每次账密登录后自动重登（ReloginIfNeeded）永远报"未登录且无保存账密"：
+		// token 失效只能人工重新登录，黄金期失效即全程停摆。这里与 SetCredentials 的
+		// "客户端内部账密唯一绑定"语义完全一致——每个客户端只用自己的账密重登自己，
+		// 绝不交叉污染；ReloginIfNeeded 仍用内部 account/password，不受调用方参数影响。
+		c.SetCredentials(account, password, token)
 		return token, nil
 	}
 	if lastErr != nil {

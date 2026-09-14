@@ -164,6 +164,8 @@ type Scheduler struct {
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
 
+	probeSem chan struct{} // F17-01（第 17 轮）：per-account 探测并发信号量（cap 4）
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	start  bool
@@ -188,6 +190,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		relogging:   make(map[string]bool),
 		rateLimited: make(map[string]map[int]time.Time),
 		chains:      make(map[string]bool),
+		probeSem:    make(chan struct{}, 4), // F17-01：per-account 探测并发上限
 		acctData:    make(map[string]*zhidao.ElectivesData),
 		acctDataAt:  make(map[string]time.Time),
 		ctx:         ctx,
@@ -741,9 +744,21 @@ func (s *Scheduler) probe() {
 	s.mu.Unlock()
 
 	now := time.Now()
-	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照
+	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照。
+	// F12-B2 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
+	// 每账号各起 goroutine 调 ProbeForAccount 不受保护——临门/开窗期 probeIntervalNear
+	// 2s 周期触发时，N 账号部署每 2s 变 N+1 并发 findElectivesData 直打上游，与
+	// "访问过于频繁 1 分钟熔断"实证契约冲突（F17-01，第 17 轮 MAJOR）。
+	// 修复：probeSem 结构化信号量（cap 4）封顶 per-account 并发——峰值从 N 降到 4，
+	// 跨批（2s 周期短于一批耗时）受同一信号量约束绝不叠加；全局 FindElectives 主体
+	// 不受影响（probe() 在 per-account 全部入场后执行）。
+	// ponytail: cap=4 常驻，若平台放宽熔断或账号数 >50 再调。
 	for _, a := range s.AccountsWithTargets() {
 		go func(acct string) {
+			// F17-01（第 17 轮）：结构化信号量封顶 per-account 探测并发——峰值从 N
+			// 降到 4；跨批（2s 周期短于一批耗时）由同一信号量约束，绝不叠加。
+			s.probeSem <- struct{}{}
+			defer func() { <-s.probeSem }()
 			_, _ = s.ProbeForAccount(acct)
 		}(a)
 	}

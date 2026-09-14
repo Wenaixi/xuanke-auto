@@ -189,15 +189,23 @@ export default function Login({ onLogin }: Props) {
       </div>
 
       {/* 激活码输入模态框（登录返回 1001 时弹出） */}
+      {/* F7-03（第 7 轮）：裸 div 补无障碍语义——role=dialog/aria-modal/aria-labelledby/
+          Esc 关闭回归键盘可达性（此前背景表单可 Tab 穿出、读屏不识别对话语义）。
+          完整焦点陷阱迁移到 Radix Dialog 属 F6-02 后续候选，这里先补最小语义门。 */}
       {pendingAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="activate-dialog-title"
+        >
           <div className="w-full max-w-sm rounded-[var(--radius-lg)] glass-strong border border-neutral-700 shadow-2xl">
             <div className="p-6 pb-4">
               <div className="flex items-center gap-2 text-xs tracking-wider uppercase text-neutral-500 font-mono">
                 <KeyRound className="h-3.5 w-3.5 text-neutral-500" />
                 <span>ACTIVATE ACCOUNT</span>
               </div>
-              <h2 className="text-lg font-medium tracking-tight text-white pt-2">
+              <h2 id="activate-dialog-title" className="text-lg font-medium tracking-tight text-white pt-2">
                 输入激活码
               </h2>
               <p className="text-xs text-neutral-400 pt-1">

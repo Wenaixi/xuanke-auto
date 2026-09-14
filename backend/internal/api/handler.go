@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -980,6 +981,26 @@ func (l *loginLimiter) allow(ip string) bool {
 }
 
 func clientIP(r *http.Request) string {
+	// B6-05（第 6 轮）：可信反代 IP 透传——部署在 nginx/caddy 等反代后面时，
+	// RemoteAddr 恒为反代地址，学校 NAT 下所有学生共享同一 IP，登录限流被合并到
+	// 一个桶（5 次/分钟全校共用一个配额，学生互相挤爆，管理员也可能被误锁）。
+	// 仅当 XUANKE_TRUSTED_PROXY=on 且请求确实来自回环地址（本机反代）时才信任
+	// X-Forwarded-For 最右一个非空值。绝不盲信公网发来的 XFF（攻击者可伪造任意 IP
+	// 刷爆其他地址的限流桶 / 绕过自身限流）——默认关闭，安全优先。
+	if os.Getenv("XUANKE_TRUSTED_PROXY") == "on" {
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil &&
+			(host == "127.0.0.1" || host == "::1") {
+			xff := r.Header.Get("X-Forwarded-For")
+			if xff != "" {
+				parts := strings.Split(xff, ",")
+				for i := len(parts) - 1; i >= 0; i-- {
+					if ip := strings.TrimSpace(parts[i]); ip != "" {
+						return ip
+					}
+				}
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

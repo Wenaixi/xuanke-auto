@@ -1219,6 +1219,46 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 	}
 }
 
+// TestClientIPTrustedProxy B6-05：clientIP 可信反代 IP 透传。
+// 默认（未设 XUANKE_TRUSTED_PROXY）绝不信 XFF——攻击者可伪造任意 IP 刷爆他人
+// 限流桶或绕过自身限流；仅当开关=on 且 RemoteAddr 确实是回环地址（真正的本机
+// 反代）时，才取 X-Forwarded-For 最右一个非空值作为真实客户端 IP。
+func TestClientIPTrustedProxy(t *testing.T) {
+	cases := []struct {
+		name    string
+		trusted bool   // 是否设置 XUANKE_TRUSTED_PROXY=on
+		remote  string // RemoteAddr（含端口）
+		xff     string // X-Forwarded-For 头
+		want    string
+	}{
+		{"默认关闭不信XFF", false, "10.0.0.5:43001", "1.2.3.4", "10.0.0.5"},
+		{"回环+on信任最右", true, "127.0.0.1:5000", "203.0.113.7, 10.9.9.9", "10.9.9.9"},
+		{"回环+on+单值", true, "127.0.0.1:5000", "203.0.113.7", "203.0.113.7"},
+		{"回环+on+空XFF回退", true, "127.0.0.1:5000", "", "127.0.0.1"},
+		{"回环+on+XFF全空白回退", true, "127.0.0.1:5000", " , , ", "127.0.0.1"},
+		{"公网直达不信XFF", true, "8.8.8.8:6000", "1.2.3.4", "8.8.8.8"},
+		{"IPv6回环+on", true, "[::1]:8080", "203.0.113.7", "203.0.113.7"},
+		{"无端口原样返回", true, "203.0.113.9", "1.2.3.4", "203.0.113.9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.trusted {
+				t.Setenv("XUANKE_TRUSTED_PROXY", "on")
+			} else {
+				t.Setenv("XUANKE_TRUSTED_PROXY", "")
+			}
+			req := httptest.NewRequest("POST", "/api/login", nil)
+			req.RemoteAddr = tc.remote
+			if tc.xff != "" {
+				req.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if got := clientIP(req); got != tc.want {
+				t.Fatalf("clientIP() = %q，期望 %q（场景：%s）", got, tc.want, tc.name)
+			}
+		})
+	}
+}
+
 // TestHandleElectivesSelectAndExit 验证手动报名与退选 REST API 接口 (Task 4)。
 func TestHandleElectivesSelectAndExit(t *testing.T) {
 	d := newTestDeps(t)

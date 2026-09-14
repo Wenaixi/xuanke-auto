@@ -148,6 +148,7 @@ type Scheduler struct {
 	lastSyncStart  time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
 	lastSyncFailAt time.Time                    // 上次同步失败时刻（B9-03 失败退避计时基准）
 	syncing        bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
+	probing        bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑，F12-B2）
 	syncFailStreak int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
 	lastPrewarm    time.Time                    // 上次连接池预热时间
 	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
@@ -718,6 +719,19 @@ func (s *Scheduler) tick() {
 // prevWindowOpened 在探测失败/空数据路径保持原值，窗口一旦开过就维持已开状态，
 // 提交循环（spawnChain）仍会继续尝试目标课程，黄金期不因数据异常而停摆。
 func (s *Scheduler) probe() {
+	// F12-B2（第 12 轮）：探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
+	// （15s 超时），HTTP 侧 /api/electives 在快照过期时并发的 ProbeForAccount/ProbeNow
+	// 会与 tick 探测同时打上游，N 账号部署下开窗全期形成 N+1 并发 findElectivesData。
+	// probing 在持 s.mu 时置位，保证"置位-检查"原子（B11-A1 零值守卫同款窗口）。
+	// 命中单飞直接放弃本次探测：最长推迟一个 tick（300ms），临门/黄金期无实质损失。
+	s.mu.Lock()
+	if s.probing {
+		s.mu.Unlock()
+		return
+	}
+	s.probing = true
+	s.mu.Unlock()
+
 	now := time.Now()
 	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照
 	for _, a := range s.AccountsWithTargets() {
@@ -727,11 +741,15 @@ func (s *Scheduler) probe() {
 	}
 	client, ok := s.clients.AnyClient()
 	if !ok {
+		s.mu.Lock()
+		s.probing = false
+		s.mu.Unlock()
 		return // 尚无账号登录，安静等待
 	}
 	data, err := client.FindElectives()
 	if err != nil {
 		s.mu.Lock()
+		s.probing = false
 		s.lastProbe = now // 失败同样计入节流闸门，网络故障时不会每 300ms 疯狂重试
 		s.mu.Unlock()
 		if errors.Is(err, zhidao.ErrUnauthorized) {
@@ -745,6 +763,7 @@ func (s *Scheduler) probe() {
 		return
 	}
 	s.mu.Lock()
+	s.probing = false
 	s.lastProbe = now
 	s.lastData = data
 	s.lastDataAt = now

@@ -68,6 +68,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   // 手动报名指定课程
   const handleSelectClass = async (c: ClassItem) => {
+    // F26-03（第 26 轮）：在飞幂等守卫——与 login submit 的 F19-02 / 激活的 F21-04
+    // 同款短路：disabled 渲染落地前双击/连点会发出两个并发报名，后端 TryAcquireSubmit
+    // 拒绝第二个（"该课程正在提交中"），但第一个已 MarkDone 成功、第二个的 finally 仍
+    // invalidateQueries 造成假失败 toast；退选同源。入口先查在飞标记即停。
+    if (actionLoading === c.id) return
     setActionLoading(c.id)
     try {
       const res = await selectElective(c.id, sessionToken, account, c.course_name)
@@ -86,6 +91,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   // 手动退选指定课程二次确认提交
   const handleConfirmExit = async (c: ClassItem) => {
+    // F26-03（第 26 轮）：与 handleSelectClass 同款在飞幂等守卫（双击退选第二个请求
+    // 会被后端 TryAcquireSubmit 拒、假失败 toast）。
+    if (actionLoading === c.id) return
     setActionLoading(c.id)
     try {
       const res = await exitElective(c.id, sessionToken, account)
@@ -370,11 +378,21 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     for (let i = 0; i < 3; i++) {
       flushTargets()
       if (!dirtyRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
-      if (!savingRef.current) continue    // 脏块被守卫拦下（等无可等）：下轮再试即放行
-      const deadline = Date.now() + 21000
-      while (savingRef.current && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 30)) // 等飞行中 PUT 结束，补发链在 finally 自接
+      // F26-01（第 26 轮）：保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
+      // （scheduleRetry 已挂 2/4/8/16s）同样表示内存与后端分叉、改动未落库。此前只等
+      // savingRef，退避 timer 在飞时被误判"已静止"→ 三轮后无条件 onDone 卸载、
+      // cleanup clearTimeout 取消排队重试 → 最后一批改动静默丢失且无任何提示
+      // （比 F21-01 的"飞行 PUT 补发"少覆盖了失败重试路径）。此处等待 timer 触发后
+      // saveNow 的 finally 自接补发链收敛；持续失败则超时兜底，绝不无限挂起。
+      const pendingSaving = () => savingRef.current || retryState.current.timer !== null
+      if (pendingSaving()) {
+        const deadline = Date.now() + 21000
+        while (pendingSaving() && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 30))
+        }
+        continue // 收敛（或超时）后下一轮再 flush，拿最新目标再真实发一次保存
       }
+      // 脏块被守卫拦下（等无可等）：下轮再试即放行
     }
     onDone()
   }

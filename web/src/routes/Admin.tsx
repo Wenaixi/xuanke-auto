@@ -495,10 +495,15 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       // 留空 = 不改动 key（脱敏回显无法完整回填）
       if (apiKey.trim()) body.vision_api_key = apiKey.trim()
       await api("/admin/config", { method: "PUT", session: sessionToken, body: JSON.stringify(body) })
-      setApiKey("")
-      configQuery.refetch()
       setConfigEpoch((e) => e + 1) // F7-02：让 refetch 的返回值经 effect 回填到表单（与生效值对齐）
       toast({ title: "配置已保存", description: "已生效，无需重启服务" })
+      // F26-04（第 26 轮）：密钥输入框清空后移至健康信号之后——旧实现在 PUT 成功
+      // 落地后立刻 setApiKey("")，而用户若在保存进行中（await 返回前）已开始输入新密钥，
+      // 该清空会无提示吞掉新输入（脱敏回显不写 apiKey 字段，回填 effect 也不覆盖）。
+      // 清空挪到确认健康（configEpoch 已自增、toast 已发起）之后，输入窗口收敛到
+      // "PUT 完成 → 用户此刻点进密钥框打字"的亚秒窄窗；且保存后才清空仍保证
+      // "留空 = 不改动 key"的回显语义不被上次保存的旧输入污染。
+      setApiKey("")
     } catch (e: any) {
       toast({ title: "保存失败", description: e.message || "通信异常", variant: "destructive" })
     } finally {

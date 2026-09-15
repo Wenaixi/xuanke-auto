@@ -568,7 +568,7 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
-	log.Printf("[scheduler] 已启动，轮询间隔 %v（课程探测节流 30 秒），窗口开启时间 %s", s.interval, s.openTime.Format("2006-01-02 15:04:05"))
+	log.Printf("[scheduler] 已启动，轮询间隔 %v（课程探测节流 30 秒），窗口开启时间 %s", s.interval, s.openTimeNow().Format("2006-01-02 15:04:05"))
 }
 
 // Stop 停止轮询。
@@ -1394,6 +1394,15 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Unlock()
 			full, cErr := s.classFullRealtime(acct, t.ClassID)
 			s.mu.Lock()
+			// M-38-01：实时复核网络段（最长 15s）期间管理员可能删除账号——回锁后先复核
+			// 账号仍存在再进三路分支写状态/落日志/重建 full 族 map。已删账号静默放弃整块
+			// （inflight 已在 1333 行清掉，无残留），与链顶 B30-01/失效分支/成功分支
+			// B18-M2 同族防线——实时复核结果块是删号竞态最后一块裸露写点
+			// （setStateLocked 的 idx<0 守卫只挡数组越界，挡不住落库与 map 写）。
+			if _, ok := s.clients.ClientFor(acct); !ok {
+				s.mu.Unlock()
+				return
+			}
 			// B19-03：实时复核命中 token 失效（学生数接口同样鉴权）——
 			// 与 SelectClass 分支对称触发自动重登（ErrUnauthorized 才是"重登中"语义），
 			// 否则本次失败被当普通失败处理、下个 tick 又重打报名接口（token 已失效的

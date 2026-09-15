@@ -1129,7 +1129,71 @@ func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 	}
 }
 
-// TestUnauthorizedBranchDeletedAccountSkipsState 失效分支的账号存在复核：
+// TestRealtimeRecheckDeletedAccountDropsLog 实时人数复核结果块（锁外网络段后回锁写状态）
+// 的删号竞态复核：复核发起的网络往返（IsClassFull，最长 15s）期间管理员删除账号——
+// 返回结果后回锁时若一律照写，会给已删账号落一条幽灵失败审计日志并重建 full/relogin
+// 族幽灵 map 条目（B30-01 链顶/B37-03 失效分支/B18-M2 成功分支同族防线的最后一块拼图；
+// setStateLocked 的 idx<0 守卫只挡状态数组越界，挡不住落库与 map 写）。
+func TestRealtimeRecheckDeletedAccountDropsLog(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.selectErr[61115] = errors.New("connection reset") // 报名网络失败 → 走实时人数复核路径
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	st := &countingLogStore{fakeStore: &fakeStore{}}
+
+	s := New(fa, st, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	if _, err := s.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// IsClassFull 网络段阻塞：模拟复核请求在途——删除账号精确落在"复核已发起、结果未返回"窗口
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	fc.mu.Lock()
+	fc.fullBlock = func() {
+		close(entered)
+		<-release
+	}
+	fc.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+
+	// 等链进入复核网络往返（inflight 已置位、IsClassFull 卡住）
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("自动链应已进入实时人数复核")
+	}
+	// 此刻删号：账号从客户端注册表摘除（memory-first），复核结果回锁写回时 ClientFor 必不存在
+	fa.mu.Lock()
+	fa.removed["acct1"] = true
+	fa.mu.Unlock()
+	close(release)
+
+	// 等链完全退出（chains 活跃标记消失 = goroutine 的 defer 已执行，即实时复核结果块
+	// 全部落地）。注意绝不能用 inflight 等待：inflight 在 SelectClass 返回后（进实时复核
+	// 之前）就已清理，等它会让断言与 goroutine 落日志并发——测试在旧实现上就会假绿
+	// （实测：等 inflight 时旧实现真红漏检，测试 0.01s 假绿通过）。
+	deadline := time.Now().Add(3 * time.Second)
+	key := "acct1\x001"
+	for time.Now().Before(deadline) {
+		s.chainMu.Lock()
+		_, active := s.chains[key]
+		s.chainMu.Unlock()
+		if !active {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// 契约：已删账号不得追加审计日志（旧实现在通用失败分支落幽灵行）
+	if n := st.logCount(); n != 0 {
+		t.Fatalf("已删账号实时复核不得追加审计日志，实际 %d 行", n)
+	}
+}
 // SelectClass 网络往返（最长 15s）期间管理员删除账号，返回 ErrUnauthorized 后分支必须
 // 在状态写回与审计日志落库前再次核实 ClientFor，已删则静默放弃——旧实现直接在分支内
 // setState+AppendLog：删号后状态行被覆写为"教务令牌失效"并多写一行 DB 日志

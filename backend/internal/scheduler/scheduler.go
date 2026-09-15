@@ -759,21 +759,11 @@ func (s *Scheduler) windowClosedLocked() bool {
 	if s.state.WindowClosed {
 		return true
 	}
-	// B19-01：时钟连续失败 ≥3（平台不可达信号）→ 幽灵窗口兜底判定——
-	// 从未开过窗的空快照 + 开放时间已过时，2s 高频探测/1s 提交只烧平台（熔断形态）。
-	// 自愈由 syncFailStreak 归零（同步成功）提供。注意 syncFailedWindow 字段写而不读
-	// （判据只用 syncFailStreak），已在 maybeSyncClock 注释注明，避免误读为死代码。
-	// B21-01：streak 现在真实可达——maybeSyncClock 失败分支不再清零
-	// （见下），连续失败 ≥3 后持续累计、同步成功才归零；WindowClosed 判据首次真实生效。
-	// 32-01：判据2 必须带"开放时间已过"——只查"开放时间非零"时，未来开窗点遇平台
-	// 连续故障（syncFailStreak≥3）即误视同关闭：提交守卫挂起黄金期 250ms 冲刺 + 探测
-	// 降回 30s，平台恰在开窗点恢复后要等下一轮时钟同步成功（≤30s 退避）才自愈，
-	// 首波目标可能已被抢光。判据3（EmptyProbeRuns）入账侧已有 B21-02 的 now.After(open+10s)
-	// 自保护，判据2 的计数源不依赖 probe/open，是唯一需补该条件的判据。
-	// open 取一次快照复用（与探针间隔判定同策略）：两次独立 openTimeNow() 在管理员
-	// 热改开放时间的亚毫秒窗口内可能读到新旧两个值——先读非零过 IsZero、后读零值使
-	// After(零值) 恒 true，三条件误判"已过开放时间"视同关闭。
-	if open := s.openTimeNow(); s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
+	// open 单快照对三条判据统一（判据2 取一次复用 + 判据3 同快照）——两处独立
+	// openTimeNow() 在管理员热改开放时间的亚毫秒窗口内可能读到新旧两个值（一次触发
+	// 判据、一次不触发）：判据2 已修、判据3 必须同一快照，幽灵窗口挂起/解除一致。
+	open := s.openTimeNow()
+	if s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
 		return true
 	}
 	// B20-02：视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
@@ -783,7 +773,7 @@ func (s *Scheduler) windowClosedLocked() bool {
 	// 首次探测（acctDataAt 全空）不计数、不误伤；runs≥3 即连续三轮空快照确证"从未开过"，
 	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、管理员热改开放时间，success 探测
 	// 数据后势必推开始 open 实况、emptyRuns 归零自愈。
-	if !s.openTimeNow().IsZero() && !s.state.WindowOpened && s.state.EmptyProbeRuns >= 3 {
+	if !open.IsZero() && !s.state.WindowOpened && s.state.EmptyProbeRuns >= 3 {
 		return true
 	}
 	return false

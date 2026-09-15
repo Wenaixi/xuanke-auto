@@ -66,6 +66,11 @@ export default function App() {
     // 管理员若不重置 targetAccount，渲染会直接命中代理分支再次掉进学生 Select，
     // 跳过管理页；登出即放弃代理态，重登后回到管理页。
     setTargetAccount(null)
+    // M29-02（第 29 轮）：同步重置 page 视图态——App 组件永挂载（Login 只是条件渲染
+    // 分支），page 不随 sessions 清空而重置：学生在选课大厅被 401 吊销（教务 token
+    // 过期）后重新登录，page 残留 "select" 会跳过 Dashboard 直接掉进选课大厅；
+    // 与 targetAccount 同族，登出即回到初始 dashboard 视图。
+    setPage("dashboard")
   }
 
   // 当前账号的会话被剔除后自动切到剩余账号（无账号则回登录页）

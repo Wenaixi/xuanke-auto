@@ -1193,6 +1193,13 @@ func (s *Scheduler) submitAll() {
 
 // spawnChain 逐备选提交：确认满员（快照或实时人数）才切下一备选；成功即终止。
 func (s *Scheduler) spawnChain(acct string, ts []Target) {
+	// B30-01（第 30 轮）：链顶先判客户端存在——submitAll 已过滤 ClientFor 不存在的账号，
+	// 但账号可在 submitAll 过滤后、本链启动前被删（Accounts.Remove memory-first），
+	// 此前 !ok 只在每门课锁内兜底且会建 inflight+AppendLog 落库（删账号后继续堆积）。
+	// 前置到链顶：已删账号静默放弃整链，绝不为幽灵账号建任何内存态/写任何日志。
+	if _, ok := s.clients.ClientFor(acct); !ok {
+		return
+	}
 	key := acct + "\x00" + strconv.Itoa(ts[0].PublishID)
 	s.chainMu.Lock()
 	if s.chains[key] {
@@ -1208,6 +1215,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.chainMu.Unlock()
 		}()
 		client, ok := s.clients.ClientFor(acct)
+		// B30-01（第 30 轮）：删除可发生在 spawnChain 入口判据之后、本 goroutine 取 client
+		// 之前（毫秒窗口）——此处必须再判一次，nil client 绝不能进循环调 SelectClass
+		// （nil 指针 panic）。已删账号静默放弃整链，不建 inflight、不写日志。
+		if !ok || client == nil {
+			return
+		}
 		for _, t := range ts {
 			s.mu.Lock()
 			// 重登期间跳过该账号全部提交（无效 token 请求纯浪费 + 熔断风险）
@@ -1270,11 +1283,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 
 			var msg string
 			var err error
-			if !ok {
-				err = errors.New("账号会话未建立，等待重新登录")
-			} else {
-				msg, err = client.SelectClass(t.ClassID)
-			}
+			msg, err = client.SelectClass(t.ClassID)
 			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复
 			if errors.Is(err, zhidao.ErrUnauthorized) {
 				s.maybeRelogin(acct)
@@ -1335,15 +1344,8 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			}
 			// 非满员失败：改为实时人数复核确认是否真满员
 			// （用户要求：不解析平台"满"字错误文案，直接对比总数与已报数）
-			if !ok {
-				// 账号会话未建立：保留状态，终止本链，下个 tick 重试
-				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
-				if s.store != nil {
-					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
-				}
-				s.mu.Unlock()
-				return
-			}
+			// 注意：!ok（账号会话未建立）分支已被 B30-01 前置到链顶——go routine 启动时
+			// 客户端不存在即静默放弃整链，本处不可能再遇到 !ok，无需再判。
 			// C-4（第 3 轮）：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
 			// 全局锁，黄金冲刺期里其它账号的探测/提交/时钟对齐全被锁死；锁外复核完再回锁收尾。
 			// F13-m2（第 13 轮）：锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1

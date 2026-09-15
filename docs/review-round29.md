@@ -2,7 +2,38 @@
 
 > 审查范围：backend（api/scheduler/accounts/zhidao/store/session/runtime/config/secure/db/main）
 > + web 全部模块。两个只读子代理并行产出发现，主 gate 逐条核实（读源码 + 推演
-> 真实触发路径）。本文件先写前端已确认部分（后端报告到达后追加）。
+> 真实触发路径）。确认后端 2 项（1 MAJOR + 1 MINOR）+ 前端 2 项 MINOR
+> （均核实为真并 TDD 修复）。
+
+## 后端（2 项，确认修复）
+
+### B29-01（MAJOR）SetRecognizer 模板引擎不更新——新 ensure 客户端识别引擎恒 nil 硬故障
+**缺陷**（review29-backend）：`accounts.Manager.SetRecognizer` 只遍历**当前已有**客户端注入
+识别器，从不更新 `m.vision.recognizer`；`SetVision` 更新 `m.vision` 时 `cfg.recognizer`
+恒为 nil。因此 `m.vision.recognizer` 从启动起恒 nil，任何**之后新建**的客户端在
+`zhidao.New(m.baseURL, m.vision)` 里只能走 `APIKey != ""` 兜底 Vision——ddddocr 引擎对
+新账号一律不生效。完整触发路径：按文档配置 `XUANKE_CAPTCHA_ENGINE=ddddocr`（SF_API_KEY
+留空=ddddocr 典型用途），启动 initCaptchaAtStartup 注入现有客户端成功；第一个**新学生
+账号** `/api/login` → `ensure` 走 New → 模板 recognizer nil 且 APIKey 空 → 识别报
+"未配置验证码识别引擎"×3 登录失败——**系统从第一个新账号起无法登录任何新账号**
+（Restore 既有账号被注入过引擎，掩盖问题在重启前不被发现）。
+**修复**：SetRecognizer 同步写模板（新增 `VisionConfig.WithRecognizer/Recognizer` 导出
+访问器跨包操作未导出字段，不破坏 client.go 包内直接访问）；SetVision 赋值前保留模板
+当前引擎（与 `Client.SetVision`"绝不挥动引擎切换"语义对齐）；补 `Client.CurrentRecognizer`
+测试读取器。**TDD**：`TestNewClientAfterSetRecognizerGetsEngine` 红灯（新账号登录报
+"未配置验证码识别引擎"，识别 3 次全败）→ 绿灯 + "SetVision 不清模板"对偶守卫。
+**验证**：go build+vet 绿，accounts/zhidao/api 三包测试通过。commit `ed64aec`。
+
+### B29-02（MINOR）StateForAccount 镜像 WindowClosed 兜底判据——window_closed 字段与挂起状态分叉
+**缺陷**（review29-backend）：`state.WindowClosed` 字段只在 probe() 主判据写入；
+`WindowClosed()` 方法另两条兜底判据（B19-01 时钟连续失败≥3 / B20-02 幽灵窗口
+EmptyProbeRuns≥3）返回 true 时不回写字段。`StateForAccount` 直接浅拷贝 `s.state` →
+`/api/state` 下发 `window_closed=false` → 前端横幅仍显示倒计时/"已开放"、日志与课程轮询
+维持 10s/2s 高频（F9-07 降频失效）——展示与实际挂起状态分叉。
+**修复**：抽 `windowClosedLocked()` 三条判据单源，StateForAccount 与 WindowClosed() 共用，
+杜绝两套真相。**TDD**：`TestStateForAccountMirrorsWindowClosed` 红灯（幽灵窗口兜底
+EmptyProbeRuns=3 时字段仍 false）→ 绿灯（三判据全镜像 + 非关闭不误报）。
+**验证**：go build+vet 绿，scheduler/api 全量测试通过。commit `fc0ef5f`。
 
 ## 前端（2 项，确认修复）
 
@@ -30,6 +61,10 @@ TryAcquireSubmit 拒绝 → finally invalidateQueries 照跑 → **假失败 toa
 `accounts.length === 0` 分支同样 `setPage("dashboard")`（吊销不经 logout，两路对称）。
 **验证**：`npm run build` 全绿。commit `1a014d3` + 补丁 `2087ebf`。
 
+## 可疑待核裁决（review29-backend）
+无达到需主会话推演门槛的项目——删除竞态三链闭环、时钟对齐、窗口状态机、透传校验矩阵
+均已核闭环。
+
 ## 可疑待核裁决（review29-frontend）
 - **① logout 不重置 page → 确认为真实缺陷，M29-02 修复**（上文）。
 - **② tsconfig.app.json 缺 `strict` → 维持观察**（S27-02 延续）：系统性类型安全隐患，
@@ -44,7 +79,23 @@ TryAcquireSubmit 拒绝 → finally invalidateQueries 照跑 → **假失败 toa
 
 ## 观察项（本轮追加/延续）
 - tsconfig 缺 strict（S27-02/S29-② 延续）。
-- 历轮观察项全表延续（下节已核无缺陷清单后端部分到达后合并列出）。
+- 历轮观察项全表延续：后端——reloginBackoff backoffMax=10min 死分支、RestoreRefused
+  注释过时（行为正确）、lastSyncFailAt 本地钟 vs 对齐钟（B20-03 同族）、settings 恢复
+  captcha_concurrency 无上限校验、probe per-account 近超时窄窗排队、PUT config 空变更
+  先落库（23-11）、HTTP 探测单飞（22-01）、Decrypt 死字段/RemoveFull 死方法/emptyRunsFor
+  死代码/syncFailedWindow 写而不读；前端——handleBack 极端失败路径刻意兜底、Dashboard
+  日志 key 缺 account 维度（令牌唯一性+服务端过滤双覆盖）、handleBack 等待期用户继续
+  操作边缘安全方向、手动报名假失败 toast 存在性已并入 M29-01。
+
+## 已核无缺陷（后端，主 gate 复核 + review29-backend 详核）
+- 删除账号三链竞态闭环：B26-01 memory-first 顺序（Accounts.Remove → PurgeAccount →
+  Store.DeleteAccount → Sessions.RevokeAccount）下，PurgeAccount 持 s.mu 天然排在任何
+  持 s.mu 落库临界区之后、DeleteAccount 恒在 PurgeAccount 之后——SaveSuccess/
+  SaveRefused/UpdateIDToken 的库行写入必然先于 DeleteAccount，已删账号写回行总是被
+  事务清掉；内存侧由 PurgeAccount 兜底，无幽灵复活路径。
+- spawnChain 提交链：done/full/rateLimited/inflight/refused 判定顺序正确；B23-03
+  tokenValidForLocked 短路语义确认；B23-01 满员分支 doneHas 让位与"未现满员"分支对称。
+- 时钟对齐/窗口状态机/透传校验矩阵（B27-01/02 accountExists 四路）全部闭环。
 
 ## 已核无缺陷（前端，主 gate 复核）
 - 目标保存串行化链：savingRef/dirtyRef/rev 驱动 + flushTargets/handleBack 补发收敛
@@ -55,7 +106,5 @@ TryAcquireSubmit 拒绝 → finally invalidateQueries 照跑 → **假失败 toa
 - 401 吊销链：快照式落盘、session 反查归属、F25-01 管理员自我吊销清代理态齐备。
 
 ## 回归
-- frontend：`npm run build`（tsc -b + vite build）通过（三提交均验证）。
-- backend：待 review29-backend 报告到达后补全量回归。
-
-（后端部分待补）
+- backend：`go build ./... && go vet ./... && go test -race ./...` 全量通过。
+- frontend：`npm run build`（tsc -b + vite build）通过（三个前端提交均验证）。

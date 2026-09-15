@@ -206,8 +206,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 成功→全清空"后首次非空 courses 响应会把 [A,B] 合并回来并重新写回后端，清空被静默撤销。
   useEffect(() => {
     if (echoedRef.current) return
-    const courses = stateData?.courses
-    if (!courses || courses.length === 0) {
+    // 首帧未到（stateData===undefined）：绝不提前置位回显完成——否则 /state 晚于
+    // 用户首次点击到达时，防抖/flush 用"只含用户新改动"的 selected 整包覆盖删除后端
+    // 旧目标（"添加一门"变"替换全部"），且 M30-03/31-01/35-01 真合并、33-01 等待、
+    // 34-01 守卫全部失效。继续等待 /state；持续失败由轮询自愈，改动滞留不覆盖（安全方向）。
+    if (stateData === undefined) return
+    const courses = stateData.courses ?? []
+    if (courses.length === 0) {
       // /state 首帧到达且确证后端无旧目标（courses 空）：echoed 完成——否则全程无旧
       // 目标的账号用户改动会被防抖回显守卫永久拦下（置脏无自愈信号）。清空语义/全
       // 清空守卫不受影响（echoDone 只做放行信号，不写 selected）。

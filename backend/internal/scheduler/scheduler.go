@@ -1469,6 +1469,9 @@ func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Durat
 }
 
 // classFullInSnapshot 快照人数确认满员（需持锁）。优先匹配该账号专属快照，无快照时回退全局快照。
+// 满员判定用快照级字段 max_count/selected_count（findElectivesData 课程级，真实 select.js 实证，
+// 表列定义 max_count/selected_count/audited_count 同屏）——这是调度器"真满员退避"的实证主路径；
+// 实时接口 findElectivesStudentCount 未实证 maxCount（CountEntry 注释），实时复核实际不可判满员。
 func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
@@ -1495,6 +1498,10 @@ func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 }
 
 // classFullRealtime 实时人数复核（锁外调用，禁止持锁时发起网络请求）。
+// 注意：实时接口未实证 maxCount（CountEntry 注释），IsClassFull 实际恒 false——
+// 本复核保留为"平台未来下发 maxCount 时自动生效"的防御性路径，当前真满员判定
+// 以 classFullInSnapshot（快照 max_count，实证）为主路径，spawnChain 已先于实时复核
+// 用快照判满员跳过（1273 行 classFullInSnapshot），实时复核仅兜底不破坏防轰炸契约。
 func (s *Scheduler) classFullRealtime(acct string, classID int) (bool, error) {
 	client, ok := s.clients.ClientFor(acct)
 	if !ok {

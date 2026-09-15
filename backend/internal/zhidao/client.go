@@ -646,11 +646,17 @@ func (c *Client) ExitClass(classID int) (string, error) {
 }
 
 // CountEntry 实时人数（findElectivesStudentCount）。
+// 字段实证（对照 legacy/website-source 真实 select.js 轮询回调 + HAR）：响应仅确证
+// id/selectedCount/auditedCount 三键——真实前端只读这 3 个（`t.id` 匹配、`t.selectedCount`
+// 写 selected_count 列、`t.auditedCount` 写 audited_count 列），全文件 0 处消费 maxCount，
+// 两 HAR 也无该接口请求/响应样本。maxCount 按"平台未下发"判定：JSON 静默忽略恒 0。
+// 保留字段仅为"若平台未来下发"的防御性解（零成本受益），绝不可当作满员判据——
+// 真满员判定以快照字段 max_count（findElectivesData 课程级，实证）为准（classFullInSnapshot）。
 type CountEntry struct {
 	ID             int `json:"id"`
 	SelectedCount  int `json:"selectedCount"`
 	AuditedCount   int `json:"auditedCount"`
-	MaxCount       int `json:"maxCount"`
+	MaxCount       int `json:"maxCount"` // 平台未实证下发（select.js 0 消费），恒 0，仅防御性保留
 }
 
 // StudentCounts 查询课程实时人数。
@@ -684,6 +690,9 @@ func (c *Client) StudentCounts(ids []int) ([]CountEntry, error) {
 
 // IsClassFull 实时查询该课程是否已满（已报人数 >= 可报人数）。
 // 满员判定不依赖平台错误文案，直接对比人数——用户指定方案。
+// 注意：响应未实证 maxCount 字段（CountEntry 注释），MaxCount 恒 0 时本判据恒 false——
+// 实时复核实际退化"永不确证满员"；调度器真满员判定主路径是快照 classFullInSnapshot
+// （max_count 实证字段），实时复核只是兜底，不破坏满员退避/防轰炸契约。
 func (c *Client) IsClassFull(classID int) (bool, error) {
 	counts, err := c.StudentCounts([]int{classID})
 	if err != nil {

@@ -70,16 +70,20 @@ const (
 // WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
 // 提交已被 B11-A1 零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
-	if s.openTimeNow().IsZero() {
+	// 函数入口统一取一次开放时间快照复用——runtime.Store 每次读取都重取当前配置，
+	// 同一函数内多次调用在管理员热改开放时间的亚毫秒窗口内可能读到不同值（一次落
+	// 30s 远间隔、一次落临门 2s），且与 B20-03 同族消弭时间基准漂移。
+	open := s.openTimeNow()
+	if open.IsZero() {
 		return probeIntervalFar
 	}
-	if now.After(s.openTimeNow().Add(-nearWindow)) {
+	if now.After(open.Add(-nearWindow)) {
 		// B19-01：从未开过窗 + 开放时间已过 + 空快照 = 幽灵窗口（平台窗口从未
 		// 开启或已关闭且从未被探测确认）——2s 高频盯守只剩烧平台（"访问过于频繁"熔断
 		// 形态）。以空快照 + 时钟失败裕量判定幽灵窗口，探测降回 30s 常态（窗口若真开、
 		// 管理员热改开放时间，临门判断自然重新收紧）。黄金期不受影响：开窗瞬间探测
 		// 确认 opened=true，绝不走此分支。
-		if now.After(s.openTimeNow()) && s.WindowClosed() {
+		if now.After(open) && s.WindowClosed() {
 			return probeIntervalFar // 开放时间已过且窗口关闭：降回 30s
 		}
 		return probeIntervalNear
@@ -1322,8 +1326,14 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.done[acct][t.ClassID] = true
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "success", msg)
 				if s.store != nil {
-					s.store.AppendLog(acct, t.ClassID, "select", msg, true)
-					_ = s.store.SaveSuccess(acct, t.ClassID)
+					if err := s.store.AppendLog(acct, t.ClassID, "select", msg, true); err != nil {
+						log.Printf("[scheduler] 账号 %s 课程 %d 报名成功日志落库失败: %v", acct, t.ClassID, err)
+					}
+					if err := s.store.SaveSuccess(acct, t.ClassID); err != nil {
+						// 落库失败会让重启后 RestoreDone 漏掉这条成功记录、已成功课被重新提交——
+						// 记录在案供运维排查（SQLite 单写者仅在磁盘满/IO 故障时失败）。
+						log.Printf("[scheduler] 账号 %s 课程 %d 成功记录落库失败: %v", acct, t.ClassID, err)
+					}
 				}
 				log.Printf("[scheduler] 账号 %s 课程 %d（%s）报名成功: %s", acct, t.ClassID, t.CourseName, msg)
 				s.mu.Unlock()
@@ -1703,8 +1713,12 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 		})
 	}
 	if s.store != nil {
-		_ = s.store.SaveSuccess(acct, classID)
-		_ = s.store.AppendLog(acct, classID, "select", msg, true)
+		if err := s.store.SaveSuccess(acct, classID); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 手动报名成功记录落库失败: %v", acct, classID, err)
+		}
+		if err := s.store.AppendLog(acct, classID, "select", msg, true); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 手动报名日志落库失败: %v", acct, classID, err)
+		}
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 手动标记成功: %s", acct, classID, msg)
 	return nil
@@ -1746,12 +1760,18 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	if s.store != nil {
 		// B8-M2（第 8 轮）：删除 success 行——否则重启后该课被 RestoreDone 恢复成
 		// "已报名成功"，用户当日的退选决定被静默撤销（与 CLAUDE.md 契约文档对齐）
-		_ = s.store.DeleteSuccess(acct, classID)
+		if err := s.store.DeleteSuccess(acct, classID); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 退选清除成功记录落库失败: %v", acct, classID, err)
+		}
 		// B9-02：持久化 refused——此前只写内存，重启后 refused 全丢，
 		// SetTargetsForAccount（重启恢复路径）会 delete(s.refused, acct)，
 		// 自动引擎把用户手动退选掉的课当新目标重新抢回，退选意图丢失。
-		_ = s.store.SaveRefused(acct, classID)
-		_ = s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true)
+		if err := s.store.SaveRefused(acct, classID); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 退选记录落库失败（重启后自动引擎可能抢回）: %v", acct, classID, err)
+		}
+		if err := s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 退选日志落库失败: %v", acct, classID, err)
+		}
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，记入 refused——自动引擎不再接管", acct, classID)
 	return nil

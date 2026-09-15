@@ -51,6 +51,54 @@ func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
 func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
 
+// failStore：带失败开关的 Store——SQLite 落库失败时调度器必须把错误上报/记日志，
+// 静默吞错会让"内存已写、库行没落上"的半态在重启后破坏恢复契约
+// （B9-02 refused 行丢失 = 手动退选被撤销；SaveSuccess 行丢失 = 已成功课被重抢）。
+type failStore struct {
+	*fakeStore
+	fail bool // 置 true 后全部写操作返回错误，模拟磁盘满/IO 故障
+}
+
+func (f *failStore) SaveSuccess(acct string, classID int) error {
+	if f.fail {
+		return errors.New("sqlite disk full")
+	}
+	return f.fakeStore.SaveSuccess(acct, classID)
+}
+func (f *failStore) SaveRefused(acct string, classID int) error {
+	if f.fail {
+		return errors.New("sqlite disk full")
+	}
+	return f.fakeStore.SaveRefused(acct, classID)
+}
+
+// TestStoreFailuresAreLoggedNotSilentlyDropped 验证失败落库必须记日志（B33-01）——
+// 静默吞错让"内存过半态"无法在重启前被发现。将 log 捕获器注入标准 logger，
+// 调用 SaveSuccess/SaveRefused 各失败一次，断言均有对应日志输出。
+func TestStoreFailuresLogged(t *testing.T) {
+	old := log.Writer()
+	defer log.SetOutput(old)
+	var logMu sync.Mutex
+	var logs strings.Builder
+	log.SetOutput(&lockedWriter{mu: &logMu, b: &logs})
+
+	accts := &fakeAccts{c: newFakeClient(true)}
+	s := New(accts, &failStore{fakeStore: &fakeStore{}, fail: true}, time.Now(), time.Hour)
+
+	// 触发 SaveSuccess 失败：手动标记成功（spawnChain 成功分支的网络 mock 复杂，直接走
+	// MarkDone——同一落库路径，1326/1706 同款 `_ =` 吞错）
+	s.MarkDone("acct1", 1, "健美操", "选课成功")
+	// 触发 SaveRefused 失败：手动退选（RemoveDone 的 SaveRefused 落库失败）
+	_ = s.RemoveDone("acct1", 1)
+
+	logMu.Lock()
+	out := logs.String()
+	logMu.Unlock()
+	if !strings.Contains(out, "落库失败") {
+		t.Fatalf("失败落库必须记录错误日志，实际输出: %q", out)
+	}
+}
+
 // syncLogBuffer 线程安全的日志捕获器：自动重登由调度器后台 goroutine 写日志，
 // 若用裸 bytes.Buffer 会与测试主协程并发读写（读 String / 写 Write）触发 -race；加锁彻底解除。
 type syncLogBuffer struct {
@@ -62,6 +110,18 @@ func (b *syncLogBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.Write(p)
+}
+
+// lockedWriter 供测试把标准 logger 重定向到加锁缓冲区（与 syncLogBuffer 同款防 -race）。
+type lockedWriter struct {
+	mu *sync.Mutex
+	b  *strings.Builder
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
 }
 
 func (b *syncLogBuffer) String() string {

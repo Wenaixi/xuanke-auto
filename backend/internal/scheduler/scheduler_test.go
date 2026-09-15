@@ -1371,7 +1371,7 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 		// 等待该轮发起落地：syncing 已复位 + 累计失败计数增长（第 3 轮后计数可能已被清零）
 		desired := i + 1
 		if i >= 2 {
-			desired = 0 // 第 3 轮后失败计数可能已触发回退而清零，不强卡 streak
+			desired = 0 // 第 3 轮后回退已落地（clockOffset 复位为 0），streak 只在同步成功时清零、回退不清零
 		}
 		wait := time.Now().Add(5 * time.Second)
 		for {

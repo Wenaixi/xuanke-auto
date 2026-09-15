@@ -56,7 +56,7 @@
   - **窗口开启自动刷新（官网契约）**：1500ms 检查一次 `beginTimes`，窗口开启时刻前后 1.5s 内自动 `f()` 整页重拉课程——这是"开窗瞬间自动探测"的官方等效实现
   - **报名/退选**：body 单字段 `classId=<数字id>`（表单编码）；退选走 `layer.confirm`，报名直发；成功/失败均整页 `f()` 重拉 + showRespOK/showRespFail(e.msg)
   - **classDetail**：课堂名称列保留 `showElectivesClassDetail(id)` 可点能力（官方页面），57 字段完整可查（classroom_name/lessons_date/teacher_name/plan_count/audited_count 等）——"大厅 UI 不再调用，库层函数 electivesDetail.js 仍留"（措辞精确化）
-  - **countList 字段**：`{id, selectedCount, auditedCount}` 已实证；`maxCount` 字段 Go 端有解但**未实证**，需实测确认
+  - **countList 字段**：`{id, selectedCount, auditedCount}` 已实证；**`maxCount` 判定不存在（第 36 轮 review36-contract-countlist 实证）**——真实 select.js 轮询回调只读 id/selectedCount/auditedCount 三键（selectedCount/auditedCount 各 1 处、maxCount 全文件 0 处）、两 HAR 无该接口请求/响应样本（主 HAR 实为 173 条 entry，CLAUDE.md 旧记"8468 条"为误记）；可报数/满员在真实前端来自快照级 `max_count`（表列 max_count/selected_count/audited_count 同屏静态列），可点性全由 `can_select[+btn_type+title]` 服务端味道双守卫判定、前端从不做数字对比。Go 端 `CountEntry.MaxCount` 保留字段但标注"平台未下发恒 0"——实时复核 `IsClassFull` 恒 false，真满员判定主路径为快照 `classFullInSnapshot`（`max_count` 实证字段）
   - **token 真实机制（平台真相）**：前端权威来源是 **`window.idToken` 全局变量**（由 `/home/menus` 响应 `token` 填充，`sessionStorage.zd_edu_token` 冗余）；**cookie 从不承载 token**（HAR 零 Set-Cookie 零 Cookie 头，且**全部鉴权请求在无 Cookie 头时仍成功**）。"idToken=zd_edu_cookie" 是 Python 侧自有存储约定，非平台机制；Go 端维持 idToken URL 参数 + Cookie 双通道是防御性冗余，但"Cookie 缺失即被拒"的论断无实证应弱化，契约主体锚定 URL 参数
   - **correctUrl 拼接判定式**：`url 已含 "="（带 query）→ 用 & 拼接；否则用 ?`——本项目业务路径无 query 恒落 `?idToken=`；token 值经 `encodeURIComponent`
   - **popReq 完整契约**：`popReq(url,data,success,fail,showSuccessToast=false,showFailToast=true,showLoading=false,async=true)`——默认**成功静默、失败弹 layer.msg**；`data` 对象 jQuery 默认 `application/x-www-form-urlencoded`（**不是 JSON**）；`__op_tip_msg/__op_tip_seconds` 是平台下发的确认弹窗提示字段（秒数>0 layer.msg、<=0 layer.confirm 再回调）
@@ -79,7 +79,7 @@ xuanke-auto/
 ├── login.py       # 完整登录（RSA+Vision 验证码识别），成功后写回 config.py
 ├── xuanke.py      # 主脚本，query / detail / monitor 三种模式
 ├── legacy/
-│   ├── www.zhidao.fj.cn.har          # 选课全链路真实抓包（8468 条请求）
+│   ├── www.zhidao.fj.cn.har          # 选课全链路真实抓包（173 条 entry）
 │   ├── 课程www.zhidao.fj.cn.har      # 课程详情弹窗抓包（classDetail）
 │   └── website-source/               # 从 HAR 提取的真实站点前端源码（25 个 JS）
 └── CLAUDE.md      # 本文件

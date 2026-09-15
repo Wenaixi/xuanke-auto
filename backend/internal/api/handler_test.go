@@ -866,6 +866,33 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 	}
 }
 
+// TestAdminStatsOpenTimeZeroShowsEmptyString 管理员清空开放时间（F7-02 合法操作）后，
+// stats 的 open_time 必须输出空串而非 "0001-01-01 00:00:00" 年份错位值——前端按
+// open_time_set 判定"未设置"，字符串若为 year-1 会与布尔字段自相矛盾（配置回显
+// handleConfig 对零值已输出空串，stats 必须与其对齐）。
+func TestAdminStatsOpenTimeZeroShowsEmptyString(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 通过管理接口合法清空开放时间（F7-02 契约：open_time="" = 显式清空，落库+回显三处对齐）
+	code, j := doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":""}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("清空 open_time 失败: %d %v", code, j)
+	}
+	// 清空后 stats 的 open_time 必须输出空串而非 "0001-01-01 00:00:00" 年份错位值——
+	// 前端按 open_time_set 判定"未设置"，字符串若为 year-1 会与布尔字段自相矛盾
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("stats 异常: %d %v", code, j)
+	}
+	st, _ := j["data"].(map[string]any)
+	if s, _ := st["open_time"].(string); s != "" {
+		t.Fatalf("零值开放时间应输出空串，实际 %q", s)
+	}
+	if st["open_time_set"] != false {
+		t.Fatalf("零值开放时间 open_time_set 应为 false，实际 %v", st["open_time_set"])
+	}
+}
+
 // TestAdminStatsWindowOpenedUsesScheduler admin stats 的 window_opened 以调度器探测状态为准，
 // 而非本地时钟直判：探测确认窗口开启 → stats 为 true。
 func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {

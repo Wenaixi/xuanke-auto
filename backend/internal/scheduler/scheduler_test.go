@@ -333,6 +333,26 @@ func (d *deletingStore) deletedList() []string {
 	defer d.mu.Unlock()
 	return append([]string(nil), d.deleted...)
 }
+
+// countingLogStore 带日志计数器的假存储：断言"已删账号不得追加审计日志"。
+type countingLogStore struct {
+	*fakeStore
+	mu  sync.Mutex
+	log int
+}
+
+func (c *countingLogStore) AppendLog(acct string, classID int, action, result string, isOK bool) error {
+	c.mu.Lock()
+	c.log++
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *countingLogStore) logCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.log
+}
 func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
 	return "acct1", f.c, true
 }
@@ -1106,6 +1126,80 @@ func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 	fc.mu.Unlock()
 	if relogCalls < 1 {
 		t.Fatal("提交链命中 token 失效后应触发自动重登")
+	}
+}
+
+// TestUnauthorizedBranchDeletedAccountSkipsState 失效分支的账号存在复核：
+// SelectClass 网络往返（最长 15s）期间管理员删除账号，返回 ErrUnauthorized 后分支必须
+// 在状态写回与审计日志落库前再次核实 ClientFor，已删则静默放弃——旧实现直接在分支内
+// setState+AppendLog：删号后状态行被覆写为"教务令牌失效"并多写一行 DB 日志
+// （删号竞态链 B18-M2/B20-01/B21-03 的分支级缺口，B30-01 只护链顶与取 client 处）。
+func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	st := &countingLogStore{fakeStore: &fakeStore{}}
+	fa.relogErr = errors.New("relog fail") // 重登失败（无关断言，仅需 gh 不 panic）
+
+	s := New(fa, st, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	if _, err := s.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// SelectClass 期间阻塞，模拟真实网络往返——删除账号精确落在"链在网络中、失效分支未执行"窗口
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	fc.mu.Lock()
+	fc.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	fc.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+
+	// 等链进入网络往返（inflight 已置位、SelectClass 卡住）
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("自动链应已进入 SelectClass")
+	}
+	// 此刻删号：账号从客户端注册表摘除（memory-first），失效分支写回时 ClientFor 必不存在
+	fa.mu.Lock()
+	fa.removed["acct1"] = true
+	fa.mu.Unlock()
+	close(release)
+
+	// 等链处理完毕（inflight 清理）
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		_, inFlight := s.inflight["acct1"][61115]
+		s.mu.Unlock()
+		if !inFlight {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// 契约：已删账号不得覆写状态行（提交前的 submitted 中转态保留，绝不被覆写成
+	// "failed/教务令牌失效"）也不得追加审计日志
+	s.mu.Lock()
+	idx := s.statusIndexLocked("acct1", 61115)
+	status := ""
+	if idx >= 0 {
+		status = s.state.Courses[idx].Status
+	}
+	s.mu.Unlock()
+	if status == "failed" {
+		t.Fatalf("已删账号失效分支不得覆写状态为 failed（应保持 submitted/pending 中转态）")
+	}
+	if n := st.logCount(); n != 0 {
+		t.Fatalf("已删账号失效分支不得追加审计日志，实际 %d 行", n)
 	}
 }
 

@@ -675,9 +675,9 @@ func newActivationCode() string {
 
 // ---- 管理员后台接口（会话级鉴权，见 requireAdminSession） ----
 
-// maskKey 敏感值脱敏：恒显掩码 + 后 4 位（空值恒显 ****，杜绝"未设置"歧义）。
+// maskKey 敏感值脱敏：设置了就有掩码 + 后 4 位，没设置才为空（空值 = 前端显"未配置"）。
 // A4（历轮）：key ≤4 位时旧逻辑返回空串，管理端 input 呈现空、与"未配置"无法区分
-// （误以为丢失、保存无效果）；统一恒显 **** 语义最清晰——设置了就有掩码，没设置才为空。
+// （误以为丢失、保存无效果）；统一掩码语义最清晰——设置了就有掩码，没设置才为空。
 func maskKey(v string) string {
 	if v == "" {
 		return ""
@@ -902,6 +902,13 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if !cfg.OpenTimeParsed.IsZero() {
 		open = cfg.OpenTimeParsed
 	}
+	// 零值开放时间输出空串（而非 "0001-01-01 00:00:00" 年份错位值）——前端 stats
+	// 展示依赖 open_time_set 判定"未设置"，字符串本身必须与其一致（配置回显 handleConfig
+	// 对零值已输出空串，stats 此处对齐，杜绝管理员把 year-1 当真实开放时间）。
+	openTimeStr := ""
+	if !open.IsZero() {
+		openTimeStr = open.Format("2006-01-02 15:04:05")
+	}
 	targetsCount := 0
 	for _, a := range accounts {
 		ts, err := d.Store.LoadTargetsForAccount(a)
@@ -930,7 +937,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		tokValid[a] = d.Sched.TokenValidFor(a)
 	}
 	writeJSON(w, 0, map[string]any{
-		"open_time":           open.Format("2006-01-02 15:04:05"),
+		"open_time":           openTimeStr,
 		"activation_on":       cfg.ActivationEnabled,
 		"window_opened":       windowOpened,
 		"account_count":       len(accounts),

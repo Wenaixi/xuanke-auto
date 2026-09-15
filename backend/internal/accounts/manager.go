@@ -199,6 +199,21 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 	c := m.ensure(acct)
 	token, err := c.Login(acct, password)
 	if err != nil {
+		// B23-02（第 23 轮）：登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
+		// 账号写入注册表（clients+order 首位），但空 token（无账密）客户端对 FindElectives/
+		// AnyClientWithAccount 恒返回 code=-1 ErrUnauthorized：调度器 probe() 主体每次探测
+		// 都触发 maybeRelogin("order[0]") → ReloginIfNeeded 报"未登录且无保存账密"、reloginFail
+		// 递增，lastData 永不刷新，未配置目标的全校浏览视图持续报错，直到该账号成功登录。
+		// 失败即把残留空壳从注册表摘除（next tick 不再作为 AnyClient 探测载体）。
+		m.mu.Lock()
+		delete(m.clients, acct)
+		for i, a := range m.order {
+			if a == acct {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+		m.mu.Unlock()
 		return "", err
 	}
 	if m.st != nil && encrypt != nil {

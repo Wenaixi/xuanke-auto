@@ -168,6 +168,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 从列表消失后 Radix Tabs 无 fallback，主区空白直到用户手点。受控 value 跟随
   // tabs[0]，发布重建即回落首个 Tab，绝不悬空。
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  // F36-01：跨账号组件实例复用防护——App 两处挂载点已加 key={account}，账号切换即整体
+  // 重建实例（selected/echoedRef/rev 全复位），此处守卫只兜底"未来改为不重置挂载"的
+  // 意外回归：account 变化时同步复位回显/编辑态，绝不让旧账号残留目标污染新账号
+  // （401 被动吊销自动切剩余账号时，旧账号 selected 会被防抖 PUT 整包覆盖掉新账号目标）。
+  // 声明于 echoedRef/rev/setRev/setEchoDone 之后（本文件顶部状态区），TDZ 不触发。
+  const [accountKey, setAccountKey] = useState(account)
+  if (accountKey !== account) {
+    setAccountKey(account)
+    setSelected({})
+    setRev(0)
+    echoedRef.current = false
+    setEchoDone(false)
+  }
 
   // 本地每秒刷新倒计时：F8-04/F9-07 收敛到 lib/useTickingCountdown 自 tick 组件，
   // 整页只重渲染倒计时一处，Tab 徽章"已锁定"计数随 selected 变化即时更新，无需每秒重算。

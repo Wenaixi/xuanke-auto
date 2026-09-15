@@ -1455,6 +1455,30 @@ func TestWindowClosedState(t *testing.T) {
 	}
 }
 
+// TestWindowClosedTransitionStateGrace B26-03（第 26 轮）：主判据（B18-M1）补"已过开窗点
+// 10s 裕量"——与 B21-02 给 EmptyProbeRuns 入账的 10s 裕量对称。开窗确证过（prevOpened=true）
+// 后，平台短暂返回空快照（数据刷新/切学期过渡态，F7-01 记录的预清空现象）时，旧判据
+// `now.After(open)` 在开窗点刚过就置 WindowClosed=true → tick 提交守卫挂起提交 + 探测降回
+// 30s，若平台在 30s 内恢复，黄金期提交已停摆。10s 裕量覆盖过渡态；真关仅推迟 10s 判定
+// （超过裕量仍按原判据关闭，TestWindowClosedState 的 -time.Hour 场景已固化））。
+func TestWindowClosedTransitionStateGrace(t *testing.T) {
+	// 过渡态：开窗点已过但仍在 10s 裕量内（now = open+5s，now.After(open) 为真、
+	// now.After(open+10s) 为假）——上一轮确证开过窗 + 本轮空快照，不得误标关闭
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.data.Publishes = nil
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-5*time.Second), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.mu.Lock()
+	s.state.WindowOpened = true // 上一轮确证开过窗
+	s.mu.Unlock()
+	s.probe()
+	if s.StateForAccount("acct1").WindowClosed {
+		t.Fatal("开窗点后 10s 裕量内的空快照探测不得置 window_closed（过渡态防误挂黄金期提交）")
+	}
+}
+
 // TestReleaseFullIfFreedEvenIfSnapshotOld 验证快照超过 40s 老化期但名额有空余时，
 // 调度器绝不能死守 full 标记，必须立即解除满员状态，以便黄金期捡漏抢课 (CRITICAL C1)。
 func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {

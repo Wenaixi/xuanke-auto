@@ -938,7 +938,13 @@ func (s *Scheduler) probe() {
 	// 否则未开窗即空快照（学期无发布/平台异常）会误标已关闭，tick 提交守卫按
 	// WindowClosed 挂起提交，把"还没开窗待开"误停成"永不提交"（开窗瞬间探测推进、
 	// 黄金期全停摆）。已开过窗再关 = 窗口关闭的实质语义，未开过不算关闭。
-	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow())
+	// B26-03（第 26 轮）：判定侧补"已过开窗点 10s 裕量"，与 B21-02 给 EmptyProbeRuns
+	// 入账的 10s 裕量对称——开窗确证（探测非空 + InDateRange）后平台若短暂返回空快照
+	// （数据刷新/切学期过渡态，F7-01 记录的预清空现象，非永久关闭），旧判据下一拍探测
+	// （临门 2s）即置关闭：tick 守卫挂起提交 + 探测降回 30s，若平台在 30s 内恢复，黄金期
+	// 提交已停摆。10s 裕量覆盖过渡态；真关仅推迟 10s 判定（超裕量仍按原判据关闭，
+	// TestWindowClosedState 的 -time.Hour 场景不受影响）。
+	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow().Add(10*time.Second))
 	// B20-02（第 20 轮）：探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
 	// 注意绝不触碰 state.WindowClosed（由 B18-M1/B19-01 判据独占）：这里只维护量变计数，

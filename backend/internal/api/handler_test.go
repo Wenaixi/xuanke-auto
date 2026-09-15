@@ -1060,6 +1060,38 @@ func TestSetTargetsEmptyAllowed(t *testing.T) {
 	}
 }
 
+// TestAdminElectivesUnknownAccountRejects B26-02（第 26 轮）：管理员 ?account= 透传查看
+// 课程的账号必须真实存在。此前任意串（typo/残留参数）静默走 ElectivesSnapshotFor 的全局帧
+// 回退路径返回全局课程数据，管理员以为看到的就是该账号年级的课程——与 B15-M4 在
+// handleSetTargets 的"凭据表校验"判据同源但读路径缺失，写路径拒绝、读路径假装成功不对称。
+// 触发前提是"全局帧已存在"（首账号已探测），否则恰好因 ProbeForAccount 报错而掩盖缺陷，
+// 故此测试先用真实账号探测填充全局帧再穿透。契约：凭据表查无此账号 → 明确"账号不存在"；
+// 真实登录过（activate 前 LoginByPassword 也 SaveCredential）的账号正常放行。
+func TestAdminElectivesUnknownAccountRejects(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := d.sessions.CreateAdmin("admin")
+	// 先填充全局帧：真实登录 acct1 并通过 ProbeNow（走 mock 网络写 lastData）
+	// ——修复前未知账号穿透恰好回退这个全局帧（请求被误导"成功"，缺陷本体）；
+	// 若全局帧为空则 ProbeForAccount 报错恰好与修复同效，测试会假绿。
+	tok := authenticateDirect(t, d, "acct1")
+	if _, err := d.sched.ProbeNow(); err != nil {
+		t.Fatalf("填充全局快照失败: %v", err)
+	}
+	// 未知账号穿透（无凭据记录）→ 必须拒绝，绝不回退全局帧
+	code, j := doJSONAuth(t, d.api, "GET", "/api/electives?account=nonexistent", "", adminTok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("管理员对不存在的账号查看课程应被拒绝，却返回成功 %v", j)
+	}
+	// 反向防线：真实登录过的账号（acct1 在凭据表）穿透正常放行
+	if _, jr := doJSONAuth(t, d.api, "GET", "/api/electives?account=acct1", "", adminTok); jr["code"].(float64) != 0 {
+		t.Fatalf("真实账号穿透查看课程应正常放行（B26-02 不得误伤）: %v", jr)
+	}
+	// 学生会话自己读自己的课程不受影响
+	if _, js := doJSONAuth(t, d.api, "GET", "/api/electives", "", tok); js["code"].(float64) != 0 {
+		t.Fatalf("学生自读课程不应受影响: %v", js)
+	}
+}
+
 // TestSetTargetsBounds 目标数量与范围必须受校验（n2）：
 // 超过 100 门 / 非法 publish_id / 非法 priority 一律拒绝，且不得入库。
 func TestSetTargetsBounds(t *testing.T) {
@@ -1565,6 +1597,51 @@ func TestSetTargetsUnknownAccountDoesNotFabricate(t *testing.T) {
 	if j["code"].(float64) == 0 {
 		t.Fatalf("管理员对不存在的账号设置目标应被拒绝，却返回成功 %v", j)
 	}
+}
+
+// TestAdminDeleteAccountMemoryFirst B26-01（第 26 轮）：删账号必须"先摘注册表、后清库"。
+// 此前顺序 Store.DeleteAccount（清 6 表）→ PurgeAccount → Accounts.Remove 之间存在毫秒级
+// 空窗——在飞提交链（SelectClass 最长 15s）恰在空窗完成时做 B18-M2/B20-01 的"落库前锁内
+// 复核 ClientFor 仍存在"，客户端尚未摘除 → 复核放行 → SaveSuccess/SaveRefused 把刚清掉的
+// success/refused 行写回，重启 RestoreDone 假成功、自动引擎永久跳过退选课。
+// 契约：删除成功返回后，accounts 注册表已无该客户端（内存先失效），库内凭据同步清空。
+func TestAdminDeleteAccountMemoryFirst(t *testing.T) {
+	d := newTestDeps(t)
+	// 用真实登录注册账号（SaveCredential 落库 + ensure 注册客户端）
+	tok := loginAndGetToken(t, d, "acct1")
+	if _, ok := d.accts.ClientFor("acct1"); !ok {
+		t.Fatal("登录后客户端应已在注册表")
+	}
+	adminTok := d.sessions.CreateAdmin("admin")
+	req := httptest.NewRequest("DELETE", "/api/admin/accounts", strings.NewReader(`{"account":"acct1"}`))
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j["code"].(float64) != 0 {
+		t.Fatalf("删除账号失败: %v", j)
+	}
+	// 契约 1（核心）：内存注册表必须先失效——修复前 Remove 在 DeleteAccount 之后执行，
+	// 本断言抓"库行已清但客户端仍在注册表"的半删态（红灯）；修复后 memory-first 为绿。
+	// ClientFor 返回的 (Client, bool)——bool 为 false 才是摘除成功。
+	if c, ok := d.accts.ClientFor("acct1"); ok && c != nil {
+		t.Fatal("删除成功后账号客户端必须已从注册表摘除（memory-first：在飞链复核立即失败）")
+	}
+	// 契约 2：库内凭据同步清空（客户端重建所需凭据不得残留）
+	creds, err := d.store.LoadCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range creds {
+		if c.Account == "acct1" {
+			t.Fatal("删除成功后 credentials 表不得残留 acct1 凭据")
+		}
+	}
+	_ = tok
 }
 
 // TestAdminSetTargetsWithoutAccountRejects B20-04：管理员会话不带 ?account= 时必须整体拒绝，

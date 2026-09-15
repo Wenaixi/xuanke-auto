@@ -216,8 +216,36 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 // 支持 ?account= 参数，允许管理员任选指定账号的专属选课大厅（仅管理员会话可穿透）。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	// B26-02（第 26 轮）：管理员透传的账号必须真实存在（凭据表有记录）——此前 `?account=`
+	// 任意串（typo/已删账号残留 URL 参数）静默走 ElectivesSnapshotFor 的全局帧回退路径，
+	// 返回全局课程数据但行为不可区分（B22-01 只对有目标账号返回 nil,false；无目标账号仍
+	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与 B15-M4 在 handleSetTargets
+	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在 B15-M4 路径整体拒绝，
+	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
+	// B26-02（第 26 轮）：管理员透传的账号必须真实存在（凭据表有记录）——此前 `?account=`
+	// 任意串（typo/已删账号残留 URL 参数）静默走 ElectivesSnapshotFor 的全局帧回退路径，
+	// 返回全局课程数据但行为不可区分（B22-01 只对有目标账号返回 nil,false；无目标账号仍
+	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与 B15-M4 在 handleSetTargets
+	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在 B15-M4 路径整体拒绝，
+	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
+			creds, err := d.Store.LoadCredentials()
+			if err != nil {
+				writeJSON(w, 1, nil, "读取凭据失败: "+err.Error())
+				return
+			}
+			found := false
+			for _, c := range creds {
+				if c.Account == q {
+					found = true
+					break
+				}
+			}
+			if !found {
+				writeJSON(w, 1, nil, "账号不存在，无法查看课程")
+				return
+			}
 			acct = q
 		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
 			acct = targetAccts[0]
@@ -934,16 +962,26 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "账号无效或不可删除")
 		return
 	}
-	if err := d.Store.DeleteAccount(acct); err != nil {
-		writeJSON(w, 1, nil, "删除失败: "+err.Error())
-		return
-	}
+	// B26-01（第 26 轮）：memory-first 顺序——先摘注册表（Accounts.Remove），让
+	// B18-M2/B20-01/B21-03 的"落库前锁内复核 ClientFor"防线从一开始就生效：此前顺序
+	// Store.DeleteAccount（清 6 表）→ PurgeAccount → Remove 之间存在毫秒级空窗，在飞链
+	// （SelectClass 最长 15s）恰在空窗完成时锁内复核 ClientFor 仍存在 → SaveSuccess 把刚清
+	// 掉的 success 行写回 / SaveRefused 写回 refused 行，重启 RestoreDone 假成功、恢复后自动
+	// 引擎永久跳过退选课。Remove 前置后客户端先消失，在飞链复核立即失败、静默放弃落库，
+	// 空窗从根因消除。DeleteAccount 失败时库行未清但注册表已摘（半删态），账号重启后由
+	// Restore 重建可自愈，远优于假删除成功。
+	d.Accounts.Remove(acct)
 	// B19-02（第 19 轮）：删账号路径必须走 PurgeAccount 全量清理（含 done/tokenValid/
 	// relogin 族/acctData），而非 SetTargetsForAccount(nil)——后者只清 refused，残留
 	// done 会让重建账号显示"重启恢复：已报名成功"假成功、full/rateLimited 让自动链静默跳过、
 	// inflight 阻塞手动报名。PurgeAccount 与 DeleteAccount 事务（清库行）配成"内存+库"双清。
 	d.Sched.PurgeAccount(acct)
-	d.Accounts.Remove(acct)
+	if err := d.Store.DeleteAccount(acct); err != nil {
+		// 注：注册表与调度器内存已清（半删态），库行未清的风险由重启 Restore 重建客户端
+		// 自愈，远优于"假删除成功"（客户端仍在注册表继续在飞写回）。
+		writeJSON(w, 1, nil, "删除失败: "+err.Error())
+		return
+	}
 	// 吊销该账号签发的全部会话（MAJOR-A）：被删账号既有浏览器令牌立即失效，
 	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。
 	d.Sessions.RevokeAccount(acct)

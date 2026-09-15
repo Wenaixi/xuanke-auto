@@ -804,10 +804,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 return matchSearch && matchAvailable
               })
 
-              // 剩余名额正序：名额越少越靠前，抢手课程一眼可见
+              // 剩余名额正序：名额越少越靠前，抢手课程一眼可见。
+              // 排序键必须按"剩余名额 = max_count - selected_count"而非已报名数——
+              // 两课上限不同时已报少≠剩余少（1/5 余4 与 10/100 余90，应前者靠前）。
+              // max_count=0（名额未公布）映射为 0（最紧张），与筛选/徽章同源语义。
               if (sortTightest) {
+                const remaining = (c: ClassItem) =>
+                  c.max_count > 0 ? c.max_count - c.selected_count : 0
                 filteredClasses = [...filteredClasses].sort(
-                  (a, b) => a.selected_count - b.selected_count
+                  (a, b) => remaining(a) - remaining(b)
                 )
               }
 

@@ -242,6 +242,7 @@ export default function App() {
           {sessionToken ? (
             targetAccount ? (
               <Select
+                key={targetAccount}
                 account={targetAccount}
                 sessionToken={sessionToken}
                 onDone={() => setTargetAccount(null)}
@@ -284,6 +285,7 @@ export default function App() {
               />
             ) : (
               <Select
+                key={current}
                 account={current}
                 sessionToken={sessionToken}
                 onDone={() => setPage("dashboard")}

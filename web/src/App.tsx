@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+﻿import { useEffect, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
@@ -133,7 +133,7 @@ export default function App() {
   }
 
   // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。
-  // 第 4 轮：detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
+  // detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
   // 不到账号时（如本地已注销）跳过，杜绝慢请求乱序返回时按闭包 current 误杀其他账号。
   // F10-05：归属判定一律以 detail.session（发起请求的 Bearer 令牌）为准——
   // 它才是 401 的真实主体；detail.account（?account= 穿透目标）仅在 session 缺失时兜底，

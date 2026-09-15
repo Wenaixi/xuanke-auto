@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react"
+﻿import { useMemo, useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, selectElective, exitElective } from "../api/client"
 import type { Account, ClassItem, ElectivesData, Target, SchedulerState, Publish } from "../types"
@@ -125,10 +125,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   }
 
   // 查询当前调度器已保存的目标课程并自动回显（会话绑定当前账号）。
-  // M-8（第 3 轮）：加 2s 自轮询——electives 的升频判定依赖 window_opened 信号，
+  // M-8：加 2s 自轮询——electives 的升频判定依赖 window_opened 信号，
   // 若此查询被动等 electives invalidate 才刷新，开窗瞬间（publishes 短暂为空）会把
   // 10s 慢轮询带进黄金期；独立轮询让 window_opened 一开窗立即升频 2s，两信号同源。
-  // n12（第 4 轮）：窗口已关闭后降回 30s——与 Dashboard 同一信号同一次序，
+  // n12：窗口已关闭后降回 30s——与 Dashboard 同一信号同一次序，
   // 避免窗口关闭后仍 2s 高频打 /state 刷屏日志。
   const { data: stateData } = useQuery({
     queryKey: ["state", account, sessionToken],
@@ -173,9 +173,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 整页只重渲染倒计时一处，Tab 徽章"已锁定"计数随 selected 变化即时更新，无需每秒重算。
 
   // 进入页面时自动回显已保存的目标课程（含多备选优先级）。
-  // M-9（第 3 轮）：函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽
+  // M-9：函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽
   // 外部 `selected` 导致数据重取后回显永久失效的问题。
-  // 第 4 轮：用户已编辑过目标（rev>0）时跳过回显——用户"清空全部目标"后 2s 轮询
+  // 用户已编辑过目标（rev>0）时跳过回显——用户"清空全部目标"后 2s 轮询
   // 返回的旧 courses 若再次回填，会把清空静默撤销并重新保存旧目标（回显与防抖保存竞态）。
   // F19-01：回显的 courses 可能携带"不属于当前发布集合"的 publish_id（旧学期
   // 残留/发布集合整体重建后后端 /state courses 仍按旧 publish_id 下发）——此前照单全收
@@ -282,19 +282,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 自动保存：选课一变（仅用户点击），400ms 防抖后整包 PUT 到后端；成功静默，失败仅提示
   // MAJOR-H：保存串行化——飞行中的 PUT 完成后立即补发一次最新快照，绝不出现
   // "旧 PUT 后到覆盖新数据"的乱序丢失；内存 target 与后端最终一致。
-  // C-1（第 3 轮）：body 必须包成后端 TargetsRequest 期望的 {"targets":[...]} 对象——
+  // C-1：body 必须包成后端 TargetsRequest 期望的 {"targets":[...]} 对象——
   // 此前发裸数组 100% 解码失败（后端 json 解码进 struct 直接报错），目标永远存不进库。
     const lastJson = useRef("")
   const targetRef = useRef<Target[]>([])
   const savingRef = useRef(false)
   const dirtyRef = useRef(false)
-  // F13-C2（第 13 轮）：已卸载标记——组件卸载后（返回控制台）绝不再发起新的网络请求
+  // F13-C2：已卸载标记——组件卸载后（返回控制台）绝不再发起新的网络请求
   // 或重发退避。此前卸载 cleanup 只清"当时挂着"的退避 timer，flush 补发失败后再
   // scheduleRetry 挂的新 timer 无人清理 → 组件卸载后 2/4/8/16/16s 最多 5 次孤儿请求，
   // 每次失败都全局 toast 轰炸已回到 Dashboard 的用户。卸载后重试也毫无意义（目标
   // 后端已有、改动已尽力）——直接停手。
   const unmountedRef = useRef(false)
-  // n14（第 3 轮）：失败重发状态——attempt 累计连续失败次数、timer 为退避重发定时器。
+  // n14：失败重发状态——attempt 累计连续失败次数、timer 为退避重发定时器。
   // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
   const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
   // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
@@ -351,7 +351,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         description: e.message || "通信异常，请重试",
         variant: "destructive",
       })
-      //n14（第 3 轮）：失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
+      //n14：失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
       //网络抖动/瞬时故障下不再退化为"尽力而为"，直至成功或用户新改动接管。
       dirtyRef.current = true
       scheduleRetry()
@@ -369,7 +369,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 退出前立即保存挂起的目标改动：返回按钮的防抖窗口（<400ms）内最后一次点选
   // 或重发退避排队中的改动，不在此刻落库就永失（F12-M1）。复用 lastJson 去重 +
   // savingRef/dirtyRef 串行化，绝不与飞行中的 PUT 乱序覆盖。
-  // F13-C1（第 13 轮）：无用户改动（rev===0）时绝不整包覆盖——回显数据本就是后端
+  // F13-C1：无用户改动（rev===0）时绝不整包覆盖——回显数据本就是后端
   // 目标的镜像、无需回写；而进页数据未就绪时 selected/publishes 为空，此时 PUT
   // {"targets":[]} 会把后端已有目标整包抹除（窗口关闭后 publishes 恒空时必现）。
   // 清空全部目标仍是用户改动（rev>0），仍正确落库。
@@ -493,7 +493,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
     onDone()
   }
-  // F13-C1（第 13 轮）：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
+  // F13-C1：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
   // 防抖 effect 仍只由 rev 驱动（与 F7-01 同款守卫）——轮询/回显/窗口收缩绝不触发保存。
   // F30-01：附加 hasPublishes 布尔信号——开窗瞬间平台清空 publishes（F15/F16/
   // F17 假清空守卫拦下置脏）后发布恢复，只有 rev 驱动的话 effect 不重跑、无新 timer，
@@ -616,7 +616,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               variant="outline"
               size="sm"
               onClick={() => {
-                // F12-M1（第 12 轮）：返回前先 flush 挂起的防抖/重发目标保存——
+                // F12-M1：返回前先 flush 挂起的防抖/重发目标保存——
                 // 直接 onDone 会卸载组件、400ms 防抖 timer 被清理，最后一次点选
                 // 到返回间隔 <400ms 时整批目标永不 PUT。
                 // F21-01：改为等待保存链静止的异步句柄——flush 后若

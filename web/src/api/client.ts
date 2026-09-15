@@ -1,4 +1,4 @@
-const BASE = "/api"
+﻿const BASE = "/api"
 
 // 未登录（会话失效）事件：全局通知 App 移除对应账号会话。
 // detail.session 为发起请求的 Bearer 会话令牌（401 的真实主体，App 据此反查归属账号）；
@@ -10,7 +10,7 @@ export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
 export class ApiError extends Error {
   code: number
-  // F11-A1（第 11 轮）：ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
+  // F11-A1：ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
   // 必须透传给 Login.tsx 才能随激活请求回传；此前只存 code，票据在抛错处丢失。
   data?: unknown
   constructor(code: number, msg: string, data?: unknown) {
@@ -35,7 +35,7 @@ export async function api<T>(
   // 本 api() 是全站共用通道，/electives 大列表 GET 在开窗黄金期校园网下响应偏慢，
   // 收紧到 2 秒会掐断大列表刷新，在最关键的时刻引入回归；20 秒对"不无限转圈"的本意
   // 依然成立（abort 兜底），目标保存挂了还有指数退避重发兜底。
-  // M-10（第 3 轮）：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
+  // M-10：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
   // 否则用兜底超时信号；此前 `...rest` 会把 ctrl.signal 被调用方 signal 静默覆盖。
   // F7-09：abort 映射为友好文案——此前原生 AbortError("This operation was
   // aborted") 直接进 toast，用户看不懂。

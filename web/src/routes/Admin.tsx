@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+﻿import { useEffect, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type {
@@ -49,7 +49,7 @@ interface Props {
 
 export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount, onDeleted }: Props) {
   const [copied, setCopied] = useState("")
-  // F12-M2（第 12 轮）：Tabs 受控化——defaultValue 只在首次挂载生效，管理员 Tab 间
+  // F12-M2：Tabs 受控化——defaultValue 只在首次挂载生效，管理员 Tab 间
   // 切换后状态现场保留；受控 value 只决定激活项，不破坏 Radix Tabs 键盘 roving focus。
   // 注：进出学生大厅（Admin 卸载重挂）后 useMemo 仍会重置为"codes"——如需跨挂载保留
   // 需提升到 App 层或 localStorage（见 review-round13 F13-M2）。
@@ -110,7 +110,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
     }
   }
 
-  // 第 4 轮：组件卸载时清理挂起的复制反馈定时器（切 Tab/退出 Admin 后不再 setState）
+  // 组件卸载时清理挂起的复制反馈定时器（切 Tab/退出 Admin 后不再 setState）
   useEffect(
     () => () => {
       if (copyTimer.current) clearTimeout(copyTimer.current)
@@ -310,7 +310,7 @@ function CodesTab({
   // 后端报"不存在"假失败），与选课大厅手动操作 actionLoading 同款结构
   const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set())
 
-  // n11（第 3 轮）：queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
+  // n11：queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
   // 同一浏览器令牌，若缓存只按令牌分键，另一账号的轮询数据会覆盖本账号视图。
   // （会话级服务端数据本就按 sessionAccount 过滤，本地缓存键必须跟随同一维度。）
   const codesQuery = useQuery({

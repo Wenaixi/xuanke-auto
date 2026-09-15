@@ -1,4 +1,4 @@
-import { useState } from "react"
+﻿import { useState } from "react"
 import { api } from "../api/client"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
@@ -18,7 +18,7 @@ export default function Login({ onLogin }: Props) {
 
   // 激活码模态框状态：登录返回 code=1001 时弹出
   const [pendingAccount, setPendingAccount] = useState("")
-  // F11-A1（第 11 轮）：票据必须随激活请求回传——后端 handleActivate 要求 ticket 非空
+  // F11-A1：票据必须随激活请求回传——后端 handleActivate 要求 ticket 非空
   // 且 ConsumeTicket 校验绑定账号；此前 1001 分支只存账号把 data.ticket 丢弃，激活永远
   // 返回"激活票据无效或已过期"，激活码机制整链不可用。取消激活时一并清掉。
   const [pendingTicket, setPendingTicket] = useState("")
@@ -81,7 +81,7 @@ export default function Login({ onLogin }: Props) {
       setPendingTicket("")
       onLogin(data.token, data.account)
     } catch (e: any) {
-      // F12-M3（第 12 轮）：激活失败分两个场景引导——后端票据 5 分钟单次，
+      // F12-M3：激活失败分两个场景引导——后端票据 5 分钟单次，
       // 过期/已用会报"激活票据无效或已过期"；此时账号其实已激活，重新登录即可
       // 直进，用户可能误以为激活码有问题而反复点激活（恒失败）。
       if (/激活票据无效或已过期/.test(e.message || "")) {

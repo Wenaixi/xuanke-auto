@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+﻿import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
 import type { Account, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
@@ -42,7 +42,7 @@ function isSessionError(err: unknown): boolean {
 }
 
 export default function Dashboard({ account, sessionToken, onLogout, onGoSelect }: Props) {
-  // n12（第 3 轮）：窗口已关闭后把轮询降频到 30 秒——状态已定型（快照为空、
+  // n12：窗口已关闭后把轮询降频到 30 秒——状态已定型（快照为空、
   // 不会再有新动静），继续 3 秒高频打 /state 与 /logs 纯属浪费请求与刷屏日志；
   // 窗口开放中仍保持 3 秒紧贴实时状态。函数式 refetchInterval 基于已获取的
   // state 数据实时决定下一拍间隔，窗口关闭瞬间自动切换，无需额外状态。

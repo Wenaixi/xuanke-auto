@@ -1501,16 +1501,28 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 		t.Fatal("幽灵窗口兜底（EmptyProbeRuns=3）必须镜像进 StateForAccount.window_closed（B29-02）")
 	}
 
-	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间非零）
+	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间已过）
 	s2 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s2.mu.Lock()
 	s2.syncFailStreak = 3
 	s2.mu.Unlock()
 	if !s2.WindowClosed() {
-		t.Fatal("前置：syncFailStreak=3 + 开放时间非零应视同关闭")
+		t.Fatal("前置：syncFailStreak=3 + 开放时间已过应视同关闭")
 	}
 	if !s2.StateForAccount("acct1").WindowClosed {
 		t.Fatal("时钟兜底（syncFailStreak=3）必须镜像进 StateForAccount.window_closed（B29-02）")
+	}
+	// 场景 2b 反向断言：同一时钟失败形态但开放时间在未来——绝不能视同关闭（32-01）。
+	// 判据2 原实现只查"开放时间非零"，未来开窗点 + 平台故障恢复后黄金期提交被挂起。
+	s2b := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	s2b.mu.Lock()
+	s2b.syncFailStreak = 3
+	s2b.mu.Unlock()
+	if s2b.WindowClosed() {
+		t.Fatal("时钟失败 3 次但开放时间在未来，绝不能视同关闭（黄金期提交必须存活）")
+	}
+	if s2b.StateForAccount("acct1").WindowClosed {
+		t.Fatal("未来开窗点不得镜像时钟兜底为已关闭")
 	}
 
 	// 场景 3：主判据（state.WindowClosed 已置位）照旧镜像 + 非关闭状态不误报

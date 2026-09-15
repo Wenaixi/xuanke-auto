@@ -759,7 +759,12 @@ func (s *Scheduler) windowClosedLocked() bool {
 	// （判据只用 syncFailStreak），已在 maybeSyncClock 注释注明，避免误读为死代码。
 	// B21-01：streak 现在真实可达——maybeSyncClock 失败分支不再清零
 	// （见下），连续失败 ≥3 后持续累计、同步成功才归零；WindowClosed 判据首次真实生效。
-	if s.syncFailStreak >= 3 && !s.openTimeNow().IsZero() {
+	// 32-01：判据2 必须带"开放时间已过"——只查"开放时间非零"时，未来开窗点遇平台
+	// 连续故障（syncFailStreak≥3）即误视同关闭：提交守卫挂起黄金期 250ms 冲刺 + 探测
+	// 降回 30s，平台恰在开窗点恢复后要等下一轮时钟同步成功（≤30s 退避）才自愈，
+	// 首波目标可能已被抢光。判据3（EmptyProbeRuns）入账侧已有 B21-02 的 now.After(open+10s)
+	// 自保护，判据2 的计数源不依赖 probe/open，是唯一需补该条件的判据。
+	if s.syncFailStreak >= 3 && !s.openTimeNow().IsZero() && s.nowAlignedLocked().After(s.openTimeNow()) {
 		return true
 	}
 	// B20-02：视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened

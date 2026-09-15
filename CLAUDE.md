@@ -6,11 +6,11 @@
 
 ## 认证机制
 - **无 Bearer Token**，使用 `idToken` URL 参数方案
-- `idToken` = `zd_edu_cookie` cookie 的值
-- 每个 API 请求 URL 后附加 `?idToken=<token>`
+- **平台真相**：`idToken` = 前端 `window.idToken` 全局变量（`/home/menus` 响应 token 填充），HTTP 请求 URL 后附加 `?idToken=<token>`；cookie 从不承载 token
+- **本项目存储约定**：token 落 `zd_edu_cookie` cookie（Python 侧自有约定，供 requests 会话携带）
 - Cookie 可复用；过期后运行 `python login.py` 自动重新登录，成功后自动写回 config.py
-- token 是 19 位纯数字（如 ***REMOVED***），**无 Expires 会话级 cookie**，有效期由服务端决定
-- 失效表现：接口统一返回 `{"code":-1,"msg":"您未登录,请刷新页面重新登录"}`
+- token 是纯数字（server.log 实证前 8 位形态；完整位数被 HAR 脱敏不可考，历史文档"19 位"仅供参考），**无 Expires 会话级 cookie**，有效期由服务端决定
+- 失效表现：接口统一返回 `{"code":-1,"msg":"您未登录,请刷新页面重新登录"}`（checkResp 弹 msg 并跳 /login）
 
 ## 登录链路（login.py，逆向自 /login 页面内联 JS）
 1. `GET /login` 初始化会话，种下 `access_limit_cookie`
@@ -30,14 +30,14 @@
 | 接口 | 请求体 | 说明 |
 |------|--------|------|
 | `POST /electives/select?idToken=..` | 无 | 学期列表 currentYearTermList（含 selected 标记） |
-| `POST /electives/select/findElectivesData?idToken=..` | json: `{"schoolYear":2026,"schoolTerm":1}` | 课程数据（不传 body 也会返回当前学期） |
+| `POST /electives/select/findElectivesData?idToken=..` | 空 body 或 form: `schoolYear=2026&schoolTerm=1` | 课程数据（真实 jQuery 传对象 → `application/x-www-form-urlencoded` 表单编码，**不是 JSON**；空 body 平台自动返回当前激活学期） |
 | `POST /electives/select/findElectivesStudentCount?idToken=..` | form: `ids=1,2,3`（逗号分隔） | 实时已报/已确认人数（前端每 10 秒轮询） |
 | `POST /electives/select/selectElectivesClass?idToken=..` | form: `classId=<课程id>` | 报名（参数名已用 classId=-1 无风险验证：返回"选修班不存在"） |
 | `POST /electives/select/exitElectivesClass?idToken=..` | form: `classId=<课程id>` | 退选 |
 
 响应统一为 `{"code":0,"isOk":true,...}`；code=-1 未登录、code=1 业务错误（如"选修班不存在"）。
 
-> 注：`POST /electives/classDetail` 详情接口已逆向（上课地点/授课老师/课节等，详见旧版记录），因选课大厅已取消"详情弹窗"，后端与前端不再调用，代码已全部移除；如未来需要可据 HAR（课程www.zhidao.fj.cn.har）恢复。
+> 注：`POST /electives/classDetail` 详情接口已逆向（body `id=<课程id>` form 编码，响应 `value` 嵌套 57 字段：classroom_name/lessons_date/teacher_name/plan_count/audited_count/course_name/class_name/grade_name 等），因选课大厅已取消"详情弹窗"，后端与前端不再调用，代码已全部移除（抓包版本 select.js 仍含 `onclick=showElectivesClassDetail(id)` 调用 classDetail，属 UI 改版前版本）；如未来需要可据 HAR（课程www.zhidao.fj.cn.har）恢复，接口仍完全可用。
 
 ## 课程数据关键字段（findElectivesData → electivesClassList 每项）
 - `id`：课程 id（报名用 classId，详情用 id），范围 61115-61283
@@ -46,6 +46,25 @@
 - `selected_count`/`max_count`/`plan_count`：已报/可报/计划人数
 - `publish_id`：所属发布；`plan_id`：教学计划 id（报名不需要）
 - 外层 selectElectivesData 每项含 `publishName`（如"高二年体育"）、`canSelect`（最多可选几门）、`hasSelected`（已选几门）、`inDateRange`（窗口是否开放）、`groupCount`（组数）、`beginDate`/`endDate`
+- **真实网站源码对照基线（逆向锚，2026-09-16 落盘）**：真实前端源码已从大 HAR 提取落盘 `legacy/website-source/`（select.js / electivesDetail.js / common.js 等 25 文件），**任何针对 zhidao 平台的 API 契约改动必须先对照这些真实源码与 `legacy/www.zhidao.fj.cn.har` 真实样本**，绝不凭记忆臆断。已核实契约：
+  - **学期列表**（`POST /electives/select`，空 body）：`currentYearTermList` 真实 10 字段（`schoolYear`/`schoolTerm`/`yearTermText`/`selected`/`gradeName`/`gradeId`/`termName`/`nextSchoolYear`/`enrollmentYear`/`yearTermGradeText`）——`gradeName`/`gradeId` 是年级隔离的直接数据源（Go `YearTerm` 目前只解 3 字段，未消费）
+  - **课程数据**（`POST /electives/select/findElectivesData`）：请求体是 **jQuery 对象 → `application/x-www-form-urlencoded` 表单编码**，不是 JSON；空 body 平台返回当前激活学期（首探空 POST 是合法路径）；响应顶层 `{code, beginTimes(millis 数组), selectElectivesData}`，**无 msg 字段**；发布级真实字段除文档所列外还有嵌套 `publish` 对象（27 字段含 `grade_name`/`max_select_count`/`allow_exit`）
+  - **课程级字段**：服务端直接下发 `publish_id`（=发布级 publishId）与 `group_no`（组号），**都不需要推导**；`teacher_name_list` 逗号分隔；`title` 承载禁用原因（真实案例"不在选修报名时间范围内，无法选课！"）
+  - **btn_type/can_select/title 源码证据**：btn_type 1=退选（btn-danger）/2=报名（btn-primary），其他值不渲染按钮；`can_select` false 加 `disabled` 且**点击事件本身 `i.can_select && postReq(...)` 双守卫**；title 非空转 `lay-tips` 悬浮
+  - **实时人数轮询**：`findElectivesStudentCount` 请求体 `ids=<逗号分隔字符串>`（前端预 join，非数组）；10s（1e4ms）轮询；只更新 `selected_count`←`selectedCount`、`audited_count`←`auditedCount` 两格；**`b` 数组只在 `inDateRange=true` 的发布下收集课程 id**——窗口未开/已关时 `b` 空 → 前端**根本不发轮询**（旧文档"ids 空时报错 code=1"表述偏差）
+  - **真实错误文案（HAR+运行日志实证）**：未开放不可选禁用 title = `不在选修报名时间范围内，无法选课！`；重复提交 = `选课处理中，请勿重复操作！`（code=1 并发重复提交，task_log 实证）；报名成功 `选课成功！`。满员与"无效的课程ID"无 HAR 抓包留存（review18/20 实测背书）；"您未登录"形状合理无现场样本
+  - **窗口开启自动刷新（官网契约）**：1500ms 检查一次 `beginTimes`，窗口开启时刻前后 1.5s 内自动 `f()` 整页重拉课程——这是"开窗瞬间自动探测"的官方等效实现
+  - **报名/退选**：body 单字段 `classId=<数字id>`（表单编码）；退选走 `layer.confirm`，报名直发；成功/失败均整页 `f()` 重拉 + showRespOK/showRespFail(e.msg)
+  - **classDetail**：课堂名称列保留 `showElectivesClassDetail(id)` 可点能力（官方页面），57 字段完整可查（classroom_name/lessons_date/teacher_name/plan_count/audited_count 等）——"大厅 UI 不再调用，库层函数 electivesDetail.js 仍留"（措辞精确化）
+  - **countList 字段**：`{id, selectedCount, auditedCount}` 已实证；`maxCount` 字段 Go 端有解但**未实证**，需实测确认
+  - **token 真实机制（平台真相）**：前端权威来源是 **`window.idToken` 全局变量**（由 `/home/menus` 响应 `token` 填充，`sessionStorage.zd_edu_token` 冗余）；**cookie 从不承载 token**（HAR 零 Set-Cookie 零 Cookie 头，且**全部鉴权请求在无 Cookie 头时仍成功**）。"idToken=zd_edu_cookie" 是 Python 侧自有存储约定，非平台机制；Go 端维持 idToken URL 参数 + Cookie 双通道是防御性冗余，但"Cookie 缺失即被拒"的论断无实证应弱化，契约主体锚定 URL 参数
+  - **correctUrl 拼接判定式**：`url 已含 "="（带 query）→ 用 & 拼接；否则用 ?`——本项目业务路径无 query 恒落 `?idToken=`；token 值经 `encodeURIComponent`
+  - **popReq 完整契约**：`popReq(url,data,success,fail,showSuccessToast=false,showFailToast=true,showLoading=false,async=true)`——默认**成功静默、失败弹 layer.msg**；`data` 对象 jQuery 默认 `application/x-www-form-urlencoded`（**不是 JSON**）；`__op_tip_msg/__op_tip_seconds` 是平台下发的确认弹窗提示字段（秒数>0 layer.msg、<=0 layer.confirm 再回调）
+  - **checkResp 完整状态码机**：**code=0** 正常（带字符串 guestToken 时 setGuestToken）；**-1** 弹 msg + 跳 `/login`（token 失效）；**-6** 域名迁移弹窗；**-10** 短信验证码风控弹窗（自助领码再登录，CLAUDE.md 此前未记录）；**-11** 强制改密跳 `/user/changePassword`（未记录）；**-12** 弹 msg + location.reload；**-14/-15** 弹 msg + 跳 `errors[0].name`。**关键边界**：`code=1`（业务失败如"选修班不存在"）**不在 checkResp throw 名单**——成败由响应自带 `isOk/isFail` 布尔决定（Go 端 SelectClass 用 `j.Code != 0 || !j.IsOk` 双判已对齐）；未来新接口判断成败必须看 isOk/isFail，不靠 code 数字
+  - **cache:false 澄清**：jQuery 3.x 的 cache:false 只对 GET 生效（追加 `_=` 时间戳），**POST 不改写 URL**——本项目全部 POST，URL 恒定 `?idToken=` 不抖动
+  - **登录第四字段 priorityId**：`localStorage["priorityId"]` = `/home/menus` 的 `user.id`；undefined 时 jQuery **丢弃该键**，doLogin body 仅 `captcha/identification/uniqueId` 三项（login.py 传 `""` 会多发空键，服务端按空值等价处理，功能无差异）
+  - **验证码 URL**：首载 `/login/captcha` 无参数，仅刷新 `updateCaptcha()` 时加 `?v=Math.random()`
+  - **getUniqueDeviceId**：与 login.py 复刻逐字段一致（UA|Win32|screen.height|screen.width|时间戳36进制，`|` join 后 btoa；前端缓存 localStorage["uniqueId"]，login.py 每次现算输出等价）
 
 ## 已知数据
 - 选课开放时间：**2026-09-13 09:00:00**（时间戳 1789261200000），窗口 09:00-10:30
@@ -59,7 +78,10 @@ xuanke-auto/
 ├── captcha.py     # 验证码识别（硅基流动 Vision，配置读 config.py）
 ├── login.py       # 完整登录（RSA+Vision 验证码识别），成功后写回 config.py
 ├── xuanke.py      # 主脚本，query / detail / monitor 三种模式
-├── 课程www.zhidao.fj.cn.har  # 课程详情弹窗抓包（classDetail）
+├── legacy/
+│   ├── www.zhidao.fj.cn.har          # 选课全链路真实抓包（8468 条请求）
+│   ├── 课程www.zhidao.fj.cn.har      # 课程详情弹窗抓包（classDetail）
+│   └── website-source/               # 从 HAR 提取的真实站点前端源码（25 个 JS）
 └── CLAUDE.md      # 本文件
 ```
 
@@ -80,7 +102,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 
 ## 注意事项
 - HAR 中并不存在 `/electives/select/apply`，真实报名接口是 `selectElectivesClass`（历史文档误记为 apply）；`/electives/apply` 是教师端"选修课申报"页面入口，与学生报名无关
-- `findElectivesStudentCount` 窗口未开放时 countList 为空属正常（ids 为空时报错 code=1）
+- `findElectivesStudentCount` 窗口未开放时**前端根本不发请求**（b 数组只在 inDateRange=true 的发布下收集课程 id，空即不建轮询）——旧文档"ids 空时报错 code=1"表述偏差
 - 登录成功后 `access_limit_cookie` 会更新为新会话的值，但 API 请求主要靠 idToken，access_limit_cookie 不敏感
 - 待办：xuanke.py 遇到 code=-1（token 过期）时尚未自动重新登录，只在 monitor 打印提示
 ## Go + React 现代版（backend/ + web/）
@@ -109,7 +131,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
   - 最终用户无需安装 Node.js 或前端环境，双击单个 `xuanke.exe` 即可在单一端口同时提供后端抢课引擎与前端网页，开箱即用！
 - **防逆向交付（garble 混淆）**：本地构建可用 `garble -literals -tiny build -ldflags="-s -w -H windowsgui"` 混淆 Windows 发布 exe（`-literals` 加密字符串字面量、`-tiny` 剥源码路径、`-ldflags` 剥符号表；实测 12.6MB → 24.7MB，strings 扫描零命中）。**注意**：CGO=1 与 garble 不兼容（garble 需 CGO=0），而 Windows 原生内嵌 ddddocr 必须 CGO=1——故自动发布流水线 release.yml 不再产出 garble 混淆版（Windows 交付即 CGO=1 原样构建；Linux/macOS 走 CGO=0 交叉编译，如需混淆可在本地手动执行）。garble 用 `go install mvdan.cc/garble@latest`（注意 v0.17.0 需 go ≥1.26.2，自动切 go1.26.8 工具链）
 - **单二进制内嵌原生 ddddocr（彻底摆脱 Python 运行时依赖）**：ONNX 模型（common_old.onnx 13MB）+ 字符集（charsets_old.json 56KB）+ ONNX Runtime（onnxruntime.dll 16MB）经 `//go:embed` 编译进单个 exe；运行时懒加载把资源释出到 `%TEMP%\xuanke_ddddocr_assets`（dumpIfDiff 对比大小，无变化不重写），调用 `github.com/yangbin1322/go-ddddocr` 的 `Classification` 直接在进程内推理，单次识别 5~10ms。**构建双轨（build-tag）**：`native_ocr.go`（`//go:build windows && cgo`）走内嵌实现，`native_ocr_stub.go`（`!windows || !cgo`）返回 false/nil 自动回退本地 Python 桥接或 Vision——Linux/macOS 与 CGO=0 交叉编译不受影响。**引擎优先级**：router 对 `XUANKE_CAPTCHA_ENGINE=ddddocr` 先试 `NativeDdddOcrAvailable()` → 回退本地 Python → 再回退 Vision。**注意**：CGO=1 与 garble 混淆不兼容（garble 需 CGO=0），Windows 发布版必须用 CGO=1 原样构建，Linux/macOS 才走 garble。
-- **选课窗口关闭后平台行为（实测）**：窗口结束后 `findElectivesData` 返回 `code:0` 但 `publishes`/`electivesData` 全空（并非 token 失效 code=-1）；`parseElectives` 对此直接返回空快照，`FindElectives` 不再因空快照落后陷入学期列表兜底重试（兜底拿不到更多课程，纯浪费时间）；`selectElectivesClass` 对已关闭窗口返回 `code:1` 报名错误，调度器新增 `isWindowClosedError`（匹配"关闭/未开启/报名时间/已结束"）按满员记入 `full` 集合，窗口关闭后不再每个 tick 反复轰炸报名接口。
+- **窗口关闭形态（open vs closed 分界）**：**未开放≠关闭**——未开放（开窗前）时 publishes 是 82 门完整数据 + title 禁用提示；**关闭**（窗口结束后）时 `findElectivesData` 返回 `code:0` 但 `publishes`/`electivesData` 全空（server.log 实证"探测成功：0 个发布"且 token 有效未报错）。调度器"先开过窗才判定关闭"的 B18-M1 前提被实证支持；`selectElectivesClass` 对已关闭窗口返回 `code:1` 报名错误，调度器新增 `isWindowClosedError`（匹配"关闭/未开启/报名时间/已结束"）按满员记入 `full` 集合，窗口关闭后不再每个 tick 反复轰炸报名接口。
 - **全校探测节流闸门（第 6 轮 B6-04）**：`scheduler.lastProbe` 全校 30s 探测节流闸门**只归 spring 正规探测 `probe()`/`ProbeNow` 写入**；管理员穿透探测 `ProbeForAccount` 概不旁路——开窗前管理员点一次课程页若吞掉闸门，全校探测即被高频轰炸触发平台熔断（课程拉空）。**第 12 轮 F12-B2 + 第 14 轮 B14-I2 定案**：`probe()` 内有 `probing` 单飞守卫（持锁置位，HTTP 并发探测与 tick 探测不再 N+1 轰上游，命中放弃本次最长推迟一个 300ms tick）；HTTP 侧 `ProbeForAccount`/`ProbeNow` **未接入 probing/lastProbe 节流**——精确触发窗口已推演：正常时序 30s 探测间隔 < 快照 40s TTL 几乎从不过期，最坏 15s 超时挂起 + 快照过期拉宽到 ~25s 且恰逢前端刷新才直打一次（频率"每 30s 周期至多多 1 次"），不足以触发平台熔断；接入单飞会破坏"管理员刷新强制拿最新数据"语义 + 临门 2s 盯守期误命中卡顿。**维持观察不修，触发条件已精确化，未来平台更敏感再落地**。
 - **第 7 轮 B7-C4**：未知 `/api/xxx` 由 `Register` 的 `mux.HandleFunc("/api/", ...)` 显式 404（JSON body + HTTP 404）——绝不再落入 `mux.Handle("/", SpaHandler)` 的 SPA 兜底返回 200 HTML。**第 12 轮 F12-B2 探测单飞守卫**：`probing` 在途标记——probe() 最长耗时 FindElectives 网络往返（15s 超时），HTTP 侧快照过期并发的 ProbeForAccount/ProbeNow 会与 tick 探测同时打上游，N 账号开窗全期形成 N+1 并发 findElectivesData；命中 `probing` 直接放弃本次（最长推迟一个 300ms tick，临门/黄金期无实质损失），任何返回路径统一复位。**第 17 轮 F17-01 补齐（probe() 内部 per-account 并发也封顶）**：probe() 内每目标账号 goroutine 调 ProbeForAccount **不受 probing 单飞保护**（守卫只护全局主体），临门/开窗期 probeIntervalNear **2s 周期**（B15 修正前误记 30s）下 N 账号变每 2s N+1 并发 findElectivesData 直打上游（"访问过于频繁 1 分钟熔断"实证契约冲突）——新增 `probeSem` 结构化信号量（cap 4）封顶 per-account 并发，峰值 N→4，跨批受同一信号量约束绝不叠加，全局 FindElectives 主体不受影响（per-account 全部入场后才执行）。
 - **前端目标自动保存只由用户改动驱动（第 7 轮 F7-01 CRITICAL）**：Select 页 `rev` 计数只归 pick()/用户操作自增（依赖不含 publishes）；轮询拉回的 `publishes` 经 `publishesRef` 读取——窗口开启瞬间平台短暂清空 publishes 时**绝不**触发 `{"targets":[]}` 抹除服务端/调度器目标（黄金期空转 + 窗口关闭后目标永久丢失已根治）。发布列表收缩 ≠ 用户意图清空目标。**假清空守卫链（F15-01/F16-01/F17-02）**：目标集由 `[publishes × selected]` 联查构建，任一为空即 targets=[]。F15-01 判据渲染期 `publishesMissing`（400ms 后读旧闭包）；F16-01 `targetsUseCurrentPublishes` 消费时刻全数校验 publish_id 必属当前 publishesRef（防抖+flush 双闸）；**F17-02 补漏**——every 校验对**空 targets 恒真**，消费时刻另加"selectedCount>0 却构建出空集 = 假清空"守卫（selectedCount 只随用户改动所在渲染更新，只会偏保守绝不放过真实假清空）。改 Select.tsx 保存逻辑前先看此处。
@@ -140,7 +162,7 @@ python xuanke.py monitor   # 监控模式（窗口开后自动提交）
 - **运行时热配置中心（runtime.Store，全部热重载免重启）**：管理员改动立即进 `runtime.Store`（RWMutex + Get 快照拷贝 + Update 闭包）。生效链路——激活码开关（`activationEnabled()` 三处登录/激活/生成读取）、Vision url/key/model（`Accounts.SetVision` 推全部客户端）、开放时间（`sched.SetOpenTimeFn` 调度器逐 tick 读取）；PUT 同步 `SaveSettings` 全量落库（settings k/v 表），重启后 LoadSettings 覆盖环境变量恢复。敏感值回显脱敏（`maskKey` 只显 `****`+后4位）
 - **教务 token 失效自动重登（取代早期"禁止自动重登"）**：doRequest 对 code=-1 返回 `ErrUnauthorized` 本身不重登；调度器探测命中该错误时按账号标记失效并异步自动重登（防重入 + 30 秒节流，Vision 持续失败不轰炸登录接口），成功后新 token 落库（UpdateIDToken）+ 立即补一次探测。**第 8 轮 B8-M7 + 第 9 轮 B9-01 + 第 10 轮 B10-02 完整化**：手动**报名**与**退选**路径命中 `ErrUnauthorized` 同样触发自动重登（调度器导出幂等别名 `MaybeRelogin` 供 api 层调用）——但**只调 `MaybeRelogin`，绝不先调 `MarkTokenValid`**（后者只该用于"手动登录成功"的 issueSession 恢复路径；在手动操作分支会 `delete(reloginFail)` 击穿指数退避，Vision 持续故障时退避恒从 30s 重来、平台锁号防线失效）。B9-01 只修了报名分支，B10-02 补上退选分支漏删的 `MarkTokenValid`（B9-01 半成品根治）。网络类失败绝不重登。前端 `/state` 只读 `token_valid` 显示有效性（有效 / 已失效·自动恢复中），不显示次数与时间。**第 12 轮 F12-B3 锁纪律对齐**：`tokenValid` 失效标记在决策段置位（与发起同持 `reloginMu→s.mu` 两把锁，语义"发起重登即 token 已知失效"），`MarkTokenValid` 对齐锁序补取 `reloginMu`——此前置位在重登 goroutine 开头（只持 s.mu），手动登录成功清标记后会被在途重登覆写回 true，/state 短暂闪动；现在两条路径串行化杜绝半态读。
 - **登录验证码重试收敛（防空炸平台限流）**：`zhidao.Login` 三层上限——识别最多 3 次（识别失败/识别结果为空/提交被拒均刷新验证码重试）、提交最多 2 次（提交被拒多为验证码过期）、初始化会话/取验证码/网络/配置错误一律立即返回。杜绝旧版"识别 10 次"引发的"登录失败次数过多，请 30 分钟后重试"平台熔断
-- **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制，避免服务端报 code=1 鉴权缺失
+- **会话复用与完整 Cookie 注入**：登录成功（Login）后自动提取服务端下发的所有会话 Cookie（尤其是 `access_limit_cookie` 与 `zd_edu_cookie`），若未下发则注入默认保护 Cookie。API 请求严格遵循 idToken + Cookie 双通道机制——HAR 实证 URL 参数通道独力可鉴权（0 Cookie 头请求全成功），Cookie 注入属防御性冗余（防服务端额外校验场景），非必需依赖。
 - **课程探测 30 秒节流（根因修复"选课大厅突然啥都没了"）**：调度器对 `findElectivesData` 的成功探测加 30 秒最小间隔（`probeInterval` 常量），探测成功或失败均记录时间戳，网络故障时不会 300ms 疯狂重试；窗口未开启时也绝不高频轮询，从根因消除平台"访问过于频繁"1 分钟熔断导致的课程列表拉空。轮询 ticker 仍为 300ms（负责窗口开启后的**立即**探测与提交），但探测动作本身被 30 秒节流闸门挡下
 - **按账号各自 Token 专属查询与年级隔离快照（彻底废弃单一全局快照，根因根除年级串线）**：至道教务平台按学籍年级动态下发课程发布（高二下发高二体育+校本1+校本2共82门课，高三仅下发高三体育1门课）。旧架构使用单一全局快照加盲目探测，导致首个高三账号的快照覆盖全校产生严重串线。现已全面重构为：调度器按账号隔离维护 `acctData` 与 `acctDataAt` 映射表，提供 `ElectivesSnapshotFor(acct)` 与 `ProbeForAccount(acct)` 专属方法；后台定时探测与开窗冲刺并发为每一个配置了目标的账号独立刷新年级快照；满员检测 `classFullInSnapshot` 优先对齐本账号年级名额。
 - **全链路多账号独立维护（前端至后端彻底打通）**：管理后台「账号管理」为每个学生账号提供专属「选课大厅」入口，点击即可无缝进入该学生名下的独立选课大厅；`/api/electives?account=xxx`、`/api/targets?account=xxx`、`/api/state?account=xxx` 全面支持目标账号透传，管理员未传参时自动对齐首个有预选目标的核心账号（绝不再盲目抓取首个高三测试账号）；前端选课大厅顶部明确显示当前维护账号并隔离缓存与自动保存。

@@ -159,6 +159,11 @@ export default function App() {
       setTargetAccount((prev) =>
         prev === lostAccount || lostAccount === adminName ? null : prev
       )
+      // 被吊销的是管理员自身会话：除退出代理态外必须同步退出管理态——否则
+      // sessions[admin] 删除后 inAdmin 仍为 true，current 切到剩余学生账号时渲染
+      // 命中 `inAdmin || current === adminName` 分支，拿学生令牌去拉管理接口
+      // （403 假象 + 连锁触发 401 误删学生会话）。
+      if (lostAccount === adminName) setInAdmin(false)
       // 管理员处于后台管理态代理查看学生大厅时，若发生 401 绝不误杀管理员自身会话
       if (current === adminName && inAdmin && lostAccount !== adminName) {
         return

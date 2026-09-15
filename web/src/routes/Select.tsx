@@ -151,6 +151,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   selectedRef.current = selected
   const revRef = useRef(rev)
   revRef.current = rev
+  // /state 到达状态镜像：防抖 effect 依赖不含 stateData（轮询刷新不得重置 400ms 窗口），
+  // 回调闭包捕获的 stateData 恒为 effect 创建时的旧值——回显未完成守卫必须读 ref
+  // 拿"首帧是否已到达"的最新判断（首帧未到 = 后端旧目标尚未经回显合并进 selected）。
+  const stateDataRef = useRef(stateData)
+  stateDataRef.current = stateData
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
@@ -506,6 +511,20 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return targets
     }
     const timer = setTimeout(async () => {
+      // 回显未完成守卫：/state 首帧尚未到达或首个回显携带旧目标（courses 非空）时，
+      // 防抖回调不能拿"只含用户新改动"的 selected 整包 PUT 覆盖后端旧目标（"添加一门"
+      // 变"替换全部"）。渲染期的 stateData 是 effect 创建时的旧闭包，必须读 ref 判
+      // "首帧是否已到/是否存在旧目标"——首帧未到或有旧目标 → 置脏等回显合并（合并
+      // 触发 selected 变化 → effect 重跑 → 新 timer 携带完整目标落库，自愈）；courses
+      // 为空 = 确证后端无旧目标，直接放行。
+      if (
+        !echoedRef.current &&
+        (stateDataRef.current === undefined ||
+          (stateDataRef.current.courses?.length ?? 0) > 0)
+      ) {
+        dirtyRef.current = true
+        return
+      }
       // F15-01 + F17-01：防抖回调在 400ms 后执行，读到的是渲染期旧闭包
       // （publishesMissing 恒为本次渲染推算值）。若这期间发布集被清空（开窗瞬间平台
       // 清空 / 窗口关闭），旧守卫失效且 targetsUseCurrentPublishes 对空 targets 恒真，
@@ -887,7 +906,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                       <LogOut className="h-3.5 w-3.5" />
                                       <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
                                     </Button>
-                                  ) : (
+                                  ) : c.btn_type === 2 ? (
                                     <Button
                                       variant="primary"
                                       size="sm"
@@ -899,7 +918,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                       <Check className="h-3.5 w-3.5" />
                                       <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
                                     </Button>
-                                  )}
+                                  ) : null /* btn_type 非 1/2（异常值）：官网契约不渲染操作按钮，只留后台冲刺目标 */}
                                   <Button
                                     variant={isSelected ? "outline" : "ghost"}
                                     size="sm"

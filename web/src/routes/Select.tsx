@@ -484,8 +484,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       (stateData === undefined || (stateData.courses?.length ?? 0) > 0)
     ) {
       const deadline = Date.now() + 5000
+      // 轮询间隔 50ms：回显合并是 React 状态更新+渲染（一帧约 16ms），50ms 足够感知
+      // 完成且不抢调度；10ms 会让 5s 窗口内连开约 500 个定时器空转主线程。
       while (!echoedRef.current && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise((r) => setTimeout(r, 50))
       }
       // 等合并 effect 的 setSelected 渲染提交落地，selectedRef 同步到含旧目标的合并结果
       await new Promise((r) => setTimeout(r, 0))

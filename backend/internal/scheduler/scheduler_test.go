@@ -551,6 +551,21 @@ func TestFormatOpenTime(t *testing.T) {
 	}
 }
 
+// TestFormatOpenTimeEmpty B25-01（第 25 轮）：空串 = 合法"清除开放时间"
+// （F7-02 契约：零值 = 解除窗口机制）。修复前 FormatOpenTime("") 报"开放时间格式
+// 错误"——管理员 PUT open_time=""（合法清空）落库 settings 后重启，main.go:116
+// log.Fatal 拒绝启动，服务永久停摆（只能手工改 DB 删 settings 行）。修复后空串
+// 返回零值 time.Time 不报错，与 runtime.reparse 置 OpenTimeParsed 零值语义对齐。
+func TestFormatOpenTimeEmpty(t *testing.T) {
+	tt, err := FormatOpenTime("")
+	if err != nil {
+		t.Fatal("空串（清空开放时间）= 合法操作，不得报错: " + err.Error())
+	}
+	if !tt.IsZero() {
+		t.Fatalf("空串应返回零值 time.Time，实际: %v", tt)
+	}
+}
+
 // TestBackupFallbackOnFull 同发布多备选：第一备选人数满员（快照对比 selected>=max）→ 自动退避第二备选并成功。
 func TestBackupFallbackOnFull(t *testing.T) {
 	fc := newFakeClient(false)

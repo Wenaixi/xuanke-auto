@@ -1542,7 +1542,14 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 }
 
 // FormatOpenTime 解析开放时间字符串（本地时区）。
+// B25-01（第 25 轮）：空串 = 合法"清除开放时间"（F7-02 契约：零值 = 解除窗口机制），
+// 返回零值 time.Time 绝不判错——与 runtime.reparse 对空串置 OpenTimeParsed 零值的
+// 语义完全对齐；此前返回错误只是 main.go 启动路径独自严惩空串（热改清空落库后重启
+// log.Fatal 拒绝启动，服务永久停摆）。非空值仍严格校验格式（B21-04 契约不变）。
 func FormatOpenTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local)
 	if err != nil {
 		return time.Time{}, errors.New("开放时间格式错误: " + err.Error())

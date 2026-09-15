@@ -220,7 +220,21 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       const next = { ...prev }
       let merged = false
       for (const c of ordered) {
-        if (c.publish_id in next) continue // 该发布用户已触碰：保留现状
+        const list = next[c.publish_id]
+        if (list) {
+          // 已触碰发布：空数组 = 用户显式清空该发布（清空语义绝不复活）；
+          // 非空数组 = 用户添加了课程——把后端旧目标中用户未勾选的补进（同发布
+          // "添加一门"语义：慢首帧下旧目标尚未回显，不补就会被防抖 PUT 整包覆盖删掉）。
+          // 补进按 priority 序排在用户勾选之后，用户可随后自行调整首选顺序。
+          if (list.length > 0 && !list.some((item) => item.id === c.class_id)) {
+            next[c.publish_id] = [
+              ...list,
+              { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem,
+            ]
+            merged = true
+          }
+          continue
+        }
         ;(next[c.publish_id] ??= []).push({ id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem)
         merged = true
       }

@@ -517,6 +517,8 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
     // 整体覆盖生效配置（open_time 清空 = B11-A1 调度器挂起提交、激活码机制误开、Vision
     // 配置清空），按钮已 disabled 锁定，此处再兜一道（加载失败停留初始值的手快路径）。
     if (!loaded) return
+    // 在飞幂等：双击保存时按钮 disabled 依赖渲染落地有延迟，入口先查在飞标记短路
+    if (saving) return
     setSaving(true)
     try {
       const body: Record<string, unknown> = {

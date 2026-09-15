@@ -77,6 +77,11 @@ export default function App() {
   useEffect(() => {
     if (accounts.length === 0) {
       setCurrent("")
+      // M29-02（第 29 轮）：会话全部清空回登录页时必须重置 page——401 被动吊销
+      // 不经过 logout()：学生在选课大厅被吊销（唯一账号）→ 回登录页 → 重新登录后
+      // page 残留 "select" 跳过 Dashboard 直接掉进选课大厅（与主动登出同族）。
+      // 登出/吊销即回到初始 dashboard 视图。
+      setPage("dashboard")
     } else if (!current || !accounts.includes(current)) {
       setCurrent(accounts[0])
     }

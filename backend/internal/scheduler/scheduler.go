@@ -413,7 +413,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.rebuildCoursesForAccountLocked(acct, targets)
 }
 
-// PurgeAccount 全量清空指定账号在调度器中的一切状态（B19-02，第 19 轮）：
+// PurgeAccount 全量清空指定账号在调度器中的一切状态（B19-02）：
 // 管理员删除账号后调用，保证重建的账号（同学生换绑/重登）绝不残留旧状态——
 // done 残留会显示"重启恢复：已报名成功"、full/rateLimited 残留会让自动链静默跳过、
 // inflight 残留会阻塞手动报名。与 DeleteAccount 事务（清库行）配成"内存+库"双清。
@@ -918,7 +918,7 @@ func (s *Scheduler) probe() {
 	// F12-B2 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
 	// 每账号各起 goroutine 调 ProbeForAccount 不受保护——临门/开窗期 probeIntervalNear
 	// 2s 周期触发时，N 账号部署每 2s 变 N+1 并发 findElectivesData 直打上游，与
-	// "访问过于频繁 1 分钟熔断"实证契约冲突（F17-01，第 17 轮 MAJOR）。
+	// "访问过于频繁 1 分钟熔断"实证契约冲突（F17-01 MAJOR）。
 	// 修复：probeSem 结构化信号量（cap 4）封顶 per-account 并发——峰值从 N 降到 4，
 	// 跨批（2s 周期短于一批耗时）受同一信号量约束绝不叠加；全局 FindElectives 主体
 	// 不受影响（probe() 在 per-account 全部入场后执行）。
@@ -1310,6 +1310,14 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			if errors.Is(err, zhidao.ErrUnauthorized) {
 				s.maybeRelogin(acct)
 				s.mu.Lock()
+				// 账号存在复核：maybeRelogin 只串行化"决策发起"（锁外 goroutine 执行登录），
+				// 其间管理员可删除该账号——已删的幽灵账号不再写状态行与审计日志（与成功分支
+				// B18-M2 同款防线；重登 goroutine 内 B21-03 也只护成功写回路径，此分支此前裸露）。
+				if _, ok := s.clients.ClientFor(acct); !ok {
+					delete(s.inflight[acct], t.ClassID)
+					s.mu.Unlock()
+					return
+				}
 				delete(s.inflight[acct], t.ClassID) // 清提交标记（避免残留占用）
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
 				if s.store != nil {
@@ -1766,7 +1774,7 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 // RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
 // 同步清理 inflight 位：退选进行中占用的提交锁位必须释放（M5）。
 // 同时记入 refused 集合并置"已用户退选"文案：后台 spawnChain 从此对该课程绝不再自动
-// 接管——用户手动退出的课，自动引擎下一 tick（≤1s）就抢回是错误行为（第 4 轮 MAJOR A2），
+// 接管——用户手动退出的课，自动引擎下一 tick（≤1s）就抢回是错误行为，
 // 只有用户重新把它设为目标（SetTargetsForAccount 清空 refused）才恢复自动接管。
 func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	s.mu.Lock()

@@ -258,7 +258,7 @@ export default function App() {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
                   const others = accounts.filter((a) => a !== adminName)
                   setInAdmin(false)
-                  // 第 4 轮（D4）+ F21-05：无其他学生账号时回登录页——
+                  // 无其他学生账号时回登录页（D4 + F21-05 完整登出语义）：
                   // 否则 current 仍是 adminName，渲染条件 `inAdmin || current === adminName` 恒真，
                   // D4 的"回登录页"从未生效。但"仅 setCurrent("")"会被 account-reselect effect
                   // 立即弹回 accounts[0]（仍是 admin），Admin 继续显示。改为完整登出语义：

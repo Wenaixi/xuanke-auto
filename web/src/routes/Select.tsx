@@ -137,6 +137,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
+  // M30-03（第 30 轮）：回显一次性标记——回显 effect 只合并一次，绝不重放。
+  // 第 4 轮 rev>0 守卫保护的"用户清空目标后轮询旧 courses 再次回填撤销清空"语义
+  // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见 166 行 effect）。
+  const echoedRef = useRef(false)
   // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
   // 注意：F7 修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
@@ -163,8 +167,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 校验必失败，一路置脏跳过（安全方向：绝不假清空），但也永远不落库——目标被静默"锁死"
   // 在读不出的旧条目上，用户改不了也存不上。修复：回显即过滤，只用当前 publishes 集合内的
   // publish_id 构建 initial（与消费时刻校验同一判据），幽灵条目根本进不了 selected。
+  // F30-01（第 30 轮）：回显跳过条件从"用户已编辑（rev>0）"收窄为"selected 已含任何条目"——
+  // 进页后课程列表（/electives 内存快照）先渲染，/state 首次加载慢于 electives（或首帧失败
+  // retry 拉长到秒级）时，用户在 stateData 到达前先点选课程 → rev 已 >0 → 旧实现回显被跳过，
+  // 后端已保存的旧目标永远不进 selected，防抖 PUT 只含用户新点的课程 → 后端旧目标被静默
+  // 覆盖删除（本意"添加一门"变"替换全部"）。现在回显只合并不覆盖：updater 内
+  // "selected 已有内容即返回"守卫保用户已操作课程不动、未涉及旧目标补进；echoedRef 保证
+  // 只合并一次，第 4 轮"清空后轮询旧 courses 再次回填撤销清空"竞态语义延续。
   useEffect(() => {
-    if (rev > 0) return
+    if (echoedRef.current) return
     const courses = stateData?.courses
     if (!courses || courses.length === 0) return
     // F19-01：effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
@@ -173,6 +184,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     if (pubs.length === 0) return
     const currentIds = new Set(pubs.map((p) => p.publish_id))
     setSelected((prev) => {
+      // F30-01：用户已手动选过课程（selected 已有内容）→ 不再合并回显（只保首次合并）。
+      // 与旧 rev>0 守卫等价但更精确：stateData 晚到/首帧失败时用户先手选不会误杀回显。
       if (Object.values(prev).some((arr) => arr.length > 0)) return prev
       const initial: Record<number, ClassItem[]> = {}
       const ordered = [...courses]
@@ -184,7 +197,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       }
       return initial
     })
-  }, [stateData, data, rev])
+    echoedRef.current = true
+  }, [stateData, data])
 
   const publishes = data?.publishes ?? []
 
@@ -393,7 +407,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const handleBack = async () => {
     for (let i = 0; i < 3; i++) {
       flushTargets()
-      if (!dirtyRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
+      // F30-01（第 30 轮）：flush 首次发起的 PUT 在飞（savingRef=true 且 flush 不发脏）时
+      // 不得 break——PUT 失败后 catch 走 scheduleRetry（组件未卸载，因下方等待循环在
+      // onDone 前），退避重试到成功或 21s 超时收敛；旧实现只等"flush 前已有在飞 PUT /
+      // 退避 timer"，flush 自己刚发起的 PUT 恰是唯一没等的路径，失败即静默丢弃改动。
+      if (!dirtyRef.current && !savingRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
       // F26-01（第 26 轮）：保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
       // （scheduleRetry 已挂 2/4/8/16s）同样表示内存与后端分叉、改动未落库。此前只等
       // savingRef，退避 timer 在飞时被误判"已静止"→ 三轮后无条件 onDone 卸载、
@@ -414,6 +432,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   }
   // F13-C1（第 13 轮）：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
   // 防抖 effect 仍只由 rev 驱动（与 F7-01 同款守卫）——轮询/回显/窗口收缩绝不触发保存。
+  // F30-01（第 30 轮）：附加 hasPublishes 布尔信号——开窗瞬间平台清空 publishes（F15/F16/
+  // F17 假清空守卫拦下置脏）后发布恢复，只有 rev 驱动的话 effect 不重跑、无新 timer，
+  // 置脏的改动永不落库（"等发布恢复再落库"的注释承诺从未实现）。hasPublishes 从 false→
+  // true 时 effect 重跑 → 新 400ms timer → 消费时刻守卫通过 → 正常保存。publishes 非空期间
+  // 轮询刷新布尔值不变、effect 不重跑，绝不把 400ms 防抖窗口无限重置。
+  const hasPublishes = (data?.publishes?.length ?? 0) > 0
   const publishesRef = useRef<readonly Publish[]>(publishes)
   publishesRef.current = publishes
   useEffect(() => {
@@ -470,7 +494,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       void saveNow()
     }, 400)
     return () => clearTimeout(timer)
-  }, [rev, selected, sessionToken, toast])
+  }, [rev, selected, sessionToken, toast, hasPublishes])
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
@@ -697,7 +721,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                       const selIdx = selArr.findIndex((x) => x.id === c.id)
                       const isSelected = selIdx >= 0
                       const rate = fillRate(c)
-                      const isFull = c.selected_count >= c.max_count
+                      // F30-01（第 30 轮）：max_count=0（未公布名额的新课程）时 `0>=0` 恒真
+                      // 会误显"已满额"徽章并把进度条染红——与后端 IsClassFull 的
+                      // `MaxCount>0 && SelectedCount>=MaxCount` 判据同源，0 表示名额未公布而非满员。
+                      const isFull = c.max_count > 0 && c.selected_count >= c.max_count
                       const remaining = Math.max(0, c.max_count - c.selected_count)
 
                       // 进度条与徽章色彩分配

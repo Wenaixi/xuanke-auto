@@ -246,6 +246,9 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                   size="sm"
                   disabled={deleting}
                   onClick={async () => {
+                    // F30-01（第 30 轮）：在飞幂等守卫——双击删除按钮第二发 DELETE 报
+                    // "账号不存在"假失败 toast（F19-02 同族）。
+                    if (deleting) return
                     setDeleting(true)
                     try {
                       await api("/admin/accounts", {
@@ -300,6 +303,7 @@ function CodesTab({
   const [count, setCount] = useState(5)
   const [uses, setUses] = useState(1)
   const [generating, setGenerating] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [generated, setGenerated] = useState<string[]>([])
 
   // n11（第 3 轮）：queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
@@ -312,6 +316,11 @@ function CodesTab({
   })
 
   const generate = async () => {
+    // F30-01（第 30 轮）：在飞幂等守卫——与 login submit F19-02 / activate F21-04 同款
+    // 短路：按钮 disabled 依赖 React 渲染落地有延迟，连按两次会在 disabled 生效前发出两个
+    // POST /admin/codes → 激活码重复生成 count 个（后端落库两次，前端 setGenerated 被第二发
+    // 覆盖）。入口先查在飞标记即停。
+    if (generating) return
     setGenerating(true)
     try {
       const codes = await api<string[]>("/admin/codes", {
@@ -330,6 +339,10 @@ function CodesTab({
   }
 
   const remove = async (code: string) => {
+    // F30-01（第 30 轮）：在飞幂等守卫——双击删除同一码时第二发后端报"不存在"假失败
+    // toast（F19-02/F21-04 同族，generate 同款）。
+    if (removing) return
+    setRemoving(true)
     try {
       await api("/admin/codes", {
         method: "DELETE",
@@ -339,6 +352,8 @@ function CodesTab({
       codesQuery.refetch()
     } catch (e: any) {
       toast({ title: "删除失败", description: e.message || "通信异常", variant: "destructive" })
+    } finally {
+      setRemoving(false)
     }
   }
 

@@ -85,3 +85,42 @@
 第 37 轮未发现 CRITICAL/MAJOR 级新缺陷。两个 MINOR 已落地修复（**MarkDone 同步清库内 refused 单课行**、**ElectivesSnapshotFor 目标判据改 len>0**），两个可疑项已顺手收敛（**ErrUnauthorized 分支补 ClientFor 复核**、**stats 零值 open 输出空串**），maskKey 矛盾注释已修正。其余高风险区域经通读 + 编译 + race 验证均无真实触发路径的缺陷。
 
 回归：`go build ./...` + `go vet ./...` + `go test ./...` + `go test -race ./...` 全绿。
+
+---
+
+## 前端部分（M37 系列，主 gate 现场核实 + 前端子代理 review37-frontend 报告）
+
+### M37-01（MINOR）「按剩余排序」排序键与标签语义不符
+
+**位置**：`web/src/routes/Select.tsx` 排序块（原 807-811 行）。
+
+**缺陷**：排序按钮文案"剩余名额正序"（注释"名额越少越靠前，抢手课程一眼可见"），排序键却是 `a.selected_count - b.selected_count`（已报名数升序）——两课 `max_count` 不同时"已报少"≠"剩余少"（A=1/5 余4 vs B=10/100 余90，当前把 B 排前而 B 剩余更多），排序结果与 UI 意图及同屏徽章矛盾。
+
+**修复**：排序键改真实剩余名额 `remaining(c) = c.max_count > 0 ? c.max_count - c.selected_count : 0`；`max_count=0`（名额未公布）映射为 0（最紧张），与 M30-04/32-02 同源语义。commit `5175a0c`。
+
+**验证**：`npm run build`（tsc -b + vite）通过。
+
+### M37-02（MINOR）handleBack 回显等待忙轮询无调度让步
+
+**位置**：`web/src/routes/Select.tsx` 487-489 行。
+
+**缺陷**：`while (!echoedRef.current && Date.now() < deadline) await setTimeout(r, 10)`——5s 兜底窗口内约 500 个 10ms 定时器忙轮询，与回显合并 effect 同宏任务循环争抢时间片（33-01 前置守卫兜住数据不丢，属性能/调度瑕疵）。
+
+**修复**：轮询间隔 10ms→50ms（React 一帧约 16ms，50ms 足够感知合并完成且不抢渲染调度）。commit `96bab74`。
+
+**验证**：`npm run build` 通过。
+
+### 可疑项裁决
+
+- **可疑-3（App.tsx:168-170 onUnauthorized 守卫阻止代理目标失效会话清理）**：主 gate 现场核实后**否决采纳修复方案，维持现状记观察**。理由：① 前端 401 归属反查（`detail.session`）可靠，但改窄守卫 `lostAccount === current` 会在代理态下网络抖动/后端 12h TTL 恰好到期时**误删学生有效会话**，重开 F8-01"绝不误杀"契约；② 代理态停留期间管理员自身会话过期的正确处理已由 `lostAccount === adminName` 分支专门覆盖（清 targetAccount + 退出管理态），守卫保护的正是"代理态下有效令牌不被误杀"；③ 三条失效来源中唯一卡死路径已被现有分支覆盖。观察 37-01。
+- **可疑-2（useTickingCountdown 时区依赖浏览器本地时区）**：与后端调度器（只信对齐钟）解耦、属展示层非决策层；本项目部署形态服务器与浏览器同机构同时区，无实际触发。判误报（与观察 14-02 同族）。
+- **可疑-4（发布级/课程级 can_select 字段同名）**：类型隔离（`t` 为 `Publish & {...}`、`c` 为 `ClassItem`），JSX 内无同名混淆点，:270 仅字符串拼接无逻辑依赖、:944 只读课程级。判误报，可读性瑕疵而已。
+
+### 前端已核无缺陷高风险区域（review37-frontend 逐项核验 + 主 gate 抽查）
+
+目标自动保存链（防抖+savingRef/lastJson/targetRef/dirtyRef 串行化+假清空三闸+hasPublishes 驱动发布恢复重试+stateDataRef 双闸）、回显合并（echoedRef 一次/31-01 真合并/31-04 全清空/35-01 同发布补进/幽灵过滤/TDZ 规避）、handleBack（33-01 回显等待/32-01 flushedRev 收敛/3 轮上限）、在飞幂等全链（M29-01 Set/31-03 removing Set/deleting/generating/Login submit/activate/ConfigTab saving）、视图态清理（logout page/account-reselect 空账号/401 session 归属/F25-01/App-34-02/M28-01/adminName 持久化）、btn_type 三向契约、max_count=0 全语义五处同源、XSS/存储安全（dangerouslySetInnerHTML/innerHTML/eval/new Function 零命中、localStorage 仅 4 处均 try/catch 降级）、Tabs 受控兜底、手写弹窗 Esc+autoFocus、api 20s 超时。
+
+### 观察项（本轮追加）
+
+- 观察 37-01：App.tsx onUnauthorized 代理态守卫"不误杀有效令牌"vs"残留失效代理目标槽位"的张力——保留前者优先（数据完整/会话安全优先），后端会话吊销由 12h TTL 自清，维持观察。
+- 观察 37-02：M37-01 修复后"名额未公布"课程在剩余排序中恒排最前——与 32-02"未公布≠最紧张"语义张力，82 门实际数据中未公布课程极罕见，触发概率低，维持观察。

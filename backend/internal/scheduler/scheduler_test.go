@@ -2410,6 +2410,21 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 	if _, ok := s.ElectivesSnapshotFor("student1"); ok {
 		t.Fatal("无目标账号专属帧已过期时不得回退新鲜全局帧（错年级数据串线 + 不触发本账号刷新）")
 	}
+
+	// 断言 4（B37-02）：清空目标后（SetTargetsForAccount 留下空 slice、map key 仍存在），
+	// 该账号必须走"无目标账号"快路径——全局帧新鲜即返回，绝不走"有目标账号"专属路径：
+	// 旧判据按 key 存在性判定，清空目标的账号被归入目标账号 → 无专属帧返回 (nil,false)
+	// → handleElectives 每次浏览都调 ProbeForAccount 真打平台（前端 10s 轮询 × 每次过期即打），
+	// 与"无目标账号回退全局帧（快、无网络开销）"契约相悖（AccountsWithTargets 只认 len>0）。
+	s.SetTargetsForAccount("acct1", []Target{}) // 模拟用户清空全部目标（F7-01 合法操作）
+	s.mu.Lock()
+	delete(s.acctData, "acct1") // 清空后从未探测过：无专属帧
+	delete(s.acctDataAt, "acct1")
+	s.mu.Unlock()
+	data, ok = s.ElectivesSnapshotFor("acct1")
+	if !ok || data == nil || len(data.Publishes) == 0 {
+		t.Fatal("清空目标的账号应回退全局帧快路径（零网络探测），不得返回 (nil,false)")
+	}
 }
 
 // TestReloginBackoffWindowBlocksManualTriggers B9-01：连续失败进入指数退避后，

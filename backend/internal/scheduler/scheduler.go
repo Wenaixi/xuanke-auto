@@ -643,7 +643,12 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 	// 且永不触发本账号 ProbeForAccount——年级串线全开。这里返回 false 让
 	// handleElectives 走 ProbeForAccount 真取该账号年级帧；无目标账号（仅浏览/手动
 	// 报名）保持回退全局帧（快、无网络开销，且手动复核 CheckClassSelectable 不读全局帧）。
-	if _, hasTargets := s.acctTargets[acct]; acct != "" && hasTargets {
+	// 判据用 len(acctTargets[acct]) > 0 而非 map key 存在性——handler 层清空目标时
+	// 落 `SetTargetsForAccount(acct, []Target{})` 留下空 slice（key 存在），若按 key 判断
+	// 该账号会一直走"有目标账号"专属路径：专属帧过期后每次浏览都返回 (nil,false) 触发
+	// ProbeForAccount 网络探测，与"无目标账号回退全局帧（快、无网络开销）"契约相悖，
+	// 且与 AccountsWithTargets()（返回 len>0）判定不一致——probe() 不会刷新该账号帧。
+	if acct != "" && len(s.acctTargets[acct]) > 0 {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			snappedAt := s.acctDataAt[acct]
 			if !snappedAt.IsZero() && time.Since(snappedAt) <= snapshotTTL {

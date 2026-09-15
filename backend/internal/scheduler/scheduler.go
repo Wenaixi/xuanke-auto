@@ -1,4 +1,4 @@
-package scheduler
+﻿package scheduler
 
 import (
 	"context"
@@ -64,16 +64,18 @@ const (
 // 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
 // 窗口已关闭（开放时间已过且快照为空）时降回 30 秒——窗口结束后再高频盯守毫无意义，
 // 只会浪费请求并刷屏日志；若管理员热改开放时间到未来（新一轮），临门判断仍优先生效。
-// B15-M2（第 15 轮）：open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
+// B15-M2：open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
 // 窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时提前返回远间隔——此前
 // `now.After(open.Add(-nearWindow))` 对零值 open 恒 true 落入临门 2s 分支，且快照非空时
 // WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
 // 提交已被 B11-A1 零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
-	// 函数入口统一取一次开放时间快照复用——runtime.Store 每次读取都重取当前配置，
-	// 同一函数内多次调用在管理员热改开放时间的亚毫秒窗口内可能读到不同值（一次落
-	// 30s 远间隔、一次落临门 2s），且与 B20-03 同族消弭时间基准漂移。
-	open := s.openTimeNow()
+	return s.probeIntervalForOpen(now, s.openTimeNow())
+}
+
+// probeIntervalForOpen 判定探测间隔的纯函数——open 由调用方统一传入（tick 830 行取一次
+// 快照复用），避免各调用点各自 openTimeNow() 在热改亚毫秒窗口读到不同值。
+func (s *Scheduler) probeIntervalForOpen(now time.Time, open time.Time) time.Duration {
 	if open.IsZero() {
 		return probeIntervalFar
 	}
@@ -128,7 +130,7 @@ type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
 	UpdateIDToken(acct, idToken string) error     // 自动重登后落库新 token
-	DeleteSuccess(acct string, classID int) error // B8-M2（第 8 轮）：手动退选后删除 success 行
+	DeleteSuccess(acct string, classID int) error // B8-M2：手动退选后删除 success 行
 	SaveRefused(acct string, classID int) error   // B9-02：手动退选记库，重启后自动引擎仍不抢回
 	DeleteRefused(acct string) error              // B9-02：重设目标清空该账号全部退选标记
 }
@@ -266,7 +268,7 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 // maybeSyncClock 定期异步采样教务服务端时间，校准本地时钟偏差。
 // MAJOR-C 回退：同步连续失败 3 次即复位 clockOffset=0（窗口判定回到本地时钟），
 // 绝不带着一个过期偏差长期误判开窗点；单次成功立即清零失败计数，瞬断不累计。
-// B7-M1（第 7 轮）：同步闸门推进改为"同步成功才推进 lastSyncTime"——此前在锁内、
+// B7-M1：同步闸门推进改为"同步成功才推进 lastSyncTime"——此前在锁内、
 // 发起异步 goroutine 前就把 lastSyncTime=now：网络抖动导致 SyncServerTime 挂起 >300ms
 // 时（等于上一个 tick 间隔），并发 goroutine 回写会跳过一个完整的 60s 窗口，且
 // 连续失败 3 次复位 clockOffset 后该分钟整段不再校准。现在的推进语义：启动同步
@@ -298,7 +300,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 		return
 	}
 	// 防重入：上一轮同步仍在进行（未落地），本 tick 不叠加。
-	// B8-M1（第 8 轮）：此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
+	// B8-M1：此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
 	// 中 syncing 恒被置 true、inflight 恒 true——死代码，每个 tick（300ms）在同步失败期
 	// 都会再 spawn 一个 SyncServerTime goroutine（绕开登录频率闸门、堆积在途、streak 并发
 	// 累加诱发瞬断复位风暴）。现在在途即直接返回，真正的单飞语义。
@@ -311,7 +313,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Unlock()
 
 	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime（见 B7-M1）。
-	// F12-B1（第 12 轮）：先确认有可同步客户端再置位——此前无账号（空库/账号全删）或
+	// F12-B1：先确认有可同步客户端再置位——此前无账号（空库/账号全删）或
 	// 客户端不支持同步时，syncing 被置 true 后无人复位，后续每个 tick 在 `if s.syncing`
 	// 处直接返回，时钟校准从启动起永久休眠、clockOffset 恒 0 且无任何错误日志。
 	if client, ok := s.clients.AnyClient(); ok {
@@ -768,7 +770,10 @@ func (s *Scheduler) windowClosedLocked() bool {
 	// 降回 30s，平台恰在开窗点恢复后要等下一轮时钟同步成功（≤30s 退避）才自愈，
 	// 首波目标可能已被抢光。判据3（EmptyProbeRuns）入账侧已有 B21-02 的 now.After(open+10s)
 	// 自保护，判据2 的计数源不依赖 probe/open，是唯一需补该条件的判据。
-	if s.syncFailStreak >= 3 && !s.openTimeNow().IsZero() && s.nowAlignedLocked().After(s.openTimeNow()) {
+	// open 取一次快照复用（与探针间隔判定同策略）：两次独立 openTimeNow() 在管理员
+	// 热改开放时间的亚毫秒窗口内可能读到新旧两个值——先读非零过 IsZero、后读零值使
+	// After(零值) 恒 true，三条件误判"已过开放时间"视同关闭。
+	if open := s.openTimeNow(); s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
 		return true
 	}
 	// B20-02：视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
@@ -834,7 +839,10 @@ func (s *Scheduler) tick() {
 	s.maybeSyncClock(now)
 
 	// 探测闸门：距上次成功探测不足当前阶段间隔且非首次则跳过
-	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalFor(now)
+	// open 已在本函数开头取过单次快照（830 行前）——probeIntervalFor 内部不再重取，
+	// 与 B33-02"探测间隔判定取单次 open 快照"同策略：热改亚毫秒窗口内立即探测判定与
+	// 节流间隔若各自取 open，可能读到新旧两个不同值（一次放行、一次被节流或反之）。
+	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalForOpen(now, open)
 	// 超高性能：窗口到点后的首次 tick 立即探测（不等待节流闸门放过）
 	if !probe && now.After(open) && last.Before(open.Add(-time.Second)) {
 		probe = true
@@ -852,7 +860,7 @@ func (s *Scheduler) tick() {
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
-	// B11-A1（第 11 轮）：open 为零值（管理员 PUT open_time="" 显式解除窗口机制，F7-02）
+	// B11-A1：open 为零值（管理员 PUT open_time="" 显式解除窗口机制，F7-02）
 	// 时恒满足 !now.After(open) → 提交循环永续放行。此时窗口机制已被显式解除，
 	// 但提交仍可能对"已满员/已成功"目标反复刷平台报名接口——挂起提交，绝不放行。
 	if open.IsZero() {
@@ -861,7 +869,7 @@ func (s *Scheduler) tick() {
 	if !opened && !now.After(open) {
 		return
 	}
-	// B18-M1（第 18 轮）：窗口已确认关闭（探测到空快照且开放时间已过，state.WindowClosed）
+	// B18-M1：窗口已确认关闭（探测到空快照且开放时间已过，state.WindowClosed）
 	// 时挂起提交——平台对关闭后的报名返回 code=1"无效的课程ID"（真实关闭文案），不在
 	// isWindowClosedError 的"关闭/未开启/报名时间/已结束"匹配集合内 → 不记 full → 走实时
 	// 复核 → 窗口关闭后 countList 空 → IsClassFull 报"课程无人数数据" → 下个 tick 重打
@@ -888,7 +896,7 @@ func (s *Scheduler) tick() {
 // prevWindowOpened 在探测失败/空数据路径保持原值，窗口一旦开过就维持已开状态，
 // 提交循环（spawnChain）仍会继续尝试目标课程，黄金期不因数据异常而停摆。
 func (s *Scheduler) probe() {
-	// F12-B2（第 12 轮）：探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
+	// F12-B2：探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
 	// （15s 超时），HTTP 侧 /api/electives 在快照过期时并发的 ProbeForAccount/ProbeNow
 	// 会与 tick 探测同时打上游，N 账号部署下开窗全期形成 N+1 并发 findElectivesData。
 	// probing 在持 s.mu 时置位，保证"置位-检查"原子（B11-A1 零值守卫同款窗口）。
@@ -957,16 +965,16 @@ func (s *Scheduler) probe() {
 			break
 		}
 	}
-	// B18-M1（第 18 轮）：先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
+	// B18-M1：先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
 	// "至少开过窗"作为前提（见下），若在覆写后读取 prevOpened 拿到的恒是本次 opened 值。
 	prevOpened := s.state.WindowOpened
 	s.state.WindowOpened = opened
 	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
 	// 且开放时间已过 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
-	// C-3（第 3 轮）：去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
+	// C-3：去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
 	// 若只认"从未开过窗"则开过再关后 WindowClosed 恒 false，probeIntervalFor 的
 	// "开放时间已过 + WindowClosed → 降回 30s"分支永不命中，窗口关闭后仍 2s 高频探测。
-	// B18-M1（第 18 轮）：只在"至少开过窗"（opened 曾经为 true）后才标记关闭——
+	// B18-M1：只在"至少开过窗"（opened 曾经为 true）后才标记关闭——
 	// 否则未开窗即空快照（学期无发布/平台异常）会误标已关闭，tick 提交守卫按
 	// WindowClosed 挂起提交，把"还没开窗待开"误停成"永不提交"（开窗瞬间探测推进、
 	// 黄金期全停摆）。已开过窗再关 = 窗口关闭的实质语义，未开过不算关闭。
@@ -976,7 +984,10 @@ func (s *Scheduler) probe() {
 	// （临门 2s）即置关闭：tick 守卫挂起提交 + 探测降回 30s，若平台在 30s 内恢复，黄金期
 	// 提交已停摆。10s 裕量覆盖过渡态；真关仅推迟 10s 判定（超裕量仍按原判据关闭，
 	// TestWindowClosedState 的 -time.Hour 场景不受影响）。
-	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow().Add(10*time.Second))
+	// 裕量基准 open 取一次快照复用——同一探测内两处 10s 裕量判定若各自取 open，热改
+	// 亚毫秒窗口内主判据与 EmptyProbeRuns 入账可能基于新旧两个不同 open（B33-02 同族）。
+	open := s.openTimeNow()
+	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second))
 	// B20-02：探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
 	// 注意绝不触碰 state.WindowClosed（由 B18-M1/B19-01 判据独占）：这里只维护量变计数，
@@ -985,7 +996,7 @@ func (s *Scheduler) probe() {
 	// （F7-01 记录的真实现象，切学期/数据迁移），若开窗瞬间清空过渡态持续 ≥6 秒（3 次探测
 	// × 2s 临门间隔），旧判据会在真实窗口已开时误挂起黄金期提交+降频探测；以"开窗点后
 	// 10s 内不计空快照轮数"错开过渡态，窗口真开（10s 黄金期结束）后连续空才确证幽灵窗口。
-	if !opened && len(data.Publishes) == 0 && now.After(s.openTimeNow().Add(10*time.Second)) {
+	if !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second)) {
 		s.state.EmptyProbeRuns++
 	} else {
 		s.state.EmptyProbeRuns = 0
@@ -1106,7 +1117,7 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		}
 		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
 		// 不再误报"有效"（安全审计 MINOR 7）。
-		// C1 修复（第 3 轮）：失败后 reloginFail 保留本次发起时递增到的次数，杜绝无条件复位 1——
+		// C1 修复：失败后 reloginFail 保留本次发起时递增到的次数，杜绝无条件复位 1——
 		// 否则计数恒 1→2→1→2 振荡，指数退避表永不增长，Vision 持续故障时退避恒为 30s，
 		// 平台锁号防线被击穿。失败次数只会随成功清零（上面成功分支 delete），
 		// 由 maybeRelogin 的退避窗口自然隔开下一次失败尝试。
@@ -1300,7 +1311,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				delete(s.inflight[acct], t.ClassID) // 清提交标记（避免残留占用）
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
 				if s.store != nil {
-					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)
+					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); err != nil {
+						log.Printf("[scheduler] 账号 %s 课程 %d 失效日志落库失败: %v", acct, t.ClassID, err)
+					}
 				}
 				s.mu.Unlock()
 				return
@@ -1309,7 +1322,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Lock()
 			delete(s.inflight[acct], t.ClassID)
 			if err == nil {
-				// B18-M2（第 18 轮）：写成功/落库前复核账号仍存在——管理员 DeleteAccount
+				// B18-M2：写成功/落库前复核账号仍存在——管理员 DeleteAccount
 				// （先清 credentials/accounts/targets/success 表 + Accounts.Remove）与在飞
 				// spawnChain 网络往返（SelectClass 最长 15s）竞态时，本链在删除完成后才返回
 				// 成功，若不复核会 SaveSuccess/SaveRefused 把已删账号的 success 行写回，
@@ -1344,7 +1357,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.markRateLimitedLocked(acct, t.ClassID, 30*time.Second)
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "触发平台风控退避 30 秒: "+err.Error())
 				if s.store != nil {
-					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false)
+					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false); err != nil {
+						log.Printf("[scheduler] 账号 %s 课程 %d 风控退避日志落库失败: %v", acct, t.ClassID, err)
+					}
 				}
 				s.mu.Unlock()
 				return
@@ -1361,9 +1376,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// （用户要求：不解析平台"满"字错误文案，直接对比总数与已报数）
 			// 注意：!ok（账号会话未建立）分支已被 B30-01 前置到链顶——go routine 启动时
 			// 客户端不存在即静默放弃整链，本处不可能再遇到 !ok，无需再判。
-			// C-4（第 3 轮）：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
+			// C-4：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
 			// 全局锁，黄金冲刺期里其它账号的探测/提交/时钟对齐全被锁死；锁外复核完再回锁收尾。
-			// F13-m2（第 13 轮）：锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1
+			// F13-m2：锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1
 			// 串行）只发生在持锁段、不跨此网络段——黄金期不因 DB 写停顿网络往返；持锁写
 			// 窗口仅成功分支两行（微秒级），彻底消除需独立 DB goroutine，边际不动（观察项）。
 			s.mu.Unlock()
@@ -1379,7 +1394,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Lock()
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
 				if s.store != nil {
-					s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 实时复核命中 token 失效，自动重登中", false)
+					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 实时复核命中 token 失效，自动重登中", false); err != nil {
+						log.Printf("[scheduler] 账号 %s 课程 %d 实时复核失效日志落库失败: %v", acct, t.ClassID, err)
+					}
 				}
 				s.mu.Unlock()
 				return
@@ -1406,7 +1423,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			}
 			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
 			if s.store != nil {
-				s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false)
+				if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false); err != nil {
+					log.Printf("[scheduler] 账号 %s 课程 %d 报名失败日志落库失败: %v", acct, t.ClassID, err)
+				}
 			}
 			s.mu.Unlock()
 			return
@@ -1449,7 +1468,7 @@ func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time)
 	return false
 }
 
-// B16-M1（第 16 轮）：退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
+// B16-M1：退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
 // spawnChain 用 nowAlignedLocked() 判期，两套时间基（实测相差 ~640ms）边界同一语义。
 // 读侧 isRateLimitedLocked 已用 nowAlignedLocked()（1021 行），写入必须同源，语义自洽。
 func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Duration) {
@@ -1505,13 +1524,15 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 	s.full[acct][t.ClassID] = true
 	s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "该课程已满员，退避至下一备选")
 	if s.store != nil {
-		s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false)
+		if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false); err != nil {
+			log.Printf("[scheduler] 账号 %s 课程 %d 满员日志落库失败: %v", acct, t.ClassID, err)
+		}
 	}
 }
 
 // releaseFullIfFreedLocked 快照显示不满时解除 full 标记并回 pending（需持锁）。
 // 只要快照显示有名额空余（如其他同学退选），立即解除 full 标记，黄金期 250ms 冲刺立即捡漏 (CRITICAL C1)。
-// C-3 守卫（第 3 轮）：只有快照**明确**显示该课程名额空余才解封——
+// C-3 守卫：只有快照**明确**显示该课程名额空余才解封——
 // 空快照（窗口关闭后平台清空课程列表）或快照中查不到该课程（无法判断）一律保持 full 不解封，
 // 否则窗口关闭后 spawnChain 每个 tick 都因 full 被解封重新打报名接口（窗口关闭防轰炸残留）。
 func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
@@ -1607,7 +1628,7 @@ func FormatOpenTime(s string) (time.Time, error) {
 // 基于该账号最近快照判定课程是否可报名——课程所在发布窗口未开放或课程已满员时
 // 提前拒绝并返回友好原因，避免无谓打教务平台拿生硬错误码。
 // 快照缺失（从未探测）或课程不在快照中（无法判定）时放行，由平台最终把关。
-// B18-m1（第 18 轮）：过期快照（超过 snapshotTTL 未刷新）一律按"无快照"放行——
+// B18-m1：过期快照（超过 snapshotTTL 未刷新）一律按"无快照"放行——
 // 快照过期的判定依据是 acctDataAt 时间戳（与 ElectivesSnapshotFor 同源），
 // 不使用 acct 外的全局 lastData 兜底（跨年级帧可为任意账号，无参考价值）。
 // 过期快照放行语义：不拿旧数据拦用户真实操作（名额/窗口可能已变化），交给平台把关，
@@ -1758,7 +1779,7 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 		s.state.Courses[idx].Result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 	}
 	if s.store != nil {
-		// B8-M2（第 8 轮）：删除 success 行——否则重启后该课被 RestoreDone 恢复成
+		// B8-M2：删除 success 行——否则重启后该课被 RestoreDone 恢复成
 		// "已报名成功"，用户当日的退选决定被静默撤销（与 CLAUDE.md 契约文档对齐）
 		if err := s.store.DeleteSuccess(acct, classID); err != nil {
 			log.Printf("[scheduler] 账号 %s 课程 %d 退选清除成功记录落库失败: %v", acct, classID, err)

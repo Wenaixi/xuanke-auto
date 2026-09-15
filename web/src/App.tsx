@@ -100,7 +100,12 @@ export default function App() {
       if (!lostAccount) return
       // 被吊销的账号恰是管理员当前代理查看的学生账号时，先退出代理视图——
       // 该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。
-      setTargetAccount((prev) => (prev === lostAccount ? null : prev))
+      // F25-01（第 25 轮）：被吊销的是管理员自身会话时同样必须退出代理态——
+      // 代理凭据随管理员会话一起没了，targetAccount 残留会让管理员重登后渲染直接
+      // 命中代理 Select 跳过管理页（F15-07 只覆盖主动 logout，被动吊销不对称）。
+      setTargetAccount((prev) =>
+        prev === lostAccount || lostAccount === adminName ? null : prev
+      )
       // 管理员处于后台管理态代理查看学生大厅时，若发生 401 绝不误杀管理员自身会话
       if (current === adminName && inAdmin && lostAccount !== adminName) {
         return

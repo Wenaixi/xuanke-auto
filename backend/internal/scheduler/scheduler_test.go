@@ -2407,3 +2407,126 @@ func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
 	}
 	close(relogDone) // 放行重登完成
 }
+
+// TestRealtimeFullRecheckKeepsManualSuccess 实时人数复核的"确证满员"分支不得覆盖手动报名
+// 成功的胜利状态（B23-01，第 23 轮）。锁外复核窗口（最长 15s）内手动路径 TryAcquireSubmit
+// 可抢到已释放的 inflight 位并 MarkDone 置 done+success；复核返回真满后旧实现 `cErr==nil
+// && full` 分支（markFullLocked，无 doneHas 复核）把 success 覆盖成"failed/已满员"并追加
+// 一条假"已满员"日志——与紧邻的"未现满员"分支（1338 行有 doneHas 复核"绝不覆盖胜利状态"）
+// 不对称，同族竞态对称缺口。手动成功后实时复核不得改变胜利状态，且不再记 full。
+func TestRealtimeFullRecheckKeepsManualSuccess(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.mu.Lock()
+	fc.selectErr[61115] = errors.New("该课程已满员") // 报名失败 → 走实时复核
+	fc.mu.Unlock()
+	var s *Scheduler // 声明提前：fullBlock 回调需要引用它（闭包捕获）
+	recheckStarted := make(chan struct{})
+	fc.fullBlock = func() {
+		close(recheckStarted)
+		// 复核在飞期间：先放手动报名成功落地（MarkDone 置 done+success），
+		// 再在 IsClassFull 返回前把快照人数改满（复核读到的就是"真满"）。
+		// 时序三要素：手动成功先于复核返回、复核返回硬编码真满、复核期间锁已释放。
+		if err := s.markDoneTestHelper("acct1", 61115); err != nil {
+			t.Errorf("手动报名成功失败: %v", err)
+		}
+		fc.mu.Lock()
+		fc.data.Publishes[0].Classes[0].SelectedCount = 36 // 复核读到的满员（用户刚占末位）
+		fc.mu.Unlock()
+	}
+	s = New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+	s.mu.Lock()
+	s.state.WindowOpened = true // 预置开窗状态，避免依赖探测时序
+	s.mu.Unlock()
+
+	// 自动链报名失败 → 进入实时复核的网络段（锁已释放）
+	select {
+	case <-recheckStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("提交失败后应触发实时人数复核")
+	}
+	// 复核返回后：手动报名成功的胜利状态必须保留（success），绝不被 markFullLocked 覆盖
+	waitStatusAcct(t, s, "acct1", 61115, "success", 3*time.Second)
+
+	s.mu.Lock()
+	_, inFull := s.full["acct1"][61115]
+	_, inDone := s.done["acct1"][61115]
+	s.mu.Unlock()
+	if !inDone {
+		t.Fatal("手动报名成功后 done 必须保留")
+	}
+	if inFull {
+		t.Fatal("手动报名成功后实时复核不得记入 full（胜利状态覆盖缺口）")
+	}
+}
+
+// markDoneTestHelper 手动报名成功的内联助手：在复核回调（已持 fakeClient 锁外的时机）
+// 里调用 MarkDone——这里是测试唯一需在回调里调 Scheduler 方法的地方，故抽出来。
+func (s *Scheduler) markDoneTestHelper(acct string, classID int) error {
+	return s.MarkDone(acct, classID, "健美操", "手动报名成功")
+}
+
+// TestRealtimeFullRecheckWithNoManualDoneMarksFull 对偶守卫：复核"真满"且没有手动成功介入时，
+// 满员分支必须照常记 full 并置 failed（B23-01 修复不得误伤正常满员退避）。
+func TestRealtimeFullRecheckWithNoManualDoneMarksFull(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.mu.Lock()
+	fc.selectErr[61115] = errors.New("该课程已满员")
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	s.Start()
+	defer s.Stop()
+	s.mu.Lock()
+	s.state.WindowOpened = true
+	s.mu.Unlock()
+	// 让 IsClassFull 立即返回真满（无手动介入）
+	fc.mu.Lock()
+	fc.data.Publishes[0].Classes[0].SelectedCount = 36
+	fc.mu.Unlock()
+
+	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
+	s.mu.Lock()
+	_, inFull := s.full["acct1"][61115]
+	s.mu.Unlock()
+	if !inFull {
+		t.Fatal("无手动成功介入时复核确证满员应记入 full")
+	}
+}
+
+// TestSpawnChainSkipsWhenTokenInvalid token 已知失效（tokenValid=true 且重登退避中）时，
+// spawnChain 必须在链顶短路、绝不真实打平台 SelectClass（B23-03，第 23 轮）——此前链顶
+// 只有 relogging 短路，失效+重登退避期（relogging 已清）每个 tick 仍对每门目标真实发起
+// SelectClass（必然 code=-1）并每题 AppendLog"教务令牌失效"，烧平台请求额度 + 日志堆积。
+// 修复后已知失效链不得发起任何 SelectClass 调用。
+func TestSpawnChainSkipsWhenTokenInvalid(t *testing.T) {
+	fc := newFakeClient(true)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	acct := "acct1"
+	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	// 预置 token 失效（tokenValid=true）且退避中（relogging=false，reloginAt 未过——重登退避期）
+	s.mu.Lock()
+	s.tokenValid[acct] = true
+	s.reloginAt[acct] = time.Now() // 退避窗口内
+	s.mu.Unlock()
+
+	s.submitAll()
+	time.Sleep(150 * time.Millisecond) // 链是异步 goroutine，等它跑完
+
+	if got := fc.SelectClassCalls(61115); got != 0 {
+		t.Fatalf("token 已知失效时不应真实打平台报名接口，实际调用 %d 次", got)
+	}
+	// 状态不得被污染成"failed"（失效期间保持原态，前端显示 token_valid=false 由 /state 承担）
+	s.mu.Lock()
+	idx := s.statusIndexLocked(acct, 61115)
+	status := ""
+	if idx >= 0 {
+		status = s.state.Courses[idx].Status
+	}
+	s.mu.Unlock()
+	if status == "failed" {
+		t.Fatal("token 失效跳过不得把状态置为 failed")
+	}
+}

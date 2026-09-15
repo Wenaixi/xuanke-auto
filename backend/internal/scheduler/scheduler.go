@@ -1186,6 +1186,16 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
+			// B23-03（第 23 轮）：token 已知失效且重登进入退避期（relogging 已被失败路径清掉、
+			// reloginAt 未过退避窗口）时，链顶只有 relogging 短路挡不住——每 tick 仍对每门目标
+			// 真实发起 SelectClass（必然 code=-1"教务令牌失效"）并每题 AppendLog，烧平台请求
+			// 额度 + 日志表堆积。tokenValidForLocked（tokenValid=true || relogging=true）即
+			// "已知失效"，重登成功/手动登录后清 false（B21-01 语义）才恢复提交。前端 /state
+			// 只读 token_valid 显示"已失效·自动恢复中"，本链不发请求、状态保持原样。
+			if !s.tokenValidForLocked(acct) {
+				s.mu.Unlock()
+				return
+			}
 			// 已成功：本发布目标完成，终止
 			if s.doneHas(acct, t.ClassID) {
 				s.mu.Unlock()
@@ -1329,6 +1339,15 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				return
 			}
 			if cErr == nil && full {
+				// B23-01（第 23 轮）：锁外复核窗口（最长 15s）内手动路径可能已抢到 inflight 位
+				// 并 MarkDone 置 done+success（用户真实报名成功）——此时"确证满员"分支若直接
+				// markFullLocked 会把 success 覆盖成"failed/已满员"并追加一条假"已满员"日志，
+				// 与紧邻的"未现满员"分支（下方 doneHas 复核"绝不覆盖胜利状态"）不对称。
+				// done 一旦置位（手动成功），满员分支必须让位，绝不覆盖胜利状态。
+				if s.doneHas(acct, t.ClassID) {
+					s.mu.Unlock()
+					return
+				}
 				s.markFullLocked(acct, t)
 				s.mu.Unlock()
 				continue

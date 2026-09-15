@@ -87,6 +87,40 @@ TryAcquireSubmit 拒绝 → finally invalidateQueries 照跑 → **假失败 toa
   日志 key 缺 account 维度（令牌唯一性+服务端过滤双覆盖）、handleBack 等待期用户继续
   操作边缘安全方向、手动报名假失败 toast 存在性已并入 M29-01。
 
+## review29-backend 详核报告补全（主 gate 复核，并入本档）
+- **已核无缺陷 15 项**（详核清单）：① 删除账号三链竞态闭环（B26-01 memory-first 顺序下
+  PurgeAccount 持 s.mu 天然排在任何持锁落库临界区后、DeleteAccount 恒在其后，库行写入
+  必然先于 DeleteAccount 被事务清掉，无幽灵复活）；② spawnChain 提交链（done/full/
+  rateLimited/inflight/refused 判定顺序、B23-03 tokenValidForLocked 短路语义、
+  B23-01 满员分支 doneHas 让位、chainMu 链去重、inflight 各分支清理 sync.Once 幂等）；
+  ③ 时钟对齐链（lastSyncTime 只成功推进、lastSyncFailAt 30s 退避、syncing 单飞、
+  F12-B1 无客户端复位、B21-01 streak 真实可达）；④ 窗口状态机（prevOpened 先捕获再覆写、
+  B26-03 双裕量对称、B20-02 入账/归零/自愈、B11-A1 零值挂起、tick 守卫五顺序）；
+  ⑤ 探测节流（lastProbe 只归 probe()/ProbeNow、probing 持锁原子、probeSem cap 4）；
+  ⑥ ?account= 透传校验矩阵四路（B15-M4/B26-02/B27-01/B27-02 全 accountExists 同源）；
+  ⑦ 会话与票据（12h TTL + 5 分钟清扫、票据单次防重放、requireAuth/requireAdminSession
+  令牌提取一致、RevokeAccount 立即吊销）；⑧ 激活码（单事务 UPDATE 原子条件不超卖、
+  已激活先扣次再查回滚、批量单事务、crypto/rand 失败 panic、16 位 hex 不可枚举 + 限流）；
+  ⑨ SQL 注入面（全部参数化占位符，columnExists 拼接均来自编译期常量数组）；
+  ⑩ AES-GCM 加密链路（secureEncrypt 未注入报错、随机 nonce、.master_key 32 字节同校、
+  加载严格校验 enc: 前缀）；⑪ CSRF 与限流（requireJSONBody 强制 application/json、
+  login/activate 独立桶、XFF 只在可信反代+回环启用）；⑫ 登录失败清理
+  （wasShell 在 Login 前快照，B24-01 契约保真）；⑬ 路由（/api/ 通配 404 精确注册、
+  SpaHandler path.Clean 防穿越 + fs.Sub 内不越界）；⑭ 时间基准（三处探测时间戳
+  nowAligned() 统一、markRateLimitedLocked 与读侧同源、relogin 族本地钟内部自洽）；
+  ⑮ open_time 契约（FormatOpenTime 空串零值、B21-04 前置校验整体拒绝、reparse 零值挂起）。
+- **观察项新增 4 条（其余为历轮延续，全表见四节）**：
+  - writeJSON 不写 HTTP 状态码：业务错误恒 200 + body code（B7-C4 约定），自洽设计。
+  - m.vision.recognizer 恒 nil 伴生设计：SF_API_KEY 非空时 New 的 APIKey 兜底保 Vision，
+    无行为影响（主触发路径只在 ddddocr 部署成立，B29-01 已修）。
+  - ddddocr 识别结果不做 normalizeCaptchaText 净化（仅 VisionRecognizer 挂净化）：
+    字符集输出通常干净稳定，识别错误由 Login 提交被拒分支刷新验证码重试兜底，低风险维持观察。
+  - LocalDdddOcrRecognizer 子进程 stderr 回传可能含本机 Python 路径：仅本地引擎报错
+    路径出现，泄露面极小，维持观察。
+  - 学生账号名与 adminName 撞名：学号恰等于 XUANKE_ADMIN_NAME 时教务登录被管理口令
+    分支抢先（密码不符报"管理口令错误"），管理员改名可解，边缘场景维持观察。
+  - gateWait/gateCond 最坏等待 60s：挂起的是重登 goroutine，不阻塞调度器主循环，有界可接受。
+
 ## 已核无缺陷（后端，主 gate 复核 + review29-backend 详核）
 - 删除账号三链竞态闭环：B26-01 memory-first 顺序（Accounts.Remove → PurgeAccount →
   Store.DeleteAccount → Sessions.RevokeAccount）下，PurgeAccount 持 s.mu 天然排在任何

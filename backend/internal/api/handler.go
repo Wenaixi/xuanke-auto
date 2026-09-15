@@ -222,27 +222,9 @@ func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与 B15-M4 在 handleSetTargets
 	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在 B15-M4 路径整体拒绝，
 	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
-	// B26-02（第 26 轮）：管理员透传的账号必须真实存在（凭据表有记录）——此前 `?account=`
-	// 任意串（typo/已删账号残留 URL 参数）静默走 ElectivesSnapshotFor 的全局帧回退路径，
-	// 返回全局课程数据但行为不可区分（B22-01 只对有目标账号返回 nil,false；无目标账号仍
-	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与 B15-M4 在 handleSetTargets
-	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在 B15-M4 路径整体拒绝，
-	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
-			creds, err := d.Store.LoadCredentials()
-			if err != nil {
-				writeJSON(w, 1, nil, "读取凭据失败: "+err.Error())
-				return
-			}
-			found := false
-			for _, c := range creds {
-				if c.Account == q {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !d.accountExists(q) {
 				writeJSON(w, 1, nil, "账号不存在，无法查看课程")
 				return
 			}

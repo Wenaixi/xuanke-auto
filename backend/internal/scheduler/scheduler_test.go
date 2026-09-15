@@ -2236,6 +2236,29 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 	if len(data.Publishes) == 0 || data.Publishes[0].PublishID != 1 {
 		t.Fatal("ElectivesSnapshotFor 返回的不是该账号专属帧（年级串线）")
 	}
+
+	// 断言 3（B28-01）：无目标账号的专属帧"存在但已过期"，而全局帧恰被其他账号刷新为
+	// 新鲜帧时，必须返回 false 触发本账号 ProbeForAccount 刷新——旧实现回退这份**错年级**
+	// 全局帧且 ok=true，读取方（handleElectives）不触发刷新，浏览者持续看到别的年级课程。
+	// 场景：browse 账号"student1"（无目标）专属帧高二（PublishID=1）已过期 41s，全局帧
+	// 高三（PublishID=9）新鲜。
+	s.mu.Lock()
+	s.acctData["student1"] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
+		{PublishID: 1, PublishName: "高二年体育", InDateRange: false, Classes: []zhidao.Class{
+			{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
+		}},
+	}}
+	s.acctDataAt["student1"] = time.Now().Add(-(snapshotTTL + time.Second))
+	s.lastData = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
+		{PublishID: 9, PublishName: "高三体育", InDateRange: false, Classes: []zhidao.Class{
+			{ID: 61999, CourseName: "高三排球", SelectedCount: 0, MaxCount: 36},
+		}},
+	}}
+	s.lastDataAt = time.Now()
+	s.mu.Unlock()
+	if _, ok := s.ElectivesSnapshotFor("student1"); ok {
+		t.Fatal("无目标账号专属帧已过期时不得回退新鲜全局帧（错年级数据串线 + 不触发本账号刷新）")
+	}
 }
 
 // TestReloginBackoffWindowBlocksManualTriggers B9-01：连续失败进入指数退避后，

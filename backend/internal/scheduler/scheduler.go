@@ -635,9 +635,17 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 	}
 	if acct != "" && s.acctData != nil {
 		if data, ok := s.acctData[acct]; ok && data != nil {
+			// 有专属帧：新鲜即返回；已过期则返回 (nil,false) 让读取方走 ProbeForAccount
+			// 真取该账号最新年级帧——否则此刻全局 lastData 恰被其他账号（如首个注册账号
+			// m.order[0]）刷新为新鲜帧时，下面会回退这份**错年级**数据且 ok=true，读取方
+			// 不会触发本账号刷新，浏览者持续看到别的年级课程（B22-01 标称
+			// "无目标账号回退全局帧"的"快、无网络开销"只对**从未有过专属帧**的纯浏览成立；
+			// 对曾有过专属帧但已过期的中间态，回退并不比刷新快，且数据是错年级）。
+			// 修复（B28-01）：过期专属帧 → 必须返回 false 触发刷新，绝不回退全局帧。
 			if time.Since(s.acctDataAt[acct]) <= snapshotTTL {
 				return data, true
 			}
+			return nil, false
 		}
 	}
 	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {

@@ -43,6 +43,18 @@ type VisionConfig struct {
 	recognizer CaptchaRecognizer
 }
 
+// WithRecognizer 返回携带指定识别引擎的配置副本（Accounts.Manager 模板引擎注入用，
+// recognizer 字段未导出，跨包只能经导出的读写访问器操作）。
+func (v VisionConfig) WithRecognizer(r CaptchaRecognizer) VisionConfig {
+	v.recognizer = r
+	return v
+}
+
+// Recognizer 返回配置中携带的识别引擎（nil=未注入）。
+func (v VisionConfig) Recognizer() CaptchaRecognizer {
+	return v.recognizer
+}
+
 // Client 至道平台 API 客户端。
 // 所有请求在 URL 后附加 idToken 参数；token 失效（code=-1）时用保存的账密自动重登（最多一次）。
 type Client struct {
@@ -164,6 +176,13 @@ func (c *Client) SetRecognizer(r CaptchaRecognizer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.visionCfg.recognizer = r
+}
+
+// CurrentRecognizer 返回当前生效的验证码识别引擎（测试/诊断读取；nil=无引擎）。
+func (c *Client) CurrentRecognizer() CaptchaRecognizer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.visionCfg.recognizer
 }
 
 // Token 返回当前 token。

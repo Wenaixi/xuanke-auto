@@ -36,6 +36,20 @@ func (p *persistentStore) DeleteRefused(acct string) error {
 	return nil
 }
 
+// DeleteRefusedClass 真实语义的单课删除：手动重报成功后只清该课退选行，
+// 其余课程与其他账号不受影响（与 SQLite DELETE ... AND class_id=? 对齐）。
+func (p *persistentStore) DeleteRefusedClass(acct string, classID int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ids := p.refused[acct]; ids != nil {
+		delete(ids, classID)
+		if len(ids) == 0 {
+			delete(p.refused, acct)
+		}
+	}
+	return nil
+}
+
 func (p *persistentStore) LoadRefused() (map[string][]int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -97,6 +111,39 @@ func TestRefusedNeverResubmitted(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("重新设为目标后自动引擎应在下个提交窗口恢复该课程")
+}
+
+// TestManualReselectClearsRefusedRow 手动重报成功必须清库内单条 refused 行（重启后不残留假退选）：
+// 用户手动报名 C 成功 → 手动退选 C（SaveRefused 落库行）→ 手动重报 C 成功 → 库内该行必须删除。
+// 否则重启恢复序 RestoreTargets（不清 refused）+ LoadRefused + RestoreRefused 把这门已报名成功的
+// 课程恢复成"已手动退选（自动引擎不再接管）"——状态文案误导 + spawnChain 永久跳过（旧实现
+// MarkDone 只 delete 内存 refused，库行残留即本缺口）。用 persistentStore 忠实复刻 SQLite 语义。
+func TestManualReselectClearsRefusedRow(t *testing.T) {
+	fc := newFakeClient(true)
+	st := newPersistentStore()
+	s := New(&fakeAccts{c: fc}, st, time.Now().Add(-time.Hour), time.Hour)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 用户手动退选 C：SaveRefused 落库行
+	if err := s.RemoveDone("acct1", 61115); err != nil {
+		t.Fatalf("RemoveDone 失败: %v", err)
+	}
+	got, _ := st.LoadRefused()
+	if len(got["acct1"]) != 1 || got["acct1"][0] != 61115 {
+		t.Fatalf("RemoveDone 后 refused 表应有 61115，实际 %+v", got)
+	}
+
+	// 用户手动重报 C 成功：MarkDone 必须清该课库内退选行（其余课程不受影响）
+	if err := s.MarkDone("acct1", 61115, "健美操", "选课成功"); err != nil {
+		t.Fatalf("MarkDone 失败: %v", err)
+	}
+	got, _ = st.LoadRefused()
+	if len(got["acct1"]) != 0 {
+		t.Fatalf("手动重报成功后库内 refused 行必须清空（重启后该课不得恢复成已手动退选），实际 %+v", got)
+	}
+	if !s.doneHas("acct1", 61115) || s.refusedHas("acct1", 61115) {
+		t.Fatal("MarkDone 后内存态 done 应置位、refused 应解除")
+	}
 }
 
 // TestRefusedRestartOrderRealDB B10-01：用真实 SQLite 验证重启恢复顺序——

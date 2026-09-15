@@ -50,6 +50,7 @@ func (f *fakeStore) SaveRefused(acct string, classID int) error {
 func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
 func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
+func (f *fakeStore) DeleteRefusedClass(acct string, classID int) error { return nil }
 
 // failStore：带失败开关的 Store——SQLite 落库失败时调度器必须把错误上报/记日志，
 // 静默吞错会让"内存已写、库行没落上"的半态在重启后破坏恢复契约

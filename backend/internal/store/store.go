@@ -168,6 +168,14 @@ func (s *Store) DeleteRefused(acct string) error {
 	return err
 }
 
+// DeleteRefusedClass 删除某账号某课程的单条已退选记录——手动重报成功后同步清库行，
+// 否则库内残留会让重启恢复序 LoadRefused+RestoreRefused 把已报名成功的课程恢复成
+// "已手动退选"，自动引擎永久跳过该课（与内存侧 MarkDone 解除 refused 必须对称）。
+func (s *Store) DeleteRefusedClass(acct string, classID int) error {
+	_, err := s.db.Exec("DELETE FROM refused WHERE account = ? AND class_id = ?", acct, classID)
+	return err
+}
+
 // LoadRefused 读取全部已退选记录（map[账号][]classID，重启恢复用，B9-02）。
 func (s *Store) LoadRefused() (map[string][]int, error) {
 	rows, err := s.db.Query("SELECT account, class_id FROM refused")

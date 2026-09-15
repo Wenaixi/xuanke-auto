@@ -133,6 +133,7 @@ type Store interface {
 	DeleteSuccess(acct string, classID int) error // B8-M2：手动退选后删除 success 行
 	SaveRefused(acct string, classID int) error   // B9-02：手动退选记库，重启后自动引擎仍不抢回
 	DeleteRefused(acct string) error              // B9-02：重设目标清空该账号全部退选标记
+	DeleteRefusedClass(acct string, classID int) error // 手动重报成功清单条退选行（与内存侧解除对称）
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -1713,6 +1714,15 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 	// 手动重选成功但未重设目标时 refused 卡死，窗口重开后自动引擎永久跳过该课）。
 	if s.refused[acct] != nil {
 		delete(s.refused[acct], classID)
+		// 库内 refused 行同步清除：删除只清内存标记是半套——手动退选落库的 refused
+		// 行残留时，重启恢复序 RestoreTargets（不清 refused）+ LoadRefused + RestoreRefused
+		// 会把这门已报名成功的课恢复成"已手动退选（自动引擎不再接管）"假象（状态文案误导
+		// + spawnChain 永久跳过）。落库失败记录在案供运维排查（B33-01 家族零吞错规范）。
+		if s.store != nil {
+			if err := s.store.DeleteRefusedClass(acct, classID); err != nil {
+				log.Printf("[scheduler] 账号 %s 课程 %d 手动重报清退选记录落库失败（重启后该课会被恢复成'已手动退选'）: %v", acct, classID, err)
+			}
+		}
 	}
 	if s.inflight[acct] != nil {
 		delete(s.inflight[acct], classID)

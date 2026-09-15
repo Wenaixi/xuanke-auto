@@ -106,6 +106,38 @@ func TestRefusedRecords(t *testing.T) {
 	}
 }
 
+// TestDeleteRefusedClassOnlyRemovesOneClass 手动重报成功只清除该课程的单条退选行：
+// DeleteRefusedClass(acct, classID) 必须只删目标课程、保留该账号其余退选课程与其他
+// 账号的全部记录（与整账号 DeleteRefused 的"重设目标语义"正交）。
+func TestDeleteRefusedClassOnlyRemovesOneClass(t *testing.T) {
+	s := openTestStore(t)
+	for _, cid := range []int{61115, 61205} {
+		if err := s.SaveRefused("acct1", cid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SaveRefused("acct2", 61276); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteRefusedClass("acct1", 61115); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadRefused()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["acct1"]) != 1 || got["acct1"][0] != 61205 {
+		t.Fatalf("DeleteRefusedClass 应只删 61115，acct1 剩 %+v", got["acct1"])
+	}
+	if len(got["acct2"]) != 1 || got["acct2"][0] != 61276 {
+		t.Fatalf("DeleteRefusedClass 不得影响其他账号: %+v", got["acct2"])
+	}
+	// 删除不存在的课程幂等不报错
+	if err := s.DeleteRefusedClass("acct1", 99999); err != nil {
+		t.Fatalf("删除不存在课程应幂等返回 nil: %v", err)
+	}
+}
+
 func TestTargetsByAccount(t *testing.T) {
 	s := openTestStore(t)
 	if err := s.SaveAccountName("acct1"); err != nil {

@@ -1092,6 +1092,67 @@ func TestAdminElectivesUnknownAccountRejects(t *testing.T) {
 	}
 }
 
+// TestAdminElectiveSelectUnknownAccountRejects B27-01（第 27 轮）：管理员 ?account= 透传
+// 手动报名/退选，账号必须真实存在（凭据表有记录）——与 B15-M4（目标写）/B26-02（课程读）
+// 同款判据，手动操作两路（select/exit）对称补齐。此前 override 分支只 `acct = q` 放行，
+// 幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable 放行 →
+// ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案；凭据表查无此账号 →
+// 必须明确"账号不存在"，绝不让操作假装到达平台。反向防线：真实账号（authenticateDirect
+// 已 LoginByPassword 落凭据）透传报名仍正常放行。
+func TestAdminElectiveSelectUnknownAccountRejects(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := d.sessions.CreateAdmin("admin")
+	// 1. 幽灵账号透传报名 → 必须拒绝"账号不存在"（修复前返回"账号会话未建立或未登录"）
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select?account=nonexistent",
+		`{"class_id":61115,"course_name":"健美操"}`, adminTok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("管理员对不存在的账号报名应被拒绝: %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "账号不存在") {
+		t.Fatalf("拒绝文案必须是'账号不存在'而非误导的会话文案: %v", j)
+	}
+	// 2. 幽灵账号透传退选同样拒绝
+	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select/exit?account=nonexistent",
+		`{"class_id":61115,"course_name":"健美操"}`, adminTok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("管理员对不存在的账号退选应被拒绝: %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "账号不存在") {
+		t.Fatalf("退选拒绝文案必须是'账号不存在': %v", j)
+	}
+	// 3. 反向防线：真实账号（authenticateDirect 落凭据）透传报名放行
+	authenticateDirect(t, d, "acct1")
+	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select?account=acct1",
+		`{"class_id":61115,"course_name":"健美操"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("真实账号透传报名应放行（B27-01 不得误伤）: %d %v", code, j)
+	}
+}
+
+// TestAdminStateUnknownAccountRejects B27-02（第 27 轮）：管理员 ?account= 透传读取状态，
+// 账号必须真实存在。此前 handleState override 分支任意串放行，StateForAccount(ghost) 返回
+// 空 Courses + token_valid=true + window 状态——与"账号存在但确实无目标"返回形状完全相同，
+// 管理员无法分辨"账号不存在"与"账号没目标"（B26-02 修掉的假装成功的轻量版）。凭据表
+// 查无此账号 → 明确"账号不存在"；真实账号透传不受影响。
+func TestAdminStateUnknownAccountRejects(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := d.sessions.CreateAdmin("admin")
+	// 1. 幽灵账号透传状态 → 必须拒绝（修复前 code=0 + 空 courses 假象）
+	code, j := doJSONAuth(t, d.api, "GET", "/api/state?account=nonexistent", "", adminTok)
+	if code != 200 || j["code"].(float64) == 0 {
+		t.Fatalf("管理员对不存在的账号读取状态应被拒绝: %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "账号不存在") {
+		t.Fatalf("拒绝文案必须是'账号不存在': %v", j)
+	}
+	// 2. 反向防线：真实账号透传状态放行
+	authenticateDirect(t, d, "acct1")
+	code, j = doJSONAuth(t, d.api, "GET", "/api/state?account=acct1", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("真实账号透传状态应放行（B27-02 不得误伤）: %d %v", code, j)
+	}
+}
+
 // TestSetTargetsBounds 目标数量与范围必须受校验（n2）：
 // 超过 100 门 / 非法 publish_id / 非法 priority 一律拒绝，且不得入库。
 func TestSetTargetsBounds(t *testing.T) {

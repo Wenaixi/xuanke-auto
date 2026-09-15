@@ -285,8 +285,17 @@ type ElectiveActionRequest struct {
 // handleElectiveSelect 手动报名指定课程 (POST /api/electives/select)
 func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	// B27-01（第 27 轮）：管理员透传的手动报名/退选账号必须真实存在——B15-M4（目标写）/
+	// B26-02（课程读）对 ?account= 任意串已凭据表整体拒绝，手动操作两路是同一契约的下沉
+	// 缺口：幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable
+	// 放行 → ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案。凭据表 = "确实登录过"
+	// 的更强真理源（同 B26-02 判据），查无此账号 → 明确拒绝，绝不让操作假装到达平台。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
+			if !d.accountExists(q) {
+				writeJSON(w, 1, nil, "账号不存在，无法执行报名操作")
+				return
+			}
 			acct = q
 		}
 	}
@@ -353,8 +362,13 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 // handleElectiveExit 手动退选指定课程 (POST /api/electives/select/exit)
 func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	// B27-01（第 27 轮）：与 handleElectiveSelect 同款凭据表校验，退选路径对称补齐。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
+			if !d.accountExists(q) {
+				writeJSON(w, 1, nil, "账号不存在，无法执行退选操作")
+				return
+			}
 			acct = q
 		}
 	}
@@ -503,8 +517,16 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 // handleState 调度器状态（按会话账号过滤；仅管理员会话可跨账号）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
+	// B27-02（第 27 轮）：管理员透传状态读取的账号必须真实存在——此前任意串放行，
+	// StateForAccount(ghost) 返回空 Courses + token_valid=true 假象，管理员无法分辨
+	// "账号不存在"与"账号没目标"（B26-02 修掉的"全局帧假装成功"的轻量版）。凭据表
+	// 查无此账号 → 明确拒绝；与 B27-01 的?account= 契约全局对齐。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
+			if !d.accountExists(q) {
+				writeJSON(w, 1, nil, "账号不存在，无法读取状态")
+				return
+			}
 			acct = q
 		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
 			acct = targetAccts[0]
@@ -1032,6 +1054,22 @@ func sessionToken(r *http.Request) string {
 // 仅管理员会话（会话身份 Admin:true）可穿透，普通会话一律只操作自己绑定账号。
 func (d *Deps) allowAccountOverride(r *http.Request) bool {
 	return d.Sessions.IsAdminToken(sessionToken(r))
+}
+
+// accountExists 校验账号在凭据表真实存在（LoadCredentials 逐账号比对）。
+// 凭据表由所有登录路径写（LoginByPassword/issueSession），是"确实登录过"的更强真理源。
+// B15-M4（目标写）/B26-02（课程读）判据同源，B27-01/02（手动报名退选 + 状态读）复用。
+func (d *Deps) accountExists(acct string) bool {
+	creds, err := d.Store.LoadCredentials()
+	if err != nil {
+		return false
+	}
+	for _, c := range creds {
+		if c.Account == acct {
+			return true
+		}
+	}
+	return false
 }
 
 // requireAuth 会话校验中间件：无/无效令牌返回 401。

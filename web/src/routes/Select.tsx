@@ -141,6 +141,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 第 4 轮 rev>0 守卫保护的"用户清空目标后轮询旧 courses 再次回填撤销清空"语义
   // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见 166 行 effect）。
   const echoedRef = useRef(false)
+  // 回显完成状态（state 而非 ref）：防抖 effect 依赖必须能感知"回显流程完成"以驱动
+  // 重跑——ref 变化不触发 effect。仅由回显 effect 置位一次，作为守卫拦下改动的自愈
+  // 信号（见防抖回调内的回显未完成守卫与 echo effect 的空 courses 分支）。
+  const [echoDone, setEchoDone] = useState(false)
   // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
   // 注意：F7 修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
@@ -190,7 +194,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   useEffect(() => {
     if (echoedRef.current) return
     const courses = stateData?.courses
-    if (!courses || courses.length === 0) return
+    if (!courses || courses.length === 0) {
+      // /state 首帧到达且确证后端无旧目标（courses 空）：echoed 完成——否则全程无旧
+      // 目标的账号用户改动会被防抖回显守卫永久拦下（置脏无自愈信号）。清空语义/全
+      // 清空守卫不受影响（echoDone 只做放行信号，不写 selected）。
+      echoedRef.current = true
+      setEchoDone(true)
+      return
+    }
     // effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
     // 与回显合并同款构建中断陷阱——绝不能反向引用 effect 之后声明的 publishes。
     const pubs = data?.publishes ?? []
@@ -218,6 +229,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return next
     })
     echoedRef.current = true
+    setEchoDone(true)
   }, [stateData, data, rev])
 
   const publishes = data?.publishes ?? []
@@ -559,7 +571,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       void saveNow()
     }, 400)
     return () => clearTimeout(timer)
-  }, [rev, selected, sessionToken, toast, hasPublishes])
+    // echoDone：回显完成驱动 effect 重跑——场景 B（后端确证无旧目标，courses 空）
+    // 回显 effect 只置 echoedRef/echoDone、不改 selected，若无此依赖置脏的改动永不
+    // 重试落库；非空合并场景由 selected 变化驱动（双路并保）。回显只完成一次，不会
+    // 重置 400ms 防抖窗口。
+  }, [rev, selected, sessionToken, toast, hasPublishes, echoDone])
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 

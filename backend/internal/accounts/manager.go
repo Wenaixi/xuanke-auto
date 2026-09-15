@@ -197,6 +197,12 @@ func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
 // 管理员入口（换绑定新账密）不受全局重登闸门约束，仍走平台登录接口。
 func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (string, error)) (string, error) {
 	c := m.ensure(acct)
+	// B24-01（第 24 轮）：判别本次是不是"纯新建的空壳"再决定失败清理——
+	// 需在 Login 前快照，因为 Login 成功分支会 SetCredentials 写 token，失败返回时
+	// 无法再区分"本次新建"与"此前已持有效 token 的既有客户端"（B23-02 的清理无判别
+	// 直接摘除，会误删后者：自动抢课静默停摆 + 该账号选课大厅持续报错，直到手动
+	// 重新登录成功——黄金期手滑输错密码即全程失联）。
+	wasShell := c.Token() == ""
 	token, err := c.Login(acct, password)
 	if err != nil {
 		// B23-02（第 23 轮）：登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
@@ -204,16 +210,20 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 		// AnyClientWithAccount 恒返回 code=-1 ErrUnauthorized：调度器 probe() 主体每次探测
 		// 都触发 maybeRelogin("order[0]") → ReloginIfNeeded 报"未登录且无保存账密"、reloginFail
 		// 递增，lastData 永不刷新，未配置目标的全校浏览视图持续报错，直到该账号成功登录。
-		// 失败即把残留空壳从注册表摘除（next tick 不再作为 AnyClient 探测载体）。
-		m.mu.Lock()
-		delete(m.clients, acct)
-		for i, a := range m.order {
-			if a == acct {
-				m.order = append(m.order[:i], m.order[i+1:]...)
-				break
+		// 失败只摘除"本次新建的空壳"（原注册表里无此账号）；若注册表里已躺着持有效 token
+		// 的工作客户端（重启 Restore/此前登录成功注册），本次失败绝不误删——旧 token 是否
+		// 失效交给调度器现有失效检测 + 自动重登链处理，远优于直接失联。
+		if wasShell {
+			m.mu.Lock()
+			delete(m.clients, acct)
+			for i, a := range m.order {
+				if a == acct {
+					m.order = append(m.order[:i], m.order[i+1:]...)
+					break
+				}
 			}
+			m.mu.Unlock()
 		}
-		m.mu.Unlock()
 		return "", err
 	}
 	if m.st != nil && encrypt != nil {

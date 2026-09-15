@@ -44,7 +44,11 @@ function priorityName(p: number): string {
 export default function Select({ account, sessionToken, onDone }: Props) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  // M29-01（第 29 轮）：在飞操作从单值改 Set<number> 按课程 id 独立跟踪——
+  // 单值 actionLoading 被并发不同课程操作互相覆盖（A 在飞时点 B 会覆盖 A 的标记，
+  // A 的 finally 清 null 又把 B 的在飞态抹掉，用户再点 B 发第三发请求被后端
+  // TryAcquireSubmit 拒绝 → 假失败 toast 在"不同课程"维度复发）。
+  const [actionLoading, setActionLoading] = useState<ReadonlySet<number>>(new Set())
   const [exitModalClass, setExitModalClass] = useState<ClassItem | null>(null)
 
   const { data, isLoading, isError, error } = useQuery({
@@ -72,8 +76,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 同款短路：disabled 渲染落地前双击/连点会发出两个并发报名，后端 TryAcquireSubmit
     // 拒绝第二个（"该课程正在提交中"），但第一个已 MarkDone 成功、第二个的 finally 仍
     // invalidateQueries 造成假失败 toast；退选同源。入口先查在飞标记即停。
-    if (actionLoading === c.id) return
-    setActionLoading(c.id)
+    // M29-01（第 29 轮）：守卫与置位改用 Set 按课程独立跟踪，只拦"本课程在飞"。
+    if (actionLoading.has(c.id)) return
+    setActionLoading((prev) => new Set(prev).add(c.id))
     try {
       const res = await selectElective(c.id, sessionToken, account, c.course_name)
       toast({ title: "报名成功", description: res.msg || "已成功选报该课程", variant: "success" })
@@ -85,7 +90,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 否则前端显示"还可报名"实则已满，用户看到的是过期数据。
       queryClient.invalidateQueries({ queryKey: ["electives"] })
       queryClient.invalidateQueries({ queryKey: ["state"] })
-      setActionLoading(null)
+      // M29-01：函数式清除只删自己的 id——绝不抹掉其他仍在飞的课程标记。
+      setActionLoading((prev) => {
+        const n = new Set(prev)
+        n.delete(c.id)
+        return n
+      })
     }
   }
 
@@ -93,8 +103,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const handleConfirmExit = async (c: ClassItem) => {
     // F26-03（第 26 轮）：与 handleSelectClass 同款在飞幂等守卫（双击退选第二个请求
     // 会被后端 TryAcquireSubmit 拒、假失败 toast）。
-    if (actionLoading === c.id) return
-    setActionLoading(c.id)
+    // M29-01（第 29 轮）：与报名同款 Set 在飞跟踪——退选/报名并发互不覆盖。
+    if (actionLoading.has(c.id)) return
+    setActionLoading((prev) => new Set(prev).add(c.id))
     try {
       const res = await exitElective(c.id, sessionToken, account)
       toast({ title: "退选成功", description: res.msg || "已成功退选该课程", variant: "success" })
@@ -104,7 +115,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     } finally {
       queryClient.invalidateQueries({ queryKey: ["electives"] })
       queryClient.invalidateQueries({ queryKey: ["state"] })
-      setActionLoading(null)
+      // M29-01：与报名同款函数式清除，只删自己的退选在飞标记。
+      setActionLoading((prev) => {
+        const n = new Set(prev)
+        n.delete(c.id)
+        return n
+      })
     }
   }
 
@@ -779,25 +795,25 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      disabled={actionLoading === c.id || !c.can_select}
+                                      disabled={actionLoading.has(c.id) || !c.can_select}
                                       onClick={() => setExitModalClass(c)}
                                       title={c.title || (c.can_select ? "点击退选此课程" : "当前无法退选")}
                                       className="w-full flex items-center justify-center gap-1.5 text-xs h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 transition-colors"
                                     >
                                       <LogOut className="h-3.5 w-3.5" />
-                                      <span>{actionLoading === c.id ? "退选中..." : (c.btn_text || "退选")}</span>
+                                      <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
                                     </Button>
                                   ) : (
                                     <Button
                                       variant="primary"
                                       size="sm"
-                                      disabled={actionLoading === c.id || !c.can_select}
+                                      disabled={actionLoading.has(c.id) || !c.can_select}
                                       onClick={() => handleSelectClass(c)}
                                       title={c.title || (c.can_select ? "点击立即报名" : "不在选修报名时间范围内，无法选课！")}
                                       className="w-full flex items-center justify-center gap-1.5 text-xs h-8 disabled:opacity-40"
                                     >
                                       <Check className="h-3.5 w-3.5" />
-                                      <span>{actionLoading === c.id ? "报名中..." : (c.btn_text || "报名")}</span>
+                                      <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
                                     </Button>
                                   )}
                                   <Button
@@ -863,7 +879,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             aria-modal="true"
             aria-labelledby="exit-modal-title"
             onKeyDown={(e) => {
-              if (e.key === "Escape" && actionLoading !== exitModalClass.id) {
+              if (e.key === "Escape" && !actionLoading.has(exitModalClass.id)) {
                 setExitModalClass(null)
               }
             }}
@@ -887,7 +903,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   variant="outline"
                   size="sm"
                   onClick={() => setExitModalClass(null)}
-                  disabled={actionLoading === exitModalClass.id}
+                  disabled={actionLoading.has(exitModalClass.id)}
                   className="text-xs h-8"
                 >
                   取消
@@ -896,10 +912,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   variant="primary"
                   size="sm"
                   onClick={() => handleConfirmExit(exitModalClass)}
-                  disabled={actionLoading === exitModalClass.id}
+                  disabled={actionLoading.has(exitModalClass.id)}
                   className="text-xs h-8 bg-red-600 hover:bg-red-500 text-white border-none"
                 >
-                  {actionLoading === exitModalClass.id ? "退选中..." : "确认退选"}
+                  {actionLoading.has(exitModalClass.id) ? "退选中..." : "确认退选"}
                 </Button>
               </div>
             </div>

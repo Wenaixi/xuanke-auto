@@ -428,6 +428,24 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // （publishes 恒空）不在此列——那是 F15/F16/F17 链的刻意安全方向，等无可等，绝不
   // 强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
   const handleBack = async () => {
+    // 回显合并先行：/state 首帧晚于用户首次点击到达时（stateData 仍为 undefined），
+    // 后端旧目标尚未经回显 effect 合并进 selected——此刻直接 flush 会用当前 selected
+    // （只含用户新改动）整包 PUT 覆盖删掉后端旧目标（"添加一门"变"替换全部"）。
+    // 只有回显已完成（echoedRef 置位）或确证后端无旧目标（/state 已到且 courses 为空）
+    // 才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，flush 自然全量提交。
+    // 5s 兜底：/state 持续失败时合并永不发生，等无可等继续——flush 内假清空守卫仍拦截
+    // 发布缺席的覆盖（安全方向）。
+    if (
+      !echoedRef.current &&
+      (stateData === undefined || (stateData.courses?.length ?? 0) > 0)
+    ) {
+      const deadline = Date.now() + 5000
+      while (!echoedRef.current && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10))
+      }
+      // 等合并 effect 的 setSelected 渲染提交落地，selectedRef 同步到含旧目标的合并结果
+      await new Promise((r) => setTimeout(r, 0))
+    }
     for (let i = 0; i < 3; i++) {
       flushTargets()
       // 32-01：flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——

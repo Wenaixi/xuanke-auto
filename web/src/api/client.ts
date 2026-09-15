@@ -31,13 +31,13 @@ export async function api<T>(
   if (session) headers.Authorization = `Bearer ${session}`
   Object.assign(headers, extraHeaders ?? {})
   // 20 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不至于无限转圈（MAJOR-H 配套）。
-  // F10-04（第 10 轮）：注释原文写"2 秒"而实现为 20 秒，行为与注释分叉。保持 20 秒——
+  // F10-04：注释原文写"2 秒"而实现为 20 秒，行为与注释分叉。保持 20 秒——
   // 本 api() 是全站共用通道，/electives 大列表 GET 在开窗黄金期校园网下响应偏慢，
   // 收紧到 2 秒会掐断大列表刷新，在最关键的时刻引入回归；20 秒对"不无限转圈"的本意
   // 依然成立（abort 兜底），目标保存挂了还有指数退避重发兜底。
   // M-10（第 3 轮）：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
   // 否则用兜底超时信号；此前 `...rest` 会把 ctrl.signal 被调用方 signal 静默覆盖。
-  // F7-09（第 7 轮）：abort 映射为友好文案——此前原生 AbortError("This operation was
+  // F7-09：abort 映射为友好文案——此前原生 AbortError("This operation was
   // aborted") 直接进 toast，用户看不懂。
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
@@ -51,7 +51,7 @@ export async function api<T>(
     }
     if (j.code === 401) {
       // 会话过期：广播事件，附上「发起请求的会话令牌 + URL 穿透目标账号」。
-      // F10-05（第 10 轮）：session 恒为 401 的真实主体，account 只作展示线索——
+      // F10-05：session 恒为 401 的真实主体，account 只作展示线索——
       // 管理员代看学生大厅时 URL account 是学生名，与失效的管理员令牌无映射；
       // 此前 account 优先导致 App 反查落空、管理员卡死在代理页。
       let account = ""

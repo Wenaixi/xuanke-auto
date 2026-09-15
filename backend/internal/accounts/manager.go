@@ -174,7 +174,7 @@ func (m *Manager) Registered() []string {
 }
 
 // SetVision 热更新全部账号客户端的验证码识别配置（管理员运行时修改立即生效）。
-// B29-01（第 29 轮）：赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
+// B29-01：赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
 // SetVision 再 applyCaptchaRecognizerFor(SetRecognizer)，若 SetVision 直接覆盖模板，
 // 两条调用之间新 ensure 的客户端会短暂拿到 nil 引擎；保留当前引擎与
 // zhidao.Client.SetVision 的"绝不挥动引擎切换"语义对齐（引擎归属 SetRecognizer）。
@@ -190,7 +190,7 @@ func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 
 // SetRecognizer 热切换全部账号客户端的验证码识别引擎（ddddocr 本地 / Vision 二选一）。
 // recognizer 为 nil 时表示"无引擎"（登录识别立即报错，直到管理员恢复配置）。
-// B29-01（第 29 轮）：同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
+// B29-01：同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
 // 当前已有客户端，m.vision 模板的 recognizer 恒为 nil：此后 ensure 新建客户端经
 // zhidao.New(m.baseURL, m.vision) 时 recognizer 拿不到引擎，默认兜底仅认 APIKey
 // （SF_API_KEY 留空的 ddddocr 部署下），新账号登录识别直接报"未配置验证码识别引擎"，
@@ -209,7 +209,7 @@ func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
 // 管理员入口（换绑定新账密）不受全局重登闸门约束，仍走平台登录接口。
 func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (string, error)) (string, error) {
 	c := m.ensure(acct)
-	// B24-01（第 24 轮）：判别本次是不是"纯新建的空壳"再决定失败清理——
+	// B24-01：判别本次是不是"纯新建的空壳"再决定失败清理——
 	// 需在 Login 前快照，因为 Login 成功分支会 SetCredentials 写 token，失败返回时
 	// 无法再区分"本次新建"与"此前已持有效 token 的既有客户端"（B23-02 的清理无判别
 	// 直接摘除，会误删后者：自动抢课静默停摆 + 该账号选课大厅持续报错，直到手动
@@ -217,7 +217,7 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 	wasShell := c.Token() == ""
 	token, err := c.Login(acct, password)
 	if err != nil {
-		// B23-02（第 23 轮）：登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
+		// B23-02：登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
 		// 账号写入注册表（clients+order 首位），但空 token（无账密）客户端对 FindElectives/
 		// AnyClientWithAccount 恒返回 code=-1 ErrUnauthorized：调度器 probe() 主体每次探测
 		// 都触发 maybeRelogin("order[0]") → ReloginIfNeeded 报"未登录且无保存账密"、reloginFail

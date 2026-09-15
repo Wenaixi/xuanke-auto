@@ -551,7 +551,7 @@ func TestFormatOpenTime(t *testing.T) {
 	}
 }
 
-// TestFormatOpenTimeEmpty B25-01（第 25 轮）：空串 = 合法"清除开放时间"
+// TestFormatOpenTimeEmpty B25-01：空串 = 合法"清除开放时间"
 // （F7-02 契约：零值 = 解除窗口机制）。修复前 FormatOpenTime("") 报"开放时间格式
 // 错误"——管理员 PUT open_time=""（合法清空）落库 settings 后重启，main.go:116
 // log.Fatal 拒绝启动，服务永久停摆（只能手工改 DB 删 settings 行）。修复后空串
@@ -1455,7 +1455,7 @@ func TestWindowClosedState(t *testing.T) {
 	}
 }
 
-// TestWindowClosedTransitionStateGrace B26-03（第 26 轮）：主判据（B18-M1）补"已过开窗点
+// TestWindowClosedTransitionStateGrace B26-03：主判据（B18-M1）补"已过开窗点
 // 10s 裕量"——与 B21-02 给 EmptyProbeRuns 入账的 10s 裕量对称。开窗确证过（prevOpened=true）
 // 后，平台短暂返回空快照（数据刷新/切学期过渡态，F7-01 记录的预清空现象）时，旧判据
 // `now.After(open)` 在开窗点刚过就置 WindowClosed=true → tick 提交守卫挂起提交 + 探测降回
@@ -2095,7 +2095,7 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 // 空 → 下轮重打，probeIntervalFor 恒 2s 高频探测，防轰炸契约闭环缺口。
 // 量变判据：EmptyProbeRuns≥3 且从未开窗且开放时间已过 → 视同关闭；开窗/非空快照/未到
 // 开放时间即归零自愈（不误伤开窗前正常空快照的临门盯守）。
-// B21-02（第 21 轮）：入账增量再加"已过开窗点 10s 裕量"——开窗瞬间平台预清空 publishes
+// B21-02：入账增量再加"已过开窗点 10s 裕量"——开窗瞬间平台预清空 publishes
 // （F7-01 真实现象）时，旧判据会在黄金期误挂起；补这段过渡期错开，真实窗口开启后连续
 // 空快照才确证幽灵窗口。
 func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
@@ -2173,7 +2173,7 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 // 判定"幽灵窗口已关闭"（B19-01 时钟兜底 + B21-01 使其真实可达）：packaged 默认
 // open_time 已过 + 平台空快照 + syncFailStreak 持续累计 ≥3，WindowClosed() 必须为 true
 // （tick 守卫挂起提交 + 探测降回 30s），自愈由时钟成功恢复（streak 归零）提供。
-// B22-02（第 22 轮）：测试改为用真实 maybeSyncClock 让 streak 真实累计到 3——
+// B22-02：测试改为用真实 maybeSyncClock 让 streak 真实累计到 3——
 // 此前手动注入 3 是恒假绿形态（B21-01 死代码实证的对应测试），现验证判据真实可达。
 // maybeSyncClock 每次失败后落地 lastSyncFailAt（30s 退避）且 syncing 复位在异步
 // goroutine 内，故每次发起前清退避、发起后轮询等 syncing 落地，模拟三次独立失败。

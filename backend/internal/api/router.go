@@ -147,7 +147,11 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 		requireAdminSession(d, d.handleAdminAccounts)(w, r)
 	})
 	mux.HandleFunc("DELETE /api/admin/accounts", func(w http.ResponseWriter, r *http.Request) {
-		requireAdminSession(d, requireJSONBody(d.handleAdminDeleteAccount))(w, r)
+		// 与 codes 的 DELETE 对称——账号删除同为"DESTROY + 空 body 合法"的 REST 语义，
+		// 标准客户端 curl/Postman/脚本 DELETE 默认无 body（Content-Type 缺失）→
+		// requireJSONBody 会 403 拒。去掉 JSON 门，空 body 由 handler 解码失败返回
+		// 明确业务错误；前端始终带 JSON body 不受影响。
+		requireAdminSession(d, d.handleAdminDeleteAccount)(w, r)
 	})
 	mux.HandleFunc("GET /api/admin/logs", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminLogs)(w, r)

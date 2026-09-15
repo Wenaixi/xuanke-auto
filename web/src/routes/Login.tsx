@@ -29,7 +29,7 @@ export default function Login({ onLogin }: Props) {
   const [activateError, setActivateError] = useState("")
 
   const submit = async () => {
-    // F19-02（第 19 轮）：提交入口先查进行中标记——按钮 disabled 靠 React 状态渲染
+    // F19-02：提交入口先查进行中标记——按钮 disabled 靠 React 状态渲染
     // 落地有延迟，连按两次 Enter/快速双击可在 `disabled` 生效前发出两个重复登录请求：
     // 教务多份并发登录会互相挤掉会话（旧 token 失效），且验证码识别并发放大平台限流
     // 压力。loading 本身就是"上一发在飞"的可靠判据，入口幂等短路。
@@ -62,7 +62,7 @@ export default function Login({ onLogin }: Props) {
   }
 
   const activate = async () => {
-    // F21-04（第 21 轮）：激活入口补幂等守卫——与 submit() 的 F19-02 `if (loading) return`
+    // F21-04：激活入口补幂等守卫——与 submit() 的 F19-02 `if (loading) return`
     // 对称：激活按钮 disabled 依赖 React 渲染落地有延迟，连按两次可在 disabled 生效前
     // 发出两个重复激活请求（后到的响应处理 onLogin 会把会话挤成旧值）。
     if (activating) return
@@ -213,7 +213,7 @@ export default function Login({ onLogin }: Props) {
       </div>
 
       {/* 激活码输入模态框（登录返回 1001 时弹出） */}
-      {/* F7-03（第 7 轮）：裸 div 补无障碍语义——role=dialog/aria-modal/aria-labelledby/
+      {/* F7-03：裸 div 补无障碍语义——role=dialog/aria-modal/aria-labelledby/
           Esc 关闭回归键盘可达性（此前背景表单可 Tab 穿出、读屏不识别对话语义）。
           完整焦点陷阱迁移到 Radix Dialog 属 F6-02 后续候选，这里先补最小语义门。 */}
       {pendingAccount && (
@@ -222,7 +222,7 @@ export default function Login({ onLogin }: Props) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="activate-dialog-title"
-          // F20-03（第 20 轮）：补 Esc 关闭——F7-03 注释承诺"Esc 关闭回归键盘可达性"但
+          // F20-03：补 Esc 关闭——F7-03 注释承诺"Esc 关闭回归键盘可达性"但
           // 实现从未落地（裸 div 无 keydown 处理），键盘用户只能 Tab 到"取消"按钮；
           // 与取消按钮同逻辑（清待激活账号/票据/错误），激活中不响应防误关。
           onKeyDown={(e) => {

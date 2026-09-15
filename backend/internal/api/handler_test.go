@@ -623,7 +623,7 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if msg, _ := j["msg"].(string); !strings.Contains(msg, "开放时间格式错误") {
 		t.Fatalf("无效 open_time 应返回明确格式错误，实际: %v", j)
 	}
-	// B21-04（第 21 轮）：格式非法的 open_time 混改时整体拒绝——不得让其他字段生效
+	// B21-04：格式非法的 open_time 混改时整体拒绝——不得让其他字段生效
 	// 造成"配置已更新"半假成功。混改 PUT 里故意带上一个"与当前值不同的合法新字段"
 	// vision_model=MUTANT：整体拒绝生效时它必须保持 new-model 不被应用。
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"vision_model":"MUTANT","open_time":"2026/09/14 10:00:00"}`, adminTok)
@@ -643,7 +643,7 @@ func TestAdminConfigHotReload(t *testing.T) {
 		t.Fatalf("非法 open_time 混改后原字段不得被改动，vision_model 应仍为 new-model: %v", cfgKeep)
 	}
 
-	// F7-02（第 7 轮）：空 open_time 是"显式清空开放时间"，不再静默忽略——
+	// F7-02：空 open_time 是"显式清空开放时间"，不再静默忽略——
 	// 必须真实生效（内存 + 落库 + admin config 回显全为空），调度器解除窗口机制。
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":""}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
@@ -1060,7 +1060,7 @@ func TestSetTargetsEmptyAllowed(t *testing.T) {
 	}
 }
 
-// TestAdminElectivesUnknownAccountRejects B26-02（第 26 轮）：管理员 ?account= 透传查看
+// TestAdminElectivesUnknownAccountRejects B26-02：管理员 ?account= 透传查看
 // 课程的账号必须真实存在。此前任意串（typo/残留参数）静默走 ElectivesSnapshotFor 的全局帧
 // 回退路径返回全局课程数据，管理员以为看到的就是该账号年级的课程——与 B15-M4 在
 // handleSetTargets 的"凭据表校验"判据同源但读路径缺失，写路径拒绝、读路径假装成功不对称。
@@ -1092,7 +1092,7 @@ func TestAdminElectivesUnknownAccountRejects(t *testing.T) {
 	}
 }
 
-// TestAdminElectiveSelectUnknownAccountRejects B27-01（第 27 轮）：管理员 ?account= 透传
+// TestAdminElectiveSelectUnknownAccountRejects B27-01：管理员 ?account= 透传
 // 手动报名/退选，账号必须真实存在（凭据表有记录）——与 B15-M4（目标写）/B26-02（课程读）
 // 同款判据，手动操作两路（select/exit）对称补齐。此前 override 分支只 `acct = q` 放行，
 // 幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable 放行 →
@@ -1129,7 +1129,7 @@ func TestAdminElectiveSelectUnknownAccountRejects(t *testing.T) {
 	}
 }
 
-// TestAdminStateUnknownAccountRejects B27-02（第 27 轮）：管理员 ?account= 透传读取状态，
+// TestAdminStateUnknownAccountRejects B27-02：管理员 ?account= 透传读取状态，
 // 账号必须真实存在。此前 handleState override 分支任意串放行，StateForAccount(ghost) 返回
 // 空 Courses + token_valid=true + window 状态——与"账号存在但确实无目标"返回形状完全相同，
 // 管理员无法分辨"账号不存在"与"账号没目标"（B26-02 修掉的假装成功的轻量版）。凭据表
@@ -1518,6 +1518,39 @@ func TestHandleElectivesSelectAndExit(t *testing.T) {
 	}
 }
 
+// TestAdminDeleteAccountNoBodyOK B31-01：DELETE /api/admin/accounts 无 body（标准 REST
+// 客户端 curl/Postman/脚本默认行为）必须可用——B7-M8 只给 codes 的 DELETE 放行空 body，
+// 账号删除同为"DESTROY + 空 body 合法"语义却被 requireJSONBody 门挡成 403。
+// 与 TestAdminDeleteCodeNoBodyOK 对称：空 body DELETE 应返回明确业务错误而非 403；
+// 带 body 的正常删除由既有 TestAdminDeleteAccount 覆盖。
+func TestAdminDeleteAccountNoBodyOK(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 造一个真实账号，让"空 body 被拒"与"带 body 真删"在同一函数内闭环
+	authenticateDirect(t, d, "acct1")
+	// 模拟标准 DELETE 无 body 请求（无 Content-Type）：应不再是 403——
+	// 空 body 解码失败返回明确业务错误（"请求体解析失败"），REST 客户端不被 JSON 门挡死
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/accounts", nil)
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	if rec.Code == 403 {
+		t.Fatalf("无 body DELETE 不应被 403 拒绝（B31-01 回归）：http=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var jr map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &jr); err != nil {
+		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+	}
+	if c, _ := jr["code"].(float64); c != 1 {
+		t.Fatalf("空 body DELETE 应返回明确业务错误（code=1 请求体解析失败），而非 %v", jr)
+	}
+	// 带 body 的正常删除：真删成功（清掉 acct1，保持测试幂等）
+	code, j := doJSONAdmin(t, d.api, "DELETE", "/api/admin/accounts", `{"account":"acct1"}`, adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("带 body 删除账号失败: %d %v", code, j)
+	}
+}
+
 // TestHandleElectivesSelectUnauthorizedRelogin B8-M7：手动报名命中教务 token 失效
 // （ErrUnauthorized）时，接口返回友好提示「正在自动重登」，并实际触发了调度器的
 // maybeRelogin（重登计数/失效标记状态可观测）。此前手动路径把原始报错抛给前端、
@@ -1660,7 +1693,7 @@ func TestSetTargetsUnknownAccountDoesNotFabricate(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteAccountMemoryFirst B26-01（第 26 轮）：删账号必须"先摘注册表、后清库"。
+// TestAdminDeleteAccountMemoryFirst B26-01：删账号必须"先摘注册表、后清库"。
 // 此前顺序 Store.DeleteAccount（清 6 表）→ PurgeAccount → Accounts.Remove 之间存在毫秒级
 // 空窗——在飞提交链（SelectClass 最长 15s）恰在空窗完成时做 B18-M2/B20-01 的"落库前锁内
 // 复核 ClientFor 仍存在"，客户端尚未摘除 → 复核放行 → SaveSuccess/SaveRefused 把刚清掉的

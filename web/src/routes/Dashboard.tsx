@@ -57,16 +57,16 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   const { data: logs } = useQuery({
     queryKey: ["logs", sessionToken],
     queryFn: () => api<LogEntry[]>("/logs", { session: sessionToken }),
-    // F9-05（第 9 轮）澄清：logs 降频读组件闭包 state（/state 查询数据）即新鲜——
+    // F9-05：澄清：logs 降频读组件闭包 state（/state 查询数据）即新鲜——
     // /state 每 3s 刷新（或窗口关闭降频 30s 后低频刷新），数据一变组件重渲染，
     // react-query 用最新闭包重调度本查询的轮询间隔，不存在"闭包停旧值永不降频"。
     // 窗口关闭瞬间 /state 先返回 window_closed=true，下一次日志轮询即按 30s 走。
     refetchInterval: () => (state?.window_closed ? 30000 : 3000),
   })
 
-  // F8-04（第 8 轮）：删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
+  // F8-04：删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
   // 日志列表/状态卡片不再每秒全量重建。数组改为 hooks 层的派生常量，杜绝重复计算
-  // F9-07（第 9 轮）：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
+  // F9-07：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
   // 且 effect 依赖 [] 时 interval 内读 Date.now() 而非闭包 state——绝不随 target 卡旧值。
   const courses = state?.courses ?? []
   const openTimeStr =
@@ -234,7 +234,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 </div>
                 <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">预选目标课程</span>
-                  {/* F10-06（第 10 轮）：去掉"/ 3 门"——后端上限 100 门且每发布可配多条备选，
+                  {/* F10-06：去掉"/ 3 门"——后端上限 100 门且每发布可配多条备选，
                       3 门是早期"每账号至多 3 门"旧约束残留，硬编码展示与真实能力分叉 */}
                   <span className="text-white font-mono tabular-nums">{courses.length} 门</span>
                 </div>
@@ -397,7 +397,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           <Card className="rounded-[var(--radius-lg)] glass border border-neutral-800 overflow-hidden shadow-none">
             <div className="px-4 py-2.5 border-b border-neutral-900 text-xs text-neutral-500 flex items-center justify-between font-mono">
               <span>EVENT STREAM</span>
-              {/* F7-08（第 7 轮）：后端 LoadLogs 上限 100 条，文案与真实数量对齐（此前 RECENT 50 失真） */}
+              {/* F7-08：后端 LoadLogs 上限 100 条，文案与真实数量对齐（此前 RECENT 50 失真） */}
               <span>RECENT 100</span>
             </div>
 

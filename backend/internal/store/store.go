@@ -293,7 +293,7 @@ func (s *Store) ConsumeActivationCode(code, acct string) (bool, error) {
 	if n == 0 {
 		return false, nil // 激活码不存在或次数已用尽
 	}
-	// B5-08（第 5 轮）：已激活账号绝不重复扣次。INSERT OR IGNORE 对已激活账号静默跳过，
+	// B5-08：已激活账号绝不重复扣次。INSERT OR IGNORE 对已激活账号静默跳过，
 	// 但这里仍返回 (true, nil)——次数被扣、账号无变化、前端显示"激活成功"实未生效。
 	// 先查询是否已激活：已激活直接返回 (false, nil) 且不扣次（事务回滚），
 	// 让前端提示"该账号已激活"，杜绝双扣。

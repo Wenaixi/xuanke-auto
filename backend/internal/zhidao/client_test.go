@@ -244,7 +244,7 @@ func TestReloginIfNeeded(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// B6-01（第 6 轮）：运行时登录（/api/login）后客户端内部必须有账密——自动重登
+	// B6-01：运行时登录（/api/login）后客户端内部必须有账密——自动重登
 	// ReloginIfNeeded 直接可用的回归测试。修复前：Login 成功分支不写 c.account/c.password，
 	// 依赖 SetCredentials 的旧断言（ReloginIfNeeded 手动 SetCredentials 后可用）无法覆盖
 	// 线上真实路径——每次账密登录后自动重登永远报"未登录且无保存账密"。

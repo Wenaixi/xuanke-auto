@@ -94,7 +94,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
 		return
 	}
-	// A7（第 4 轮）：账号统一 TrimSpace——与 handleActivate 同策略，杜绝"前导/尾随空格
+	// A7（历轮）：账号统一 TrimSpace——与 handleActivate 同策略，杜绝"前导/尾随空格
 	// 拼进账号名"导致管理员名匹配失败、或学生大概率教务也登录失败但仍吃一次网络往返。
 	req.Account = strings.TrimSpace(req.Account)
 	if req.Account == "" || req.Password == "" {
@@ -106,7 +106,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if req.Account == adminName {
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
 			// 口令错误：恒定时间比对已抹平字节级差异（时序安全）。
-			// n4 + A5（第 4 轮）：错误分支固定延迟 loginTimingFlat；正确分支同一延迟——
+			// n4 + A5（历轮）：错误分支固定延迟 loginTimingFlat；正确分支同一延迟——
 			// 统一"管理员名（口令对/错）vs 未知学生（教务登录网络往返）"三者的响应时延差，
 			// 管理员账号名不再能靠响应快慢（快=对、慢=错）被侧信道枚举出口令正确性。
 			time.Sleep(loginTimingFlat)
@@ -132,7 +132,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !activated {
-			// C-2（第 3 轮）：教务登录成功即颁发短期单次激活票据（绑定本次登录账号），
+			// C-2（历轮）：教务登录成功即颁发短期单次激活票据（绑定本次登录账号），
 			// 未激活账号的 /api/activate 必须携带它才能消耗激活码，杜绝持码者对任意已登录账号激活。
 			ticket := d.Sessions.CreateTicket(req.Account)
 			writeJSON(w, 1001, map[string]string{"ticket": ticket, "account": req.Account}, "该账号尚未激活，请输入激活码")
@@ -159,7 +159,7 @@ func (d *Deps) activationEnabled() bool {
 }
 
 // handleActivate 激活账号：消耗激活码并签发会话（机制关闭时拒绝）。
-// C-2 修复（第 3 轮）：激活必须携带登录颁发的短期单次激活票据，且票据绑定账号
+// C-2 修复（历轮）：激活必须携带登录颁发的短期单次激活票据，且票据绑定账号
 // 与本次激活账号必须一致——激活码从此绑定"刚通过教务登录的账号"，
 // 不再允许持码者对任意已登录过本应用的账号名激活（学号可猜测的台账外接管已封堵）。
 func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +178,7 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	acct := strings.TrimSpace(req.Account)
 	// 票据必须有效（存在、未用尽）且绑定账号与本次激活账号一致。
-	// F13-m1（第 13 轮）：票据在激活码校验失败时已在 ConsumeTicket 中被销毁（单次防重放
+	// F13-m1（历轮）：票据在激活码校验失败时已在 ConsumeTicket 中被销毁（单次防重放
 	// 的刻意决策），用户收到"激活码无效"后需重新登录拿新票据再试——绝不因此放宽票据复用。
 	if err := d.Sessions.ConsumeTicket(req.Ticket, acct); err != nil {
 		writeJSON(w, 1, nil, "激活票据无效或已过期，请重新登录后再激活")
@@ -190,7 +190,7 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		// B5-08（第 5 轮）：ConsumeActivationCode 现在对"激活码无效/用尽/该账号已激活"
+		// B5-08：ConsumeActivationCode 现在对"激活码无效/用尽/该账号已激活"
 		// 统一返回 (false, nil)——已激活账号不再扣次，文案如实区分，避免"激活成功"假象。
 		writeJSON(w, 1, nil, "激活码无效、已用尽或该账号已激活")
 		return
@@ -204,7 +204,7 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 		log.Printf("[api] 保存账号名失败: %v", err)
 	}
 	sess := d.Sessions.Create(acct)
-	// B5-01（第 5 轮）：手动登录成功即恢复调度器的 token 有效性标记——若此前自动重登
+	// B5-01：手动登录成功即恢复调度器的 token 有效性标记——若此前自动重登
 	// 失败（Vision 故障/无保存账密）导致 tokenValid 卡在失效，手动重新登录是本系统的
 	// 另一条合法恢复路径，恢复后前端 /state 立即回"有效"（不再永久"已失效·自动恢复中"）。
 	d.Sched.MarkTokenValid(acct)
@@ -216,7 +216,7 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 // 支持 ?account= 参数，允许管理员任选指定账号的专属选课大厅（仅管理员会话可穿透）。
 func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	// B26-02（第 26 轮）：管理员透传的账号必须真实存在（凭据表有记录）——此前 `?account=`
+	// B26-02：管理员透传的账号必须真实存在（凭据表有记录）——此前 `?account=`
 	// 任意串（typo/已删账号残留 URL 参数）静默走 ElectivesSnapshotFor 的全局帧回退路径，
 	// 返回全局课程数据但行为不可区分（B22-01 只对有目标账号返回 nil,false；无目标账号仍
 	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与 B15-M4 在 handleSetTargets
@@ -267,7 +267,7 @@ type ElectiveActionRequest struct {
 // handleElectiveSelect 手动报名指定课程 (POST /api/electives/select)
 func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	// B27-01（第 27 轮）：管理员透传的手动报名/退选账号必须真实存在——B15-M4（目标写）/
+	// B27-01：管理员透传的手动报名/退选账号必须真实存在——B15-M4（目标写）/
 	// B26-02（课程读）对 ?account= 任意串已凭据表整体拒绝，手动操作两路是同一契约的下沉
 	// 缺口：幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable
 	// 放行 → ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案。凭据表 = "确实登录过"
@@ -321,7 +321,7 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	// 4. 调用教务平台真实报名接口
 	msg, err := client.SelectClass(req.ClassID)
 	if err != nil {
-		// B8-M7（第 8 轮）+B9-01（第 9 轮）：token 失效时手动报名/退选同样触发自动重登——
+		// B8-M7（历轮）+B9-01：token 失效时手动报名/退选同样触发自动重登——
 		// 此前手动路径把"未登录"原文直接抛给前端，不会走 maybeRelogin，后台要等
 		// 探测/自动链发现失效才重登（UX 断裂：用户手动点时报错却无人自愈）。
 		// B9-01：只调 MaybeRelogin，绝不先调 MarkTokenValid——后者只该用于"手动登录成功"
@@ -344,7 +344,7 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 // handleElectiveExit 手动退选指定课程 (POST /api/electives/select/exit)
 func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	// B27-01（第 27 轮）：与 handleElectiveSelect 同款凭据表校验，退选路径对称补齐。
+	// B27-01：与 handleElectiveSelect 同款凭据表校验，退选路径对称补齐。
 	if d.allowAccountOverride(r) {
 		if q := r.URL.Query().Get("account"); q != "" {
 			if !d.accountExists(q) {
@@ -387,7 +387,7 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	// 3. 调用教务平台真实退选接口
 	msg, err := client.ExitClass(req.ClassID)
 	if err != nil {
-		// B8-M7（第 8 轮）+B9-01（第 9 轮，本轮 B10-02 补齐）：token 失效路径同样自动重登
+		// B8-M7/B9-01 历轮补齐：token 失效路径同样自动重登
 		// （与报名路径完全对称）——只调 MaybeRelogin，绝不先调 MarkTokenValid：后者会
 		// delete(reloginFail) 击穿重登指数退避（Vision 持续故障时退避恒从 30s 重来，
 		// 平台锁号防线失效），它只该用于"手动登录成功"的 issueSession 恢复路径。
@@ -417,14 +417,14 @@ const maxTargetsPerAccount = 100
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	if d.allowAccountOverride(r) {
-		// B20-04（第 20 轮）：与 handleElectives/handleState 对齐——管理员会话不带 ?account=
+		// B20-04：与 handleElectives/handleState 对齐——管理员会话不带 ?account=
 		// 时取"首个有目标的核心账号"兜底，绝不让目标落入管理员账号孤儿行（B15-M4 已清
 		// "任意串透传"孤儿行形态，此处是同族缺口：未传参时 acct 停在管理员名）。否则
 		// SetTargetsForAccount(admin, ts) 写进 store.targets 无主行（重启 LoadTargetsForAccount
 		// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（B10-04 排序后 admin 可能成"核心账号"）。
 		// 学生账号（非管理员名）会话永远有自己的绑定额定账号，不受影响。
 		if q := r.URL.Query().Get("account"); q != "" {
-			// B15-M4（第 15 轮）：透传目标账号必须真实存在（凭据表有记录）——
+			// B15-M4（历轮）：透传目标账号必须真实存在（凭据表有记录）——
 			// 否则 SetTargetsForAccount 把目标写进孤儿行（store.targets 无主数据），
 			// 重启恢复 LoadTargetsForAccount 读回 → 目标幽灵复活；调度器按 targets 遍历时
 			// 该账号 ClientFor 返回不存在 → 目标永不执行、静默失败。凭据表由所有登录
@@ -466,7 +466,7 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 	if req.Targets == nil {
 		req.Targets = []scheduler.Target{}
 	}
-	// n2 修复（第 3 轮）：目标数量与范围双重校验——
+	// n2 修复（历轮）：目标数量与范围双重校验——
 	// 条数上限防恶意放大（每个账号最多 100 门，前端单选多选也远达不到）；
 	// publish_id/priority 必须有界，防止越界值干扰调度器按发布分组与优先级排序。
 	if len(req.Targets) > maxTargetsPerAccount {
@@ -499,7 +499,7 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 // handleState 调度器状态（按会话账号过滤；仅管理员会话可跨账号）。
 func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
-	// B27-02（第 27 轮）：管理员透传状态读取的账号必须真实存在——此前任意串放行，
+	// B27-02：管理员透传状态读取的账号必须真实存在——此前任意串放行，
 	// StateForAccount(ghost) 返回空 Courses + token_valid=true 假象，管理员无法分辨
 	// "账号不存在"与"账号没目标"（B26-02 修掉的"全局帧假装成功"的轻量版）。凭据表
 	// 查无此账号 → 明确拒绝；与 B27-01 的?account= 契约全局对齐。
@@ -519,7 +519,7 @@ func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAccounts 当前会话账号视角的账号列表。
-// M-2 修复（第 3 轮）：普通会话只回显自身绑定账号（学号即情报，杜绝账号枚举）；
+// M-2 修复（历轮）：普通会话只回显自身绑定账号（学号即情报，杜绝账号枚举）；
 // 管理员会话回显全量（多账号维护管理需要），与"日志按账号隔离"同隐私边界。
 func (d *Deps) handleAccounts(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
@@ -543,7 +543,7 @@ func (d *Deps) handleLogs(w http.ResponseWriter, r *http.Request) {
 // handleLogout 注销当前会话（M-7）：立即吊销服务端令牌。
 // 会话已由 requireAuth 验证通过——Delete 后该令牌在服务端即刻失效，
 // 即使被复制/窃取的 localStorage 令牌也无法再发起任何请求。
-// A7（第 4 轮）：先取值再 Delete，避免 Delete 后 context 语义不清时重复读取。
+// A7（历轮）：先取值再 Delete，避免 Delete 后 context 语义不清时重复读取。
 func (d *Deps) handleLogout(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	tok := sessionToken(r)
@@ -616,7 +616,7 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		codes := make([]string, 0, req.Count)
-		// A8（第 4 轮）+ B5-02（第 5 轮）：先全量生成、再单事务一起落库——
+		// A8（历轮）+ B5-02：先全量生成、再单事务一起落库——
 		// ①循环中途 rand panic（recover 500）不再让前 N-1 个码滞留；
 		// ②落库本身原子（CreateActivationCodes 单事务），任一条 INSERT 失败整体回滚，
 		// 彻底杜绝"部分入库 + 响应报错"的隐身码场景。任何失败都不产生半批滞留。
@@ -629,7 +629,7 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 0, codes, "生成成功")
 	case http.MethodDelete:
-		// B7-M8（第 7 轮）：无 body 的标准 REST DELETE 必须可用——空 body 解码失败直接按
+		// B7-M8（历轮）：无 body 的标准 REST DELETE 必须可用——空 body 解码失败直接按
 		// "未提供 code"返回明确错误即可（绝不 403；DELETE 无 body 场景不该被 JSON 门挡住）。
 		// 管理员用 curl -X DELETE /api/admin/codes（无 body）时得到"请指定激活码"而非
 		// 请求被 403 拒的可用性噪音。
@@ -654,7 +654,7 @@ func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 
 // newActivationCode 生成 XK-XXXX-XXXX-XXXX 格式激活码（16 位十六进制）。
 // m7 修复：原 12 位 hex（48bit 熵）对有效期长的激活码偏低，提升至 16 位 hex（64bit 熵）。
-// M-1 修复（第 3 轮）：crypto/rand 失败即 panic（与 randToken 同策略）——
+// M-1 修复（历轮）：crypto/rand 失败即 panic（与 randToken 同策略）——
 // 熵源故障时代码绝不静默产出全零可预测激活码，让攻击者拿到重复码无限激活。
 func newActivationCode() string {
 	b := make([]byte, 8)
@@ -668,7 +668,7 @@ func newActivationCode() string {
 // ---- 管理员后台接口（会话级鉴权，见 requireAdminSession） ----
 
 // maskKey 敏感值脱敏：恒显掩码 + 后 4 位（空值恒显 ****，杜绝"未设置"歧义）。
-// A4（第 4 轮）：key ≤4 位时旧逻辑返回空串，管理端 input 呈现空、与"未配置"无法区分
+// A4（历轮）：key ≤4 位时旧逻辑返回空串，管理端 input 呈现空、与"未配置"无法区分
 // （误以为丢失、保存无效果）；统一恒显 **** 语义最清晰——设置了就有掩码，没设置才为空。
 func maskKey(v string) string {
 	if v == "" {
@@ -725,7 +725,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var changed []string
-		// D-A1（第 4 轮）：先校验值域再进 Runtime.Update——非法引擎/越界并发整体拒绝，
+		// D-A1（历轮）：先校验值域再进 Runtime.Update——非法引擎/越界并发整体拒绝，
 		// 绝不落库也不下发；与 open_time 无效拒绝同策略，杜绝 stats 显示与实际引擎错位。
 		if req.CaptchaEngine != nil && *req.CaptchaEngine != "vision" && *req.CaptchaEngine != "ddddocr" {
 			writeJSON(w, 1, nil, "识别引擎仅支持 vision 或 ddddocr")
@@ -735,7 +735,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "验证码识别并发需在 1-20 之间")
 			return
 		}
-		// B21-04（第 21 轮）：非空但格式非法的 open_time 必须整体拒绝——校验必须前置到
+		// B21-04：非空但格式非法的 open_time 必须整体拒绝——校验必须前置到
 		// Runtime.Update 闭包之外：旧实现 `else if FormatOpenTime(...)==nil` 校验失败静默忽略
 		// （混改 PUT 返回"配置已更新"但 open_time 未变，半假成功）；若把 writeJSON+return
 		// 写在闭包内，return 只退出闭包不退出 handler，既会重复写响应（双 JSON body）又会把
@@ -777,7 +777,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.OpenTime != nil {
 				if *req.OpenTime == "" {
-					// F7-02（第 7 轮）：显式空串 = 管理员"清空开放时间"，不再静默忽略。
+					// F7-02：显式空串 = 管理员"清空开放时间"，不再静默忽略。
 					// 此前空串被 FormatOpenTime 判为格式错误而静默丢弃：管理员清空时间点"保存并生效"
 					// 得到的是 code:0 假成功（时间点实际没变），调度器仍按旧时间执行（含已过期的
 					// 2026-09-13 09:00:00）而表单却显示为空——前后端与生效配置三处分叉。
@@ -812,7 +812,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
 			"open_time":           cfg.OpenTime,
 		}); sErr != nil {
-			// M-4 修复（第 3 轮）：落库失败绝不静默——配置已内存生效，但重启即回退。
+			// M-4 修复（历轮）：落库失败绝不静默——配置已内存生效，但重启即回退。
 			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，
 			// 识别引擎/Vision 仍按新配置同步给账号客户端，杜绝"半生效"误导。
 			log.Printf("[api] 配置落库失败: %v", sErr)
@@ -869,7 +869,7 @@ func (d *Deps) saveSettings(kv map[string]string) error {
 }
 
 // handleAdminStats 系统运行状态总览。
-// A3（第 4 轮）：不再静默吞 DB 错误——任一数据源读取失败时如实返回 500（管理员看到的是
+// A3（历轮）：不再静默吞 DB 错误——任一数据源读取失败时如实返回 500（管理员看到的是
 // 明确报错，而非一堆 0/空值误导），绝不假装"数据没问题"。
 func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	cfg := d.Runtime.Get()
@@ -906,7 +906,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	// 全账号日志总数（LoadAllLogs 含全部账号）
 	logsCount := len(allLogs)
 	// 识别引擎与并发上限（管理员后台展示当前生效值）。
-	// m19（第 3 轮）：真值=vision——runtime 默认 vision（config.CaptchaEngineDefault），
+	// m19（历轮）：真值=vision——runtime 默认 vision（config.CaptchaEngineDefault），
 	// 空串不可能出现（runtime.New 恒注入非空），兜底也统一 vision，杜绝"stats 显示 ddddocr
 	// 而实际引擎是 vision"的表述错位。
 	eng := cfg.CaptchaEngine
@@ -958,7 +958,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	acct := strings.TrimSpace(req.Account)
-	// B15-M5（第 15 轮）：账号名含首尾空白必须整体拒绝（trim 后仍与原值逐字节一致才放行）。
+	// B15-M5（历轮）：账号名含首尾空白必须整体拒绝（trim 后仍与原值逐字节一致才放行）。
 	// 此前只 `TrimSpace != ""` 判空——前端一次空格失手（"12345 " 粘贴带换行）后 trim 出的
 	// "12345" 被当作删除目标，真实账号被删、响应却显示"已删除账号 12345"（假删除成功：
 	// 前端挂着 "12345 " 标签，store 里 12345 已消失，调度器照旧尝试提交空客户端）。
@@ -966,7 +966,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 1, nil, "账号无效或不可删除")
 		return
 	}
-	// B26-01（第 26 轮）：memory-first 顺序——先摘注册表（Accounts.Remove），让
+	// B26-01：memory-first 顺序——先摘注册表（Accounts.Remove），让
 	// B18-M2/B20-01/B21-03 的"落库前锁内复核 ClientFor"防线从一开始就生效：此前顺序
 	// Store.DeleteAccount（清 6 表）→ PurgeAccount → Remove 之间存在毫秒级空窗，在飞链
 	// （SelectClass 最长 15s）恰在空窗完成时锁内复核 ClientFor 仍存在 → SaveSuccess 把刚清
@@ -975,7 +975,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 	// 空窗从根因消除。DeleteAccount 失败时库行未清但注册表已摘（半删态），账号重启后由
 	// Restore 重建可自愈，远优于假删除成功。
 	d.Accounts.Remove(acct)
-	// B19-02（第 19 轮）：删账号路径必须走 PurgeAccount 全量清理（含 done/tokenValid/
+	// B19-02：删账号路径必须走 PurgeAccount 全量清理（含 done/tokenValid/
 	// relogin 族/acctData），而非 SetTargetsForAccount(nil)——后者只清 refused，残留
 	// done 会让重建账号显示"重启恢复：已报名成功"假成功、full/rateLimited 让自动链静默跳过、
 	// inflight 阻塞手动报名。PurgeAccount 与 DeleteAccount 事务（清库行）配成"内存+库"双清。
@@ -1136,7 +1136,7 @@ func (l *loginLimiter) allow(ip string) bool {
 }
 
 func clientIP(r *http.Request) string {
-	// B6-05（第 6 轮）：可信反代 IP 透传——部署在 nginx/caddy 等反代后面时，
+	// B6-05：可信反代 IP 透传——部署在 nginx/caddy 等反代后面时，
 	// RemoteAddr 恒为反代地址，学校 NAT 下所有学生共享同一 IP，登录限流被合并到
 	// 一个桶（5 次/分钟全校共用一个配额，学生互相挤爆，管理员也可能被误锁）。
 	// 仅当 XUANKE_TRUSTED_PROXY=on 且请求确实来自回环地址（本机反代）时才信任

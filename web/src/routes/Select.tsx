@@ -44,7 +44,7 @@ function priorityName(p: number): string {
 export default function Select({ account, sessionToken, onDone }: Props) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  // M29-01（第 29 轮）：在飞操作从单值改 Set<number> 按课程 id 独立跟踪——
+  // M29-01：在飞操作从单值改 Set<number> 按课程 id 独立跟踪——
   // 单值 actionLoading 被并发不同课程操作互相覆盖（A 在飞时点 B 会覆盖 A 的标记，
   // A 的 finally 清 null 又把 B 的在飞态抹掉，用户再点 B 发第三发请求被后端
   // TryAcquireSubmit 拒绝 → 假失败 toast 在"不同课程"维度复发）。
@@ -58,9 +58,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 轮询判定来源：in_date_range 与 window_opened 双信号合并（MAJOR-G）。
       // 窗口即将开启的瞬间平台会短暂返回空 publishes，此时仅凭 in_date_range 会把
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
-      // F5-05（第 5 轮）：窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
+      // F5-05：窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
       // 清空，继续 10s 高频打 findElectivesData 纯浪费；与 /state 同信号降 30s，全站统一。
-      // F9-05（第 9 轮）澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
+      // F9-05：澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
       // electives 自身响应（ElectivesData）无 window_closed 字段，且 /state 每 2s 刷新
       // 触发组件重渲染，react-query 用最新闭包重调度轮询间隔，闭包永不陈旧。
       const pubs = query.state.data?.publishes ?? []
@@ -72,11 +72,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   // 手动报名指定课程
   const handleSelectClass = async (c: ClassItem) => {
-    // F26-03（第 26 轮）：在飞幂等守卫——与 login submit 的 F19-02 / 激活的 F21-04
+    // F26-03：在飞幂等守卫——与 login submit 的 F19-02 / 激活的 F21-04
     // 同款短路：disabled 渲染落地前双击/连点会发出两个并发报名，后端 TryAcquireSubmit
     // 拒绝第二个（"该课程正在提交中"），但第一个已 MarkDone 成功、第二个的 finally 仍
     // invalidateQueries 造成假失败 toast；退选同源。入口先查在飞标记即停。
-    // M29-01（第 29 轮）：守卫与置位改用 Set 按课程独立跟踪，只拦"本课程在飞"。
+    // M29-01：守卫与置位改用 Set 按课程独立跟踪，只拦"本课程在飞"。
     if (actionLoading.has(c.id)) return
     setActionLoading((prev) => new Set(prev).add(c.id))
     try {
@@ -101,9 +101,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   // 手动退选指定课程二次确认提交
   const handleConfirmExit = async (c: ClassItem) => {
-    // F26-03（第 26 轮）：与 handleSelectClass 同款在飞幂等守卫（双击退选第二个请求
+    // F26-03：与 handleSelectClass 同款在飞幂等守卫（双击退选第二个请求
     // 会被后端 TryAcquireSubmit 拒、假失败 toast）。
-    // M29-01（第 29 轮）：与报名同款 Set 在飞跟踪——退选/报名并发互不覆盖。
+    // M29-01：与报名同款 Set 在飞跟踪——退选/报名并发互不覆盖。
     if (actionLoading.has(c.id)) return
     setActionLoading((prev) => new Set(prev).add(c.id))
     try {
@@ -137,7 +137,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
-  // M30-03（第 30 轮）：回显一次性标记——回显 effect 只合并一次，绝不重放。
+  // M30-03：回显一次性标记——回显 effect 只合并一次，绝不重放。
   // 第 4 轮 rev>0 守卫保护的"用户清空目标后轮询旧 courses 再次回填撤销清空"语义
   // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见 166 行 effect）。
   const echoedRef = useRef(false)
@@ -147,7 +147,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
-  // F18-03（第 18 轮）：激活 Tab 受控兜底——发布集合整体重建（开窗瞬间平台清空又
+  // F18-03：激活 Tab 受控兜底——发布集合整体重建（开窗瞬间平台清空又
   // 恢复、publish_id 全变）时，非受控 defaultValue 只首次生效、激活 Tab 对应的 Trigger
   // 从列表消失后 Radix Tabs 无 fallback，主区空白直到用户手点。受控 value 跟随
   // tabs[0]，发布重建即回落首个 Tab，绝不悬空。
@@ -161,44 +161,52 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 外部 `selected` 导致数据重取后回显永久失效的问题。
   // 第 4 轮：用户已编辑过目标（rev>0）时跳过回显——用户"清空全部目标"后 2s 轮询
   // 返回的旧 courses 若再次回填，会把清空静默撤销并重新保存旧目标（回显与防抖保存竞态）。
-  // F19-01（第 19 轮）：回显的 courses 可能携带"不属于当前发布集合"的 publish_id（旧学期
+  // F19-01：回显的 courses 可能携带"不属于当前发布集合"的 publish_id（旧学期
   // 残留/发布集合整体重建后后端 /state courses 仍按旧 publish_id 下发）——此前照单全收
   // 构建的 initial 也带幽灵 publish_id；此时 flushTargets/防抖保存的 targetsUseCurrentPublishes
   // 校验必失败，一路置脏跳过（安全方向：绝不假清空），但也永远不落库——目标被静默"锁死"
   // 在读不出的旧条目上，用户改不了也存不上。修复：回显即过滤，只用当前 publishes 集合内的
   // publish_id 构建 initial（与消费时刻校验同一判据），幽灵条目根本进不了 selected。
-  // F30-01（第 30 轮）：回显跳过条件从"用户已编辑（rev>0）"收窄为"selected 已含任何条目"——
-  // 进页后课程列表（/electives 内存快照）先渲染，/state 首次加载慢于 electives（或首帧失败
-  // retry 拉长到秒级）时，用户在 stateData 到达前先点选课程 → rev 已 >0 → 旧实现回显被跳过，
-  // 后端已保存的旧目标永远不进 selected，防抖 PUT 只含用户新点的课程 → 后端旧目标被静默
-  // 覆盖删除（本意"添加一门"变"替换全部"）。现在回显只合并不覆盖：updater 内
-  // "selected 已有内容即返回"守卫保用户已操作课程不动、未涉及旧目标补进；echoedRef 保证
-  // 只合并一次，第 4 轮"清空后轮询旧 courses 再次回填撤销清空"竞态语义延续。
+  // 回显合并：进页后课程列表（/electives 内存快照）先渲染，/state 首次加载慢于 electives
+  // （或首帧失败 retry 拉长到秒级）时，用户在 stateData 到达前先点选课程 → 若按"rev>0 即
+  // 跳过回显"处理，后端已保存的旧目标永远不进 selected，防抖 PUT 只含用户新点的课程 →
+  // 旧目标被静默覆盖删除（本意"添加一门"变"替换全部"）。合并按 publish_id 区分：用户已触碰
+  // （key 存在）的发布保留用户现状（含用户主动清空过的空数组，清空语义绝不复活），未触碰的
+  // 发布把后端旧目标补进；echoedRef 保证只合并一次（防轮询旧 courses 再次回填撤销清空）。
+  // 全清空（selectedCount===0 且 rev>0，用户明确清掉全部目标）绝不合并——否则"选 A,B→保存
+  // 成功→全清空"后首次非空 courses 响应会把 [A,B] 合并回来并重新写回后端，清空被静默撤销。
   useEffect(() => {
     if (echoedRef.current) return
     const courses = stateData?.courses
     if (!courses || courses.length === 0) return
-    // F19-01：effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
-    // 与 F18-01 同款构建中断陷阱——绝不能反向引用 effect 之后声明的 publishes。
+    // effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
+    // 与回显合并同款构建中断陷阱——绝不能反向引用 effect 之后声明的 publishes。
     const pubs = data?.publishes ?? []
     if (pubs.length === 0) return
     const currentIds = new Set(pubs.map((p) => p.publish_id))
+    const ordered = [...courses]
+      .sort((a, b) => a.priority - b.priority)
+      .filter((c) => currentIds.has(c.publish_id)) // 幽灵 publish_id 不进 selected
     setSelected((prev) => {
-      // F30-01：用户已手动选过课程（selected 已有内容）→ 不再合并回显（只保首次合并）。
-      // 与旧 rev>0 守卫等价但更精确：stateData 晚到/首帧失败时用户先手选不会误杀回显。
-      if (Object.values(prev).some((arr) => arr.length > 0)) return prev
-      const initial: Record<number, ClassItem[]> = {}
-      const ordered = [...courses]
-        .sort((a, b) => a.priority - b.priority)
-        .filter((c) => currentIds.has(c.publish_id)) // F19-01：幽灵 publish_id 不进 selected
+      const anyHas = Object.values(prev).some((arr) => arr.length > 0)
+      const hasTouched = Object.keys(prev).length > 0
+      // 用户已明确全清空（rev>0 且无任何条目）→ 绝不合并回显（清空语义不可侵犯）
+      if (rev > 0 && !anyHas) return prev
+      // 部分发布已被用户触碰（key 存在，含空数组=用户主动清空该发布）→ 只补
+      // 用户未触碰发布的旧目标；已触碰发布保留用户现状，绝不覆盖用户本次操作。
+      const next = { ...prev }
+      let merged = false
       for (const c of ordered) {
-        const item: ClassItem = { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem
-        ;(initial[c.publish_id] ??= []).push(item)
+        if (c.publish_id in next) continue // 该发布用户已触碰：保留现状
+        ;(next[c.publish_id] ??= []).push({ id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem)
+        merged = true
       }
-      return initial
+      // 无任何新发布可补（用户已触碰全部有目标的发布）→ 保持现状
+      if (!hasTouched && !merged) return prev
+      return next
     })
     echoedRef.current = true
-  }, [stateData, data])
+  }, [stateData, data, rev])
 
   const publishes = data?.publishes ?? []
 
@@ -214,7 +222,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   )
 
   // 备选目标挑选：同发布下按点击顺序排优先级，取消后后续自动升级
-  // F10-02（第 10 轮）：toast 移出 setSelected 的 updater——React 明令 updater 必须是
+  // F10-02：toast 移出 setSelected 的 updater——React 明令 updater 必须是
   // 纯函数，StrictMode 会对 updater 双调、并发渲染下也可能丢弃并重放；updater 内调
   // toast()（内部即另一组件的 setState）会让「已设为首选/已取消目标」重复弹出。
   // 事件处理器内 selected 恒为最近已提交渲染值（两次独立点击之间有渲染提交），
@@ -266,7 +274,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
   const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
   // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
-  // F20-01（第 20 轮）：挂载时复位 unmountedRef——StrictMode 开发态会对组件执行
+  // F20-01：挂载时复位 unmountedRef——StrictMode 开发态会对组件执行
   // mount→unmount→remount 两遍，原实现只有置 true 的 cleanup、二次挂载时已卸载标记
   // 恒真，saveNow/scheduleRetry 全部短路，目标改动静默丢失且无任何报错。重挂载后
   // 复位到 false，本轮会话保存链路恢复正常；真正卸载时 cleanup 依旧置位停手（F13-C2
@@ -312,7 +320,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       lastJson.current = json
       resetRetry() // 保存成功：清掉退避重发状态
     } catch (e: any) {
-      // F15-02（第 15 轮）：卸载后失败也绝不 toast——与 F13-C2"卸载后不轰炸"意图对齐
+      // F15-02：卸载后失败也绝不 toast——与 F13-C2"卸载后不轰炸"意图对齐
       if (unmountedRef.current) return
       toast({
         title: "目标保存失败",
@@ -341,22 +349,22 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 目标的镜像、无需回写；而进页数据未就绪时 selected/publishes 为空，此时 PUT
   // {"targets":[]} 会把后端已有目标整包抹除（窗口关闭后 publishes 恒空时必现）。
   // 清空全部目标仍是用户改动（rev>0），仍正确落库。
-  // F15-01（第 15 轮）：rev>0 但 publishes 已空（窗口开启瞬间平台短暂清空 / 关闭后
+  // F15-01：rev>0 但 publishes 已空（窗口开启瞬间平台短暂清空 / 关闭后
   // 恒空）时也不能整包覆盖——targets 由 [publishes × selected] 联查构建，任一为空则
   // targets=[] 是一个"假清空"，会把已落库目标永久抹除。守卫"发布缺席 + 已有选中
   // 目标"=数据缺席绝非用户意图；只有 selected 全空（用户明确清空全部）才合法 PUT []。
-  // F16-01（第 16 轮）：此守卫的渲染期常量判据会被防抖/flush 回调在 400ms 后读旧闭包
+  // F16-01：此守卫的渲染期常量判据会被防抖/flush 回调在 400ms 后读旧闭包
   // 值；F17-02 已把判据全部移入消费时刻（见 flushTargets 与防抖回调内的
   // "selectedCount>0 却构建出空集 = 假清空"守卫），渲染期常量已无引用，删除。
   const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
     const ids = new Set(pubs.map((p) => p.publish_id))
-    // F17-01（第 17 轮）：空 targets 时 every 恒真——空集防御已由各消费点的
+    // F17-01：空 targets 时 every 恒真——空集防御已由各消费点的
     // "联查产物为空 + 已有选中 = 假清空"守卫覆盖（防抖回调 + flushTargets 双闸）。
     return targets.every((t) => ids.has(t.publish_id))
   }
   const flushTargets = () => {
     if (rev === 0) return
-    // F17-01（第 17 轮）：与防抖回调同款消费时刻守卫（同 F15-01 意图，判据从渲染期
+    // F17-01：与防抖回调同款消费时刻守卫（同 F15-01 意图，判据从渲染期
     // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
     // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。
     if (publishesRef.current.length === 0 && selectedCount > 0) {
@@ -375,7 +383,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         })
       })
     }
-    // F17-01（第 17 轮）：统一"用户有勾选但联查产物为空 = 假清空"守卫——目标集由
+    // F17-01：统一"用户有勾选但联查产物为空 = 假清空"守卫——目标集由
     // [publishes × selected] 联查构建，任一为空即 targets=[]。F15-01 判据是渲染期
     // publishesMissing（回调时读旧闭包）；F16-01 的 every 校验对空 targets 恒真。
     // 这里在消费时刻校验"selectedCount>0 却构建出空集"：数据缺席/错位绝非用户清空
@@ -397,7 +405,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     }
     void saveNow()
   }
-  // F21-01（第 21 轮）：返回控制台前必须把"在飞 PUT 的补发窗口"关掉——直接 onDone
+  // F21-01：返回控制台前必须把"在飞 PUT 的补发窗口"关掉——直接 onDone
   // 会同步卸载：若点击返回时上一条目标保存仍在飞行（savingRef=true）而用户又改动过
   // 目标，flushTargets 只置脏就返回；飞行 PUT 完成后 finally 发现已卸载（F13-C2 契约）
   // 跳过补发，最后一批改动静默丢失。修复：先 flush，再等飞行中 PUT 结束（其 finally
@@ -407,12 +415,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const handleBack = async () => {
     for (let i = 0; i < 3; i++) {
       flushTargets()
-      // F30-01（第 30 轮）：flush 首次发起的 PUT 在飞（savingRef=true 且 flush 不发脏）时
+      // F30-01：flush 首次发起的 PUT 在飞（savingRef=true 且 flush 不发脏）时
       // 不得 break——PUT 失败后 catch 走 scheduleRetry（组件未卸载，因下方等待循环在
       // onDone 前），退避重试到成功或 21s 超时收敛；旧实现只等"flush 前已有在飞 PUT /
       // 退避 timer"，flush 自己刚发起的 PUT 恰是唯一没等的路径，失败即静默丢弃改动。
       if (!dirtyRef.current && !savingRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
-      // F26-01（第 26 轮）：保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
+      // F26-01：保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
       // （scheduleRetry 已挂 2/4/8/16s）同样表示内存与后端分叉、改动未落库。此前只等
       // savingRef，退避 timer 在飞时被误判"已静止"→ 三轮后无条件 onDone 卸载、
       // cleanup clearTimeout 取消排队重试 → 最后一批改动静默丢失且无任何提示
@@ -432,7 +440,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   }
   // F13-C1（第 13 轮）：退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
   // 防抖 effect 仍只由 rev 驱动（与 F7-01 同款守卫）——轮询/回显/窗口收缩绝不触发保存。
-  // F30-01（第 30 轮）：附加 hasPublishes 布尔信号——开窗瞬间平台清空 publishes（F15/F16/
+  // F30-01：附加 hasPublishes 布尔信号——开窗瞬间平台清空 publishes（F15/F16/
   // F17 假清空守卫拦下置脏）后发布恢复，只有 rev 驱动的话 effect 不重跑、无新 timer，
   // 置脏的改动永不落库（"等发布恢复再落库"的注释承诺从未实现）。hasPublishes 从 false→
   // true 时 effect 重跑 → 新 400ms timer → 消费时刻守卫通过 → 正常保存。publishes 非空期间
@@ -460,7 +468,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       return targets
     }
     const timer = setTimeout(async () => {
-      // F15-01 + F17-01（第 17 轮）：防抖回调在 400ms 后执行，读到的是渲染期旧闭包
+      // F15-01 + F17-01：防抖回调在 400ms 后执行，读到的是渲染期旧闭包
       // （publishesMissing 恒为本次渲染推算值）。若这期间发布集被清空（开窗瞬间平台
       // 清空 / 窗口关闭），旧守卫失效且 targetsUseCurrentPublishes 对空 targets 恒真，
       // build() 拿空 publishesRef 产出 [] 即"假清空"照常 PUT 抹掉后端目标。
@@ -472,7 +480,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         return
       }
       const next = build()
-      // F17-01（第 17 轮）：防抖消费时刻同款"联查产物为空 = 假清空"守卫——F16-01 的
+      // F17-01：防抖消费时刻同款"联查产物为空 = 假清空"守卫——F16-01 的
       // every 校验对空 targets 恒真，必须独立判"selectedCount>0 却产出空集"。仅在
       // 发布全缺席（构建来源为空的极限情况）时，selectedCount 可能滞后于本次清空
       // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
@@ -503,7 +511,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     stateData?.open_time && stateData.open_time !== "0001-01-01T00:00:00Z"
       ? stateData.open_time
       : null
-  // F9-07（第 9 轮）：统一用 lib 共享 useTickingCountdown——与 Dashboard 同一实现、
+  // F9-07：统一用 lib 共享 useTickingCountdown——与 Dashboard 同一实现、
   // 秒级自 tick 只重建倒计时一处，删除 Select 旧的 parseCountdown + 每秒 setTick 双份。
   const cd = useTickingCountdown(openTimeStr)
 
@@ -538,7 +546,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 // F12-M1（第 12 轮）：返回前先 flush 挂起的防抖/重发目标保存——
                 // 直接 onDone 会卸载组件、400ms 防抖 timer 被清理，最后一次点选
                 // 到返回间隔 <400ms 时整批目标永不 PUT。
-                // F21-01（第 21 轮）：改为等待保存链静止的异步句柄——flush 后若
+                // F21-01：改为等待保存链静止的异步句柄——flush 后若
                 // 在飞 PUT 完成会经 finally 自动补发（见 handleBack），全部落定才卸载。
                 void handleBack()
               }}
@@ -556,7 +564,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             <Clock className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
             {/* N8：已开放状态以调度器 window_opened 为准（服务端有 ~640ms 校准偏差，
                 本地倒计时到点 ≠ 平台开窗）；window_opened 才显示"已开放"高亮。
-                F15-03（第 15 轮）：此前 `|| cd.isExpired` 让窗口关闭后（open_time 为
+                F15-03：此前 `|| cd.isExpired` 让窗口关闭后（open_time 为
                 过去时刻 → isExpired 恒 true）横幅永远显示"已开放"，与同屏 F14-03 空态卡
                 自相矛盾——isExpired 只是本地"倒计时走到 0"，不说明窗口开放或已关闭；
                 改为 window_closed 优先显"已关闭"，否则按 window_opened 判定。 */}
@@ -639,7 +647,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           </div>
         )}
 
-        {/* F14-03（第 14 轮）：窗口关闭/学期无发布空态——publishes 恒空时给出明确说明，
+        {/* F14-03：窗口关闭/学期无发布空态——publishes 恒空时给出明确说明，
             不再是"无提示空白主体"（此前徽章还误显 n/0） */}
         {!isLoading && !isError && tabs.length === 0 && (
           <div className="rounded-[var(--radius-lg)] glass border border-neutral-800 p-16 text-center text-xs text-neutral-400 flex flex-col items-center justify-center gap-3">
@@ -650,7 +658,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         )}
 
         {/* 主选课 Tab 分段控制器
-            F14-03（第 14 轮）：窗口关闭/学期无发布时 publishes 恒空 →
+            F14-03：窗口关闭/学期无发布时 publishes 恒空 →
             tabs.length===0，此前整个主区不渲染且顶部徽章显示 n/0；补空态与徽章分母兜底 */}
         {!isLoading && !isError && tabs.length > 0 && (
           <Tabs
@@ -721,7 +729,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                       const selIdx = selArr.findIndex((x) => x.id === c.id)
                       const isSelected = selIdx >= 0
                       const rate = fillRate(c)
-                      // F30-01（第 30 轮）：max_count=0（未公布名额的新课程）时 `0>=0` 恒真
+                      // F30-01：max_count=0（未公布名额的新课程）时 `0>=0` 恒真
                       // 会误显"已满额"徽章并把进度条染红——与后端 IsClassFull 的
                       // `MaxCount>0 && SelectedCount>=MaxCount` 判据同源，0 表示名额未公布而非满员。
                       const isFull = c.max_count > 0 && c.selected_count >= c.max_count
@@ -896,8 +904,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         <div className="h-20 sm:h-16" aria-hidden />
 
         {/* 退选二次确认极简黑白 Modal (复刻官网 layer.confirm("确认退选该选修课?")) */}
-        {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
-        {/* F21-03（第 21 轮）：补 Esc 关闭——有 role=dialog 却无 keydown 处理，键盘用户只能
+        {/* F7-03：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
+        {/* F21-03：补 Esc 关闭——有 role=dialog 却无 keydown 处理，键盘用户只能
             Tab 到按钮；与取消按钮同逻辑，退选中（actionLoading）不响应防误关 */}
         {exitModalClass && (
           <div

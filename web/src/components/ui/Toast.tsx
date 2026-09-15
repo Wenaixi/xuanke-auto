@@ -30,7 +30,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const idRef = React.useRef(0)
 
   const toast = React.useCallback((msg: Omit<ToastMessage, "id">) => {
-    // F5-02（第 5 轮）：唯一 id 用自增计数器而非 Math.random 7 位短串——
+    // F5-02：唯一 id 用自增计数器而非 Math.random 7 位短串——
     // 同一页 20 分钟内高频提示（满员退避/轮询失败）Math.random 碰撞会让 React key 重复、
     // 状态异常（一条 toast 被误删），自增 id 从根上消除碰撞概率。
     idRef.current += 1

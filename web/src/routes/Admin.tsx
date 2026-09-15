@@ -40,7 +40,7 @@ interface Props {
   onLogout: () => void
   onBackToStudent: () => void
   onSelectAccount?: (acct: string) => void
-  // M28-01（第 28 轮）：管理员删除账号后通知 App 做本地会话快照式清除——
+  // M28-01：管理员删除账号后通知 App 做本地会话快照式清除——
   // 后端 DeleteAccount 只清服务端 6 表，前端 localStorage 的 xk_sessions 若不同步
   // 移除，被删账号会继续占账号槽位、首次刷新复活，直到下次请求 401 才被吊销链
   // 摘除（"删账号绝不残留"的整套工程理念与后端四段防线对齐，见 App.tsx onDeleted）。
@@ -58,7 +58,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
   // 避免旧定时器提前清空新复制码的"已复制"提示（状态复用错乱）
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { toast } = useToast()
-  // F8-03（第 8 轮）：删除账号成功后立即失效账号列表查询（否则 10s 轮询前行不消失）
+  // F8-03：删除账号成功后立即失效账号列表查询（否则 10s 轮询前行不消失）
   const queryClient = useQueryClient()
   // N3：删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -66,11 +66,11 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
 
   const copy = async (code: string) => {
     try {
-      // F19-03（第 19 轮）：navigator.clipboard 非安全上下文会整体不可用——http://内网/
+      // F19-03：navigator.clipboard 非安全上下文会整体不可用——http://内网/
       // 明文部署、iframe 嵌入、权限被拒时抛错落入 catch 提示"未授权剪贴板"，管理员复制
       // 激活码整链失效。降级：手动构造 textarea 走已废弃的 document.execCommand("copy")
       // 兜底（旧兼容路径，同步执行），仍失败才提示（且把完整激活码展示给管理员抄录）。
-      // F20-02（第 20 轮）：textarea 不设 readOnly 时部分浏览器会从可编辑区弹出软键盘或
+      // F20-02：textarea 不设 readOnly 时部分浏览器会从可编辑区弹出软键盘或
       // 选择行为异常导致 execCommand 返回 false——补 readOnly 加固复制兜底稳定性。
       if (!navigator.clipboard || !navigator.clipboard.writeText) {
         throw new Error("clipboard API 不可用")
@@ -87,7 +87,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
         ta.value = code
         ta.style.position = "fixed"
         ta.style.opacity = "0"
-        // F20-02（第 20 轮）：readOnly 固化，防可编辑区干扰选中/复制
+        // F20-02：readOnly 固化，防可编辑区干扰选中/复制
         ta.readOnly = true
         document.body.appendChild(ta)
         ta.select()
@@ -205,8 +205,8 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
         </Tabs>
 
         {/* N3：删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
-        {/* F7-03（第 7 轮）：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
-        {/* F20-04（第 20 轮）：补 Esc 关闭——与 Login 激活弹窗对齐，键盘可达性闭环 */}
+        {/* F7-03：补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
+        {/* F20-04：补 Esc 关闭——与 Login 激活弹窗对齐，键盘可达性闭环 */}
         {pendingDelete && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
@@ -246,7 +246,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                   size="sm"
                   disabled={deleting}
                   onClick={async () => {
-                    // F30-01（第 30 轮）：在飞幂等守卫——双击删除按钮第二发 DELETE 报
+                    // F30-01：在飞幂等守卫——双击删除按钮第二发 DELETE 报
                     // "账号不存在"假失败 toast（F19-02 同族）。
                     if (deleting) return
                     setDeleting(true)
@@ -256,10 +256,10 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                         session: sessionToken,
                         body: JSON.stringify({ account: pendingDelete }),
                       })
-                      // F8-03（第 8 轮）：删除成功后立即失效账号列表查询——
+                      // F8-03：删除成功后立即失效账号列表查询——
                       // 否则行要等 10s refetch 轮询才消失，用户刚删的账号仍显示在列表中
                       queryClient.invalidateQueries({ queryKey: ["admin-accounts"] })
-                      // M28-01（第 28 轮）：删除成功必须把本地会话同步摘除（快照式三连，
+                      // M28-01：删除成功必须把本地会话同步摘除（快照式三连，
                       // 与 logout/onUnauthorized 同款）——后端 6 表已清、前端 sessions 若残留
                       // 该账号条目，会继续占账号槽位 + 首次刷新复活。DeleteAccount 已由后端
                       // RevokeAccount 吊销服务端会话，这里绝不调用 logout()（那是用当前管理员
@@ -303,8 +303,11 @@ function CodesTab({
   const [count, setCount] = useState(5)
   const [uses, setUses] = useState(1)
   const [generating, setGenerating] = useState(false)
-  const [removing, setRemoving] = useState(false)
   const [generated, setGenerated] = useState<string[]>([])
+  // 删除中的激活码集合：按码独立跟踪——单值布尔会被并发删除不同码互相覆盖标记
+  // （码 A 删除在飞点码 B 覆盖标记、A finally 清 false 把 B 在飞态抹掉，B 再点发第二发
+  // 后端报"不存在"假失败），与选课大厅手动操作 actionLoading 同款结构
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set())
 
   // n11（第 3 轮）：queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
   // 同一浏览器令牌，若缓存只按令牌分键，另一账号的轮询数据会覆盖本账号视图。
@@ -316,7 +319,7 @@ function CodesTab({
   })
 
   const generate = async () => {
-    // F30-01（第 30 轮）：在飞幂等守卫——与 login submit F19-02 / activate F21-04 同款
+    // F30-01：在飞幂等守卫——与 login submit F19-02 / activate F21-04 同款
     // 短路：按钮 disabled 依赖 React 渲染落地有延迟，连按两次会在 disabled 生效前发出两个
     // POST /admin/codes → 激活码重复生成 count 个（后端落库两次，前端 setGenerated 被第二发
     // 覆盖）。入口先查在飞标记即停。
@@ -339,10 +342,11 @@ function CodesTab({
   }
 
   const remove = async (code: string) => {
-    // F30-01（第 30 轮）：在飞幂等守卫——双击删除同一码时第二发后端报"不存在"假失败
-    // toast（F19-02/F21-04 同族，generate 同款）。
-    if (removing) return
-    setRemoving(true)
+    // 在飞幂等守卫：入口先查本码是否已在删除中（Set 按码独立跟踪，互不覆盖标记）；
+    // 按钮 disabled 依赖渲染落地有延迟，连按两次会在 disabled 生效前发出两个
+    // DELETE /admin/codes → 第二发后端报"不存在"假失败 toast。
+    if (removing.has(code)) return
+    setRemoving((prev) => new Set(prev).add(code))
     try {
       await api("/admin/codes", {
         method: "DELETE",
@@ -353,7 +357,11 @@ function CodesTab({
     } catch (e: any) {
       toast({ title: "删除失败", description: e.message || "通信异常", variant: "destructive" })
     } finally {
-      setRemoving(false)
+      setRemoving((prev) => {
+        const next = new Set(prev)
+        next.delete(code)
+        return next
+      })
     }
   }
 
@@ -452,7 +460,7 @@ function CodesTab({
                   <button onClick={() => onCopy(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="复制">
                     {copied === c.code ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
-                  <button onClick={() => remove(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="删除">
+                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -504,7 +512,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   }, [loaded, configEpoch])
 
   const save = async () => {
-    // F18-02（第 18 轮）：配置加载完成前绝不保存——表单未回填时保存会用初始空值
+    // F18-02：配置加载完成前绝不保存——表单未回填时保存会用初始空值
     // 整体覆盖生效配置（open_time 清空 = B11-A1 调度器挂起提交、激活码机制误开、Vision
     // 配置清空），按钮已 disabled 锁定，此处再兜一道（加载失败停留初始值的手快路径）。
     if (!loaded) return
@@ -521,7 +529,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       // 留空 = 不改动 key（脱敏回显无法完整回填）
       if (apiKey.trim()) body.vision_api_key = apiKey.trim()
       await api("/admin/config", { method: "PUT", session: sessionToken, body: JSON.stringify(body) })
-      // R27-01（第 27 轮）：PUT 成功后必须先 refetch 拉取后端"实际生效值"再自增代际——
+      // R27-01：PUT 成功后必须先 refetch 拉取后端"实际生效值"再自增代际——
       // 旧实现只 setConfigEpoch，effect 重跑时用的 loaded 仍是挂载时陈旧快照（configQuery
       // 从未 refetch、缓存 data 未更新），表单被覆盖回旧值；管理员二次保存即把刚生效的
       // 配置静默回滚（open_time 回退尤其危险：新一轮抢窗时间被改回旧值，B11-A1 挂起语义
@@ -532,7 +540,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         setConfigEpoch((e) => e + 1) // F7-02：用后端生效真值经 effect 回填到表单（与生效配置对齐）
       }
       toast({ title: "配置已保存", description: "已生效，无需重启服务" })
-      // F26-04（第 26 轮）：密钥输入框清空后移至健康信号之后——旧实现在 PUT 成功
+      // F26-04：密钥输入框清空后移至健康信号之后——旧实现在 PUT 成功
       // 落地后立刻 setApiKey("")，而用户若在保存进行中（await 返回前）已开始输入新密钥，
       // 该清空会无提示吞掉新输入（脱敏回显不写 apiKey 字段，回填 effect 也不覆盖）。
       // 清空挪到确认健康（configEpoch 已自增、toast 已发起）之后，输入窗口收敛到

@@ -10,7 +10,7 @@ export function useTickingCountdown(target: string | null) {
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [])
-  // F10-07（第 10 轮）：目标变化时立刻校正 now——此前 diff 用上一拍的 now 计算，
+  // F10-07：目标变化时立刻校正 now——此前 diff 用上一拍的 now 计算，
   // target 从 null 变为有效开窗时刻（首次同步完成 / 窗口开启瞬间）时最多有 1 秒
   // 陈旧偏差，可能短暂误显为过期全 00；target 一变即回到当前时刻，注释意图落实。
   useEffect(() => {

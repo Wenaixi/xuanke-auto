@@ -133,7 +133,7 @@ func main() {
 			continue
 		}
 		if len(ts) > 0 {
-			// B10-01（第 10 轮）：重启恢复目标用 RestoreTargets（不清 refused）——
+			// B10-01：重启恢复目标用 RestoreTargets（不清 refused）——
 			// 此前用 SetTargetsForAccount 会 delete refused + 删库行，重启后手动退选
 			// 记录全丢、自动引擎重新抢回（B9-02 被恢复顺序抵消）。
 			sched.RestoreTargets(a, ts)

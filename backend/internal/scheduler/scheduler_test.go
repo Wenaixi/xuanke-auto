@@ -1,4 +1,4 @@
-package scheduler
+﻿package scheduler
 
 import (
 	"bytes"
@@ -1080,7 +1080,7 @@ func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
-// B14-M1（第 14 轮）：原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
+// B14-M1：原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
 // 恒 return，提交循环根本无法抵达（首段断言恒等 pending 超时必红，恒绿假象的另一面"恒红"）。
 // 改为过去时刻：守卫放行提交路径，而探测仍被 lastProbe 节流挡住（不 resetProbe），
 // 真正验证"提交不依赖探测节流"。本次为修复失效契约的测试，非业务代码改动（无红灯需先见）。
@@ -1216,7 +1216,7 @@ func TestProbeIntervalZeroOpenTime(t *testing.T) {
 // 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。
 func TestProbeIntervalWindowClosed(t *testing.T) {
 	// 已过开放时间 + 曾开过窗 + 空快照 → WindowClosed=true → 降回 30s
-	// B18-M1（第 18 轮）：关闭判定加入"至少开过窗"前提——未开过窗即空快照（学期无发布/
+	// B18-M1：关闭判定加入"至少开过窗"前提——未开过窗即空快照（学期无发布/
 	// 平台异常）不是"窗口已关闭"；测试预置 WindowOpened=true 模拟"开过再关"的真实形态。
 	fc := newFakeClient(false)
 	fc.mu.Lock()
@@ -1328,7 +1328,7 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
 	s.SetClockOffsetForTest(5 * time.Second) // 先模拟一次成功校准带来的偏差
 
-	// 连续 3 次同步失败。B8-M1（第 8 轮）：重入防抖——上轮仍在途时后续调用直接返回，
+	// 连续 3 次同步失败。B8-M1：重入防抖——上轮仍在途时后续调用直接返回，
 	// 不再 spawn 爆炸并发；每次发起前需等待上一轮 goroutine 落地（syncing 复位）。
 	// 测试驱动的 waiting 循环：每轮用「等待在该发起时刻之后成功发起的那次」而非盲目叠加。
 	// 第 3 次调用后：本轮可能触发回退（offset=0）或仍停留在失败计数阶段，统一由
@@ -1481,7 +1481,7 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 // 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
 func TestWindowClosedState(t *testing.T) {
 	// 第 3 轮 C-3：空快照 + 曾开过窗 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
-	// B18-M1（第 18 轮）：判定加入"至少开过窗"前提——未开过窗即空快照不算"已关闭"，
+	// B18-M1：判定加入"至少开过窗"前提——未开过窗即空快照不算"已关闭"，
 	// 防止还没开窗就把提交挂起（开窗瞬间黄金期全停摆）；测试预置 WindowOpened=true。
 	fcEmpty := newFakeClient(false)
 	fcEmpty.mu.Lock()
@@ -1643,7 +1643,7 @@ func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
 }
 
 // TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶（CRITICAL C2, C3）。
-// B14-I1（第 14 轮）：原后半段手写 `s.reloginFail[acct]=5; delete(...)` 直接测 Go
+// B14-I1：原后半段手写 `s.reloginFail[acct]=5; delete(...)` 直接测 Go
 // map 的 delete 语义（恒绿，与 F13-i1 同为"手写实现语义当断言"的坏味道）——删除。
 // 真实"失败保留增长 / 成功清零"路径由 TestReloginFailureKeepsBackoff /
 // TestReloginSuccessResetsBackoff 覆盖，此处不再重复。
@@ -1660,7 +1660,7 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 
 // TestReloginFailureKeepsBackoff 已契约化"重登失败后 reloginFail 保留增长、成功才清零"
 // （C1，退避表逐次拉长防线）——真实失败路径从不清零为 1。
-// F13-i1（第 13 轮）：本测试测试"复位为 1"的语义，但实现任何失败路径都不复位为 1
+// F13-i1：本测试测试"复位为 1"的语义，但实现任何失败路径都不复位为 1
 // （开发者当年手写两行"模拟实现"），是恒绿的无效测试——删除，由下方两个真实路径
 // 测试 TestReloginBackoffWindowBlocksManualTriggers / TestReloginFailureKeepsBackoff 覆盖。
 
@@ -1854,7 +1854,7 @@ func TestCheckClassSelectable(t *testing.T) {
 	if _, ok := s.CheckClassSelectable("acct1", 99999); !ok {
 		t.Fatal("不在快照中的课程应放行（由平台返回具体错误）")
 	}
-	// B18-m1（第 18 轮）：快照超过 TTL 过期后复核必须放行——
+	// B18-m1：快照超过 TTL 过期后复核必须放行——
 	// 旧快照可能已失真的名额/窗口数据绝不拦截用户真实操作（放行由平台最终把关，
 	// 与 ElectivesSnapshotFor 的过期回退语义对齐）。
 	s.mu.Lock()
@@ -2475,7 +2475,7 @@ func TestReloginFailureKeepsBackoff(t *testing.T) {
 
 // TestWindowClosedSelectStopsBombing 窗口已确认关闭时（state.WindowClosed=true）tick 守卫
 // 直接挂起提交，SelectClass 0 次调用（C-3 防轰炸主路径回归）。
-// B18-M1（第 18 轮）：真实平台关闭文案"无效的课程ID"不在 isWindowClosedError 匹配集合，
+// B18-M1：真实平台关闭文案"无效的课程ID"不在 isWindowClosedError 匹配集合，
 // 旧实现只靠文案记 full 挡不住 → 复核路径 countList 空报"课程无人数数据" → 永续轰炸；
 // 根因修复在 tick 守卫（WindowClosed 状态挂起提交，与 B11-A1 零值守卫并列）。
 func TestWindowClosedSelectStopsBombing(t *testing.T) {
@@ -2495,7 +2495,7 @@ func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	s.mu.Unlock()
 	s.Start()
 	defer s.Stop()
-	// B18-M1（第 18 轮）：窗口已关闭 → tick 守卫直接挂起提交，SelectClass 0 次调用
+	// B18-M1：窗口已关闭 → tick 守卫直接挂起提交，SelectClass 0 次调用
 	// （比"首轮执行一次再靠 full 挡"更彻底）。
 	time.Sleep(80 * time.Millisecond)
 	fc.mu.Lock()

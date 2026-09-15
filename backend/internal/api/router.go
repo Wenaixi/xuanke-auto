@@ -1,4 +1,4 @@
-package api
+﻿package api
 
 import (
 	"log"
@@ -84,7 +84,7 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
 		Encrypt: encrypt, Decrypt: decrypt, AdminName: adminName}
-	// M-6 修复（第 3 轮）：登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
+	// M-6 修复：登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
 	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。
 	loginLim := newLoginLimiter()
 	activateLim := newLoginLimiter()
@@ -123,7 +123,7 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("GET /api/admin/codes", func(w http.ResponseWriter, r *http.Request) {
 		requireAdminSession(d, d.handleAdminCodes)(w, r)
 	})
-	// B7-M8/M9（第 7 轮）：生成/列表/删除三态同级路由。此前 DELETE 也强制 requireJSONBody，
+	// B7-M8/M9：生成/列表/删除三态同级路由。此前 DELETE 也强制 requireJSONBody，
 	// 但标准 REST 客户端 DELETE 默认无 body（Content-Type 缺失）→ 被 403 拒——管理员用
 	// curl/脚本删除激活码必然踩坑，且 DELETE 分支本就接受空 body（"无副作用无需强制 JSON"）。
 	// POST 仍是副作用+需要 body（强制 JSON 防跨站表单挟持），GET/DELETE 放行空 body。
@@ -182,7 +182,7 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
 		requireAuth(d, d.handleLogout)(w, r)
 	})
-	// B7-C4（第 7 轮）：未知 /api/ 路径显式 404——此前未注册的 /api/xxx 落入
+	// B7-C4：未知 /api/ 路径显式 404——此前未注册的 /api/xxx 落入
 	// main.go 的 mux.Handle("/", SpaHandler) 兜底，返回 index.html（HTTP 200 text/html）：
 	// 前端 fetch 拿到 200 HTML 解析 JSON 报错掩盖真实 404，且被安全扫描误判"任意路径可 200"。
 	// 显式注册 "/api/" 前缀后，所有已注册的精确 method+pattern 优先命中，未匹配的 /api/xxx

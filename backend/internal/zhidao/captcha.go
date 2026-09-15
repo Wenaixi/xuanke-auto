@@ -1,4 +1,4 @@
-package zhidao
+﻿package zhidao
 
 import (
 	"bytes"
@@ -199,7 +199,7 @@ func (v *VisionRecognizer) Recognize(img []byte) (string, error) {
 		}
 		norm := normalizeCaptchaText(raw)
 		if len(norm) < 3 || len(norm) > 5 {
-			// A6（第 4 轮）：不再把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
+			// A6：不再把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
 			// 多租户/NAT 共享出口场景尤甚）——只回传字符数，调试痕迹留在进程日志。
 			log.Printf("[zhidao] Vision 识别字符数 %d 不匹配平台 3~5 位（原文已脱敏不回传）", len(norm))
 			return "", fmt.Errorf("识别长度为 %d，不匹配平台 3~5 位字符", len(norm))

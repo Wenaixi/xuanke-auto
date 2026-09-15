@@ -1,4 +1,4 @@
-package session
+﻿package session
 
 import (
 	"crypto/rand"
@@ -111,7 +111,7 @@ func (s *Store) CreateTicket(account string) string {
 // 注意：本方法只做"校验并占用"，不落任何持久化副作用——调用方（handleActivate）在
 // 校验成功后紧接着调 ConsumeActivationCode 真正消耗激活码并签发会话。
 // 消费成功即作废该票据（一次登录一次激活，重复使用返回错误）。
-// F13-m1（第 13 轮）：票据在激活码校验失败时（无效/用尽/已激活）已被此步占用销毁——
+// F13-m1：票据在激活码校验失败时（无效/用尽/已激活）已被此步占用销毁——
 // 调用方随后返回错误文案且不签发会话，用户必须重新登录拿新票据再试。这是"票据单次、
 // 防重放"的刻意设计决策：宁可输错激活码重登一次，也不让同一票据反复探测不同激活码
 // （票据 5 分钟 TTL 内可被重放穷举）。该契约已在 docs/review-round13.md 与 CLAUDE.md 落盘。

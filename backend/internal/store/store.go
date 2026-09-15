@@ -1,4 +1,4 @@
-package store
+﻿package store
 
 import (
 	"database/sql"
@@ -130,7 +130,7 @@ func (s *Store) SaveSuccess(acct string, classID int) error {
 	return err
 }
 
-// B8-M2（第 8 轮）：DeleteSuccess 手动退选后删除 success 行——否则重启后
+// B8-M2：DeleteSuccess 手动退选后删除 success 行——否则重启后
 // RestoreDone 会把用户已退选的课恢复成"已报名成功"，退选意图丢失。
 func (s *Store) DeleteSuccess(acct string, classID int) error {
 	_, err := s.db.Exec("DELETE FROM success WHERE account = ? AND class_id = ?", acct, classID)

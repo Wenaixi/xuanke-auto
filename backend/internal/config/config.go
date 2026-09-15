@@ -1,4 +1,4 @@
-package config
+﻿package config
 
 import (
 	"crypto/rand"
@@ -84,7 +84,7 @@ func loadDotEnv(path string) {
 		}
 		key = strings.TrimSpace(key)
 		if os.Getenv(key) == "" {
-			// n5 修复（第 3 轮）：不再按 # 截断值——口令/密钥中合法 # 会被截断破坏。
+			// n5 修复：不再按 # 截断值——口令/密钥中合法 # 会被截断破坏。
 			// 旧版"行内注释截断"只服务于模板注释（# 开头行已被上方整行跳过）；
 			// 真实值里出现 # 属于合法字符，宁可保留也不破坏凭据。
 			// (第 6 轮确认)"仅回填空值"语义：XUANKE_MASTER_KEY 在 .env 里会被 loadDotEnv

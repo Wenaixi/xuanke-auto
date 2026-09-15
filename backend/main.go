@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"log"
@@ -170,7 +170,7 @@ func main() {
 	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
 	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
 	openBrowser("http://localhost" + addr)
-	// M-5 修复（第 3 轮）：http.Server 显式超时——公网部署时 slowloris/慢速 POST
+	// M-5 修复：http.Server 显式超时——公网部署时 slowloris/慢速 POST
 	// 不再能占用 goroutine 与连接池饿死调度器 tick 与健康检查。
 	srv := &http.Server{
 		Addr:              addr,

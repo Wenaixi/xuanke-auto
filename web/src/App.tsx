@@ -79,6 +79,27 @@ export default function App() {
     if (current !== adminName) setInAdmin(false)
   }, [accounts, current, adminName])
 
+  // M28-01（第 28 轮）：管理员删除账号后同步清理本地会话——后端 DeleteAccount 只清
+  // 服务端（6 表事务 + RevokeAccount 吊销会话），localStorage 的 xk_sessions 若残留该
+  // 账号条目，会继续占账号槽位、刷新复活，直到下次请求 401 才被吊销链摘除。快照式
+  // 三连（与 logout/onUnauthorized 同款）：从最新快照删该账号 → 落盘 → setState。
+  // 同时若被删账号恰是"当前正在查看的账号"（current）或"代理中的学生账号"
+  // （targetAccount），必须同步退出对应视图态：渲染 `targetAccount ? <Select>` 在
+  // Admin 之前，targetAccount 残留会让管理员卡死在已删账号的代理页（F15-07 同族）。
+  // 注意：绝不调用 logout()——删除的是他人账号，用当前管理员令牌调 /logout 语义
+  // 完全错误（会登出管理员自己）；且服务端会话已由后端 RevokeAccount 吊销，本地
+  // 清除不会造成"令牌仍有效"的残留。
+  const onDeleted = (acct: string) => {
+    const snap = loadSessions()
+    if (snap[acct] === undefined) return
+    const next = { ...snap }
+    delete next[acct]
+    saveSessions(next)
+    setSessions(next)
+    setTargetAccount((prev) => (prev === acct ? null : prev))
+    if (current === acct) setCurrent("")
+  }
+
   // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。
   // 第 4 轮：detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
   // 不到账号时（如本地已注销）跳过，杜绝慢请求乱序返回时按闭包 current 误杀其他账号。
@@ -194,6 +215,7 @@ export default function App() {
                 sessionToken={sessionToken}
                 onLogout={() => logout(sessionToken)}
                 onSelectAccount={(acct) => setTargetAccount(acct)}
+                onDeleted={onDeleted}
                 onBackToStudent={() => {
                   // 切回学生端：改用其他已登录账号，否则退出 admin
                   const others = accounts.filter((a) => a !== adminName)

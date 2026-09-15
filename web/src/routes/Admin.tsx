@@ -40,9 +40,14 @@ interface Props {
   onLogout: () => void
   onBackToStudent: () => void
   onSelectAccount?: (acct: string) => void
+  // M28-01（第 28 轮）：管理员删除账号后通知 App 做本地会话快照式清除——
+  // 后端 DeleteAccount 只清服务端 6 表，前端 localStorage 的 xk_sessions 若不同步
+  // 移除，被删账号会继续占账号槽位、首次刷新复活，直到下次请求 401 才被吊销链
+  // 摘除（"删账号绝不残留"的整套工程理念与后端四段防线对齐，见 App.tsx onDeleted）。
+  onDeleted?: (acct: string) => void
 }
 
-export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount }: Props) {
+export default function Admin({ account, sessionToken, onLogout, onBackToStudent, onSelectAccount, onDeleted }: Props) {
   const [copied, setCopied] = useState("")
   // F12-M2（第 12 轮）：Tabs 受控化——defaultValue 只在首次挂载生效，管理员 Tab 间
   // 切换后状态现场保留；受控 value 只决定激活项，不破坏 Radix Tabs 键盘 roving focus。
@@ -251,6 +256,12 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                       // F8-03（第 8 轮）：删除成功后立即失效账号列表查询——
                       // 否则行要等 10s refetch 轮询才消失，用户刚删的账号仍显示在列表中
                       queryClient.invalidateQueries({ queryKey: ["admin-accounts"] })
+                      // M28-01（第 28 轮）：删除成功必须把本地会话同步摘除（快照式三连，
+                      // 与 logout/onUnauthorized 同款）——后端 6 表已清、前端 sessions 若残留
+                      // 该账号条目，会继续占账号槽位 + 首次刷新复活。DeleteAccount 已由后端
+                      // RevokeAccount 吊销服务端会话，这里绝不调用 logout()（那是用当前管理员
+                      // 令牌登出自己，语义完全不对）。
+                      if (pendingDelete) onDeleted?.(pendingDelete)
                       setPendingDelete(null)
                       toast({ title: "已删除", description: `账号 ${pendingDelete} 已移除` })
                     } catch (e: any) {

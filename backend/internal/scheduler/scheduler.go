@@ -401,7 +401,13 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	// handleAdminDeleteAccount 必须调它而非本方法。
 	if s.store != nil {
 		// B9-02：重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
-		_ = s.store.DeleteRefused(acct)
+		// B36-01：绝不静默吞错——库内 refused 行残留时，重启恢复序 LoadRefused +
+		// RestoreRefused（RestoreTargets 不清 refused，B10-01 契约）会把已重新接管的课程
+		// 恢复成"已手动退选（自动引擎不再接管）"，用户意图与持久化分叉。内存侧 delete
+		// 代表"当前运行期用户意图"正确保留，仅留日志供运维在重启错位时排查。
+		if err := s.store.DeleteRefused(acct); err != nil {
+			log.Printf("[scheduler] 账号 %s 重设目标清空退选记录落库失败（重启后该课会被恢复成'已手动退选'）: %v", acct, err)
+		}
 	}
 	s.rebuildCoursesForAccountLocked(acct, targets)
 }

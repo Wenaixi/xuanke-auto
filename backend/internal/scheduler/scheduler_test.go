@@ -71,6 +71,12 @@ func (f *failStore) SaveRefused(acct string, classID int) error {
 	}
 	return f.fakeStore.SaveRefused(acct, classID)
 }
+func (f *failStore) DeleteRefused(acct string) error {
+	if f.fail {
+		return errors.New("sqlite disk full")
+	}
+	return f.fakeStore.DeleteRefused(acct)
+}
 
 // TestStoreFailuresAreLoggedNotSilentlyDropped 验证失败落库必须记日志（B33-01）——
 // 静默吞错让"内存过半态"无法在重启前被发现。将 log 捕获器注入标准 logger，
@@ -96,6 +102,30 @@ func TestStoreFailuresLogged(t *testing.T) {
 	logMu.Unlock()
 	if !strings.Contains(out, "落库失败") {
 		t.Fatalf("失败落库必须记录错误日志，实际输出: %q", out)
+	}
+}
+
+// TestSetTargetsDeleteRefusedFailureLogged B36-01：重设目标清空库内退选行失败必须记日志——
+// 静默吞掉会让库内 refused 行残留，重启恢复序（RestoreTargets 不清 refused + LoadRefused +
+// RestoreRefused）把已重新接管的课程恢复成"已手动退选"，用户意图与持久化分叉。
+// 本测试可复现：SetTargetsForAccount 前先 MarkDone（落 failed 级别退选历史路径外的 refused
+// 内存态），再在 failStore.fail=true 下重设目标，断言日志出现"清空退选记录落库失败"。
+func TestSetTargetsDeleteRefusedFailureLogged(t *testing.T) {
+	old := log.Writer()
+	defer log.SetOutput(old)
+	var logMu sync.Mutex
+	var logs strings.Builder
+	log.SetOutput(&lockedWriter{mu: &logMu, b: &logs})
+
+	s := New(&fakeAccts{c: newFakeClient(true)}, &failStore{fakeStore: &fakeStore{}, fail: true}, time.Now(), time.Hour)
+	// 触发失败：failStore.fail=true 下重设目标 → DeleteRefused 返回错误
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	logMu.Lock()
+	out := logs.String()
+	logMu.Unlock()
+	if !strings.Contains(out, "清空退选记录落库失败") {
+		t.Fatalf("重设目标清空退选记录失败必须记日志，实际输出: %q", out)
 	}
 }
 

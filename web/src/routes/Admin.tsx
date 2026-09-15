@@ -238,6 +238,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                   onClick={() => setPendingDelete(null)}
                   disabled={deleting}
                   className="text-xs h-8"
+                  autoFocus
                 >
                   取消
                 </Button>

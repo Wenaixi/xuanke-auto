@@ -144,6 +144,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
   // 注意：F7 修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
+  // 镜像 ref：handleBack/flushTargets 是渲染闭包捕获的 async 函数，等待循环期间
+  // 用户新改动触发重渲染不会更新闭包里的 selected/rev 快照——flush 在消费时刻
+  // 必须读 ref 拿最新状态，否则旧快照会把等待期间的新改动覆盖删除（32-01）。
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const revRef = useRef(rev)
+  revRef.current = rev
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
@@ -363,17 +370,25 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     return targets.every((t) => ids.has(t.publish_id))
   }
   const flushTargets = () => {
-    if (rev === 0) return
+    // 消费时刻读 ref：handleBack 等待循环内用户新改动后，渲染闭包的 rev/selected
+    // 是旧快照，必须取 ref 里的最新值（32-01）——否则等待窗口内新增的课程被忽略。
+    const latestSelected = selectedRef.current
+    const latestRev = revRef.current
+    const latestSelectedCount = Object.values(latestSelected).reduce(
+      (n, arr) => n + arr.length,
+      0
+    )
+    if (latestRev === 0) return
     // F17-01：与防抖回调同款消费时刻守卫（同 F15-01 意图，判据从渲染期
     // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
     // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。
-    if (publishesRef.current.length === 0 && selectedCount > 0) {
+    if (publishesRef.current.length === 0 && latestSelectedCount > 0) {
       dirtyRef.current = true // 发布缺席：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
       return
     }
     const targets: Target[] = []
     for (const p of publishesRef.current) {
-      const list = selected[p.publish_id] ?? []
+      const list = latestSelected[p.publish_id] ?? []
       list.forEach((cls, i) => {
         targets.push({
           publish_id: p.publish_id,
@@ -388,7 +403,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // publishesMissing（回调时读旧闭包）；F16-01 的 every 校验对空 targets 恒真。
     // 这里在消费时刻校验"selectedCount>0 却构建出空集"：数据缺席/错位绝非用户清空
     // 意图，保留脏跳过；selectedCount 只随用户改动所在渲染更新，只会偏保守绝不放过。
-    if (targets.length === 0 && selectedCount > 0) {
+    if (targets.length === 0 && latestSelectedCount > 0) {
       dirtyRef.current = true // 联查为空：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
       return
     }
@@ -415,11 +430,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const handleBack = async () => {
     for (let i = 0; i < 3; i++) {
       flushTargets()
-      // F30-01：flush 首次发起的 PUT 在飞（savingRef=true 且 flush 不发脏）时
-      // 不得 break——PUT 失败后 catch 走 scheduleRetry（组件未卸载，因下方等待循环在
-      // onDone 前），退避重试到成功或 21s 超时收敛；旧实现只等"flush 前已有在飞 PUT /
-      // 退避 timer"，flush 自己刚发起的 PUT 恰是唯一没等的路径，失败即静默丢弃改动。
-      if (!dirtyRef.current && !savingRef.current) break        // 无可保留：直接卸载（PUT 已发出，服务端照常落库）
+      // 32-01：flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——
+      // 若等待窗口刚有用户改动（pick 的 setRev → effect 挂 400ms 防抖 timer，异步）
+      // 此刻还没触发，onDone 同步卸载会清掉 timer，改动静默丢失。等一帧后复查
+      // revRef：与本轮 flush 消费的一致才真正静止；又变了就多等一轮 flush 收敛。
+      const flushedRev = revRef.current
+      if (!dirtyRef.current && !savingRef.current) {
+        await new Promise((r) => setTimeout(r, 0))
+        if (revRef.current === flushedRev) break
+        continue // 更晚的改动涌进来：多等一轮防抖/flush 收敛再卸载
+      }
       // F26-01：保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
       // （scheduleRetry 已挂 2/4/8/16s）同样表示内存与后端分叉、改动未落库。此前只等
       // savingRef，退避 timer 在飞时被误判"已静止"→ 三轮后无条件 onDone 卸载、
@@ -698,7 +718,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   (c.class_room_name &&
                     c.class_room_name.toLowerCase().includes(search.toLowerCase()))
 
-                const matchAvailable = !onlyAvailable || c.selected_count < c.max_count
+                // 32-02：max_count=0（名额未公布，与 isFull 判据同源）不能被
+                // "仅看有余量"当已满滤掉——0 表示未公布而非满员，课程照常显示。
+                const matchAvailable = !onlyAvailable || c.max_count === 0 || c.selected_count < c.max_count
                 return matchSearch && matchAvailable
               })
 
@@ -733,12 +755,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                       // 会误显"已满额"徽章并把进度条染红——与后端 IsClassFull 的
                       // `MaxCount>0 && SelectedCount>=MaxCount` 判据同源，0 表示名额未公布而非满员。
                       const isFull = c.max_count > 0 && c.selected_count >= c.max_count
-                      const remaining = Math.max(0, c.max_count - c.selected_count)
+                      // 32-02：max_count=0 时 remaining 恒 0 会误显"余 0 席"琥珀警示——
+                      // 名额未公布（0）不是快满，徽章改显"名额未公布"、进度色回 emerald。
+                      const remaining = c.max_count > 0 ? Math.max(0, c.max_count - c.selected_count) : 0
+                      const unannounced = c.max_count <= 0
 
                       // 进度条与徽章色彩分配
                       let progressColor: "emerald" | "amber" | "rose" | "cyan" = "emerald"
                       if (isFull) progressColor = "rose"
-                      else if (remaining <= 5) progressColor = "amber"
+                      else if (!unannounced && remaining <= 5) progressColor = "amber"
                       else if (isSelected) progressColor = "cyan"
 
                       return (
@@ -763,6 +788,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               ) : isFull ? (
                                 <Badge variant="outline" className="text-[11px] text-neutral-500 border-neutral-800">
                                   已满额
+                                </Badge>
+                              ) : unannounced ? (
+                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-800">
+                                  名额未公布
                                 </Badge>
                               ) : remaining <= 5 ? (
                                 <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-700">
@@ -940,6 +969,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   onClick={() => setExitModalClass(null)}
                   disabled={actionLoading.has(exitModalClass.id)}
                   className="text-xs h-8"
+                  autoFocus
                 >
                   取消
                 </Button>

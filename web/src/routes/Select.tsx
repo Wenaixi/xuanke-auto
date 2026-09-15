@@ -858,7 +858,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   <span>已报容量</span>
                                 </span>
                                 <span className="text-white font-mono tabular-nums">
-                                  {c.selected_count} / {c.max_count} 人 ({rate}%)
+                                  {unannounced
+                                    ? `${c.selected_count} 人已报 · 名额未公布`
+                                    : `${c.selected_count} / ${c.max_count} 人 (${rate}%)`}
                                 </span>
                               </div>
                               <Progress

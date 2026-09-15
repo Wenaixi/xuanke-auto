@@ -564,11 +564,17 @@ func (s *Scheduler) Stop() {
 }
 
 // StateForAccount 返回指定账号的状态快照（Courses 仅含该账号目标；WindowOpened 全校共享）。
+// B29-02（第 29 轮）：WindowClosed 字段用 windowClosedLocked() 实时计算——此前只写
+// s.state.WindowClosed（probe 主判据），WindowClosed() 方法的两条兜底判据（B19-01 时钟
+// 连续失败、B20-02 幽灵窗口 EmptyProbeRuns）返回 true 时不回写字段：幽灵窗口/时钟失败
+// 场景下 /api/state 下发 window_closed=false，前端横幅仍显示倒计时/"已开放"、日志与课程
+// 轮询维持 10s/2s 高频（F9-07 降频机制失效）——展示与实际挂起状态分叉。
 func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	st.OpenTime = s.openTimeNow() // 运行时配置优先（热重载立即反映）
+	st.WindowClosed = s.windowClosedLocked() // B29-02：三条判据单源（含兜底），与 WindowClosed() 同真相
+	st.OpenTime = s.openTimeNow()            // 运行时配置优先（热重载立即反映）
 	st.TokenValid = s.tokenValidForLocked(acct)
 	st.Courses = nil
 	for _, c := range s.state.Courses {
@@ -735,6 +741,15 @@ func (s *Scheduler) WindowOpened() bool {
 func (s *Scheduler) WindowClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.windowClosedLocked()
+}
+
+// windowClosedLocked 计算窗口关闭判定（需持 s.mu）——三条判据单源：
+// 1) 主判据 s.state.WindowClosed（B18-M1：至少开过窗 + 空快照 + 已过开窗点 10s，probe 写入）；
+// 2) B19-01：时钟连续失败 ≥3（平台不可达信号）且开放时间非零；
+// 3) B20-02：从未开过窗 + EmptyProbeRuns≥3（幽灵窗口量变）且开放时间非零。
+// StateForAccount 与 WindowClosed() 共用同一实现，杜绝两套真相分叉（B29-02）。
+func (s *Scheduler) windowClosedLocked() bool {
 	if s.state.WindowClosed {
 		return true
 	}

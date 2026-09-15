@@ -1479,6 +1479,54 @@ func TestWindowClosedTransitionStateGrace(t *testing.T) {
 	}
 }
 
+// TestStateForAccountMirrorsWindowClosed B29-02：StateForAccount 的 window_closed 字段
+// 必须与 WindowClosed() 方法同真相——此前只写 s.state.WindowClosed（probe 主判据），
+// 兜底判据（B19-01 时钟连续失败 / B20-02 幽灵窗口 EmptyProbeRuns）返回 true 时不回写
+// 字段：幽灵窗口/时钟失败场景下 /api/state 下发 window_closed=false，前端横幅仍显示
+// 倒计时/"已开放"、日志与课程轮询维持高频（F9-07 降频失效），展示与实际挂起状态分叉。
+// 修复前（StateForAccount 直接浅拷贝 state.WindowClosed）：红——时钟失败≥3 时
+// WindowClosed() 返回 true 但状态字段仍 false。
+// 修复后（共用 windowClosedLocked 单源）：绿——三条判据（主判据/时钟兜底/幽灵窗口兜底）
+// 全部镜像进状态字段。
+func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
+	// 场景 1：幽灵窗口兜底判据（EmptyProbeRuns≥3 + 从未开窗 + 开放时间已过）
+	s1 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s1.mu.Lock()
+	s1.state.EmptyProbeRuns = 3
+	s1.mu.Unlock()
+	if !s1.WindowClosed() {
+		t.Fatal("前置：EmptyProbeRuns=3 + 从未开窗 + 已过开窗点应视同关闭")
+	}
+	if !s1.StateForAccount("acct1").WindowClosed {
+		t.Fatal("幽灵窗口兜底（EmptyProbeRuns=3）必须镜像进 StateForAccount.window_closed（B29-02）")
+	}
+
+	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间非零）
+	s2 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s2.mu.Lock()
+	s2.syncFailStreak = 3
+	s2.mu.Unlock()
+	if !s2.WindowClosed() {
+		t.Fatal("前置：syncFailStreak=3 + 开放时间非零应视同关闭")
+	}
+	if !s2.StateForAccount("acct1").WindowClosed {
+		t.Fatal("时钟兜底（syncFailStreak=3）必须镜像进 StateForAccount.window_closed（B29-02）")
+	}
+
+	// 场景 3：主判据（state.WindowClosed 已置位）照旧镜像 + 非关闭状态不误报
+	s3 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
+	s3.mu.Lock()
+	s3.state.WindowClosed = true
+	s3.mu.Unlock()
+	if !s3.StateForAccount("acct1").WindowClosed {
+		t.Fatal("主判据置位必须镜像进状态字段")
+	}
+	s4 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
+	if s4.StateForAccount("acct1").WindowClosed {
+		t.Fatal("无任何判据命中时 window_closed 必须为 false（不误报）")
+	}
+}
+
 // TestReleaseFullIfFreedEvenIfSnapshotOld 验证快照超过 40s 老化期但名额有空余时，
 // 调度器绝不能死守 full 标记，必须立即解除满员状态，以便黄金期捡漏抢课 (CRITICAL C1)。
 func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {

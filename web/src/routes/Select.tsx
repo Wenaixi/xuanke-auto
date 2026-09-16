@@ -63,10 +63,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // F9-05：澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
       // electives 自身响应（ElectivesData）无 window_closed 字段，且 /state 每 2s 刷新
       // 触发组件重渲染，react-query 用最新闭包重调度轮询间隔，闭包永不陈旧。
+      // 注意：此处绝不直接读组件顶部的 stateData（声明在下方）——refetchInterval 回调
+      // 在 useQuery 创建实例时即被同步调用，此刻 stateData 的 const 声明尚未执行，
+      // 直读会命中 JS 暂存死区（TDZ）抛 ReferenceError，整个组件渲染中断黑屏。
+      // 改从 react-query 缓存按查询 key 读取 /state 最新值，与 stateData 同源且零时序依赖。
+      const st = queryClient.getQueryData<SchedulerState>(["state", account, sessionToken])
       const pubs = query.state.data?.publishes ?? []
       const inRange = pubs.some((p) => p.in_date_range)
-      if (stateData?.window_closed) return 30000
-      return inRange || stateData?.window_opened ? 2000 : 10000
+      if (st?.window_closed) return 30000
+      return inRange || st?.window_opened ? 2000 : 10000
     },
   })
 

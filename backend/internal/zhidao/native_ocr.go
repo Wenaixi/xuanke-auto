@@ -67,12 +67,19 @@ func (r *NativeDdddOcrRecognizer) ensureInit() error {
 			r.err = fmt.Errorf("释出 charsets_old.json 失败: %w", err)
 			return
 		}
+		// modelPath/charsetsPath 必须与释出文件名一致：官方 OCR 模式按
+		// ModelDir 下固定名 common_old.onnx / charsets_old.json 查找。
 
 		ddddocr.SetOnnxRuntimePath(dllPath)
+		// 关键：必须走官方 OCR 模式（ModelDir），绝不走自定义模型路径
+		// （ImportOnnxPath+CharsetsPath）——移植库的自定义模型分支用 ImageNet 归一化
+		// (x-0.456)/0.224 预处理，与官方内置模型训练时的 (x-0.5)/0.5 不一致，同一张
+		// 英数字验证码识别结果完全错误（实测 cap1: 官方 'sjmh' vs 自定义 'S43'），
+		// 登录链路验证码提交必被拒。官方 OCR 模式从 ModelDir 读取 common_old.onnx
+		// 与 charsets_old.json，预处理与 Python 原版逐字段一致。
 		opts := ddddocr.Options{
-			Ocr:            true,
-			ImportOnnxPath: modelPath,
-			CharsetsPath:   charsetsPath,
+			Ocr:      true,
+			ModelDir: dir,
 		}
 		inst, err := ddddocr.New(opts)
 		if err != nil {

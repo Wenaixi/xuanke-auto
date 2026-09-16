@@ -487,11 +487,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // （只含用户新改动）整包 PUT 覆盖删掉后端旧目标（"添加一门"变"替换全部"）。
     // 只有回显已完成（echoedRef 置位）或确证后端无旧目标（/state 已到且 courses 为空）
     // 才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，flush 自然全量提交。
+    // 关键：等待只在"用户实际有改动"（revRef>0）时才需要——纯浏览（rev===0，SELECTED 0）
+    // 时 flush 本就在 F13-C1 的 rev===0 处直接跳过、零覆盖风险，绝无理由等首帧。
     // 5s 兜底：/state 持续失败时合并永不发生，等无可等继续——flush 内假清空守卫仍拦截
     // 发布缺席的覆盖（安全方向）。注意 5s 等待只在"首帧未到"（stateData===undefined）
     // 或首帧确实携带旧目标（courses 非空）时才会发生——courses 为空（窗口已关/无目标）
     // 时 echoedRef 已在回显 effect 空分支置位、条件不成立，点击返回立即放行。
     if (
+      revRef.current > 0 &&
       !echoedRef.current &&
       (stateData === undefined || (stateData.courses?.length ?? 0) > 0)
     ) {

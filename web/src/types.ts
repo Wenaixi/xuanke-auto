@@ -46,7 +46,10 @@ export interface CourseStatus {
 }
 
 export interface SchedulerState {
+  // 当前账号的"预计开放时间"（管理员配置或平台 beginTimes 自动识别）；
+  // open_time_known=false = 未识别到（识别不到就是未知），open_time 为零值字符串。
   open_time: string
+  open_time_known: boolean
   window_opened: boolean
   // n12：窗口已关闭信号（后端探测到空快照且从未开过窗即置真）。
   // 前端据此降频轮询——状态已定型，不必再 3 秒高频打接口。

@@ -627,9 +627,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
-  // 选课开放时间倒计时（来自调度器状态，窗口 2026-09-13 09:00:00）
+  // 选课开放时间倒计时（来自调度器状态——管理员配置或平台 beginTimes 自动识别，
+  // 识别不到 = 未知，绝不显示编造时间）。
   const openTimeStr =
-    stateData?.open_time && stateData.open_time !== "0001-01-01T00:00:00Z"
+    stateData?.open_time_known && stateData.open_time
       ? stateData.open_time
       : null
   // F9-07：统一用 lib 共享 useTickingCountdown——与 Dashboard 同一实现、
@@ -689,7 +690,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 过去时刻 → isExpired 恒 true）横幅永远显示"已开放"，与同屏 F14-03 空态卡
                 自相矛盾——isExpired 只是本地"倒计时走到 0"，不说明窗口开放或已关闭；
                 改为 window_closed 优先显"已关闭"，否则按 window_opened 判定。 */}
-            {!stateData || !openTimeStr ? (
+            {!stateData ? (
               <span>正在同步选课开放时间...</span>
             ) : stateData.window_closed ? (
               <span className="text-neutral-400 font-medium flex items-center gap-1.5 whitespace-nowrap">
@@ -700,6 +701,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               <span className="text-white font-medium flex items-center gap-1.5 whitespace-nowrap">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 选课窗口已开放
+              </span>
+            ) : !openTimeStr ? (
+              <span className="truncate">
+                未识别到开放时间
+                <span className="text-neutral-500">（平台尚未下发 beginTimes）</span>
               </span>
             ) : cd.isExpired ? (
               <span className="truncate">本地已到开窗点，等待平台窗口开放...</span>
@@ -713,9 +719,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             )}
           </div>
           <span className="text-neutral-500 font-mono hidden sm:block shrink-0">
-            {openTimeStr
+            {stateData?.open_time_known && openTimeStr
               ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-              : "SYNC"}
+              : "未知"}
           </span>
         </div>
 

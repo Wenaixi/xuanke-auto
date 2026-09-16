@@ -35,10 +35,14 @@ type CourseStatus struct {
 
 // SchedulerState 对外状态快照。
 type SchedulerState struct {
-	OpenTime     time.Time      `json:"open_time"`
-	WindowOpened bool           `json:"window_opened"`
-	WindowClosed bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
-	TokenValid   bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
+	// OpenTime 当前账号的"预计开放时间"——优先取管理员配置，未配置时取该账号
+	// 自己探测识别的 beginTimes（全校共享同一开窗时刻）；识别不到且无配置 = 未知
+	// （零值 + OpenTimeKnown=false），前端展示"未识别到开放时间"，绝不显示编造时间。
+	OpenTime     time.Time `json:"open_time"`
+	OpenTimeKnown bool      `json:"open_time_known"` // 是否已识别到开放时间（管理员配置或平台 beginTimes）
+	WindowOpened bool      `json:"window_opened"`
+	WindowClosed bool      `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
+	TokenValid   bool      `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
 	Courses      []CourseStatus `json:"courses"`
 	// EmptyProbeRuns B20-02："空快照且从未开窗"的连续探测轮数——WindowClosed
 	// 视同关闭判据之一（探测量变），由 probe() 入账推进、开窗/非空快照归零；零值=尚未连续
@@ -149,6 +153,10 @@ type Scheduler struct {
 	mu               sync.Mutex
 	acctTargets      map[string][]Target // 按账号隔离的目标课程
 	state            SchedulerState
+	// openTimeDetected 按账号隔离的"平台下发 beginTimes 识别结果"（毫秒时间戳）。
+	// 识别时间 = 平台真实开窗时刻（HAR 实证全校共享单值，select.js 用它做 1500ms
+	// 开窗探测）；每个账号只认自己探测识别的值，识别不到 = 未知（绝不借用别账号）。
+	openTimeDetected map[string]int64
 	inflight         map[string]map[int]bool // [账号][classID] 正在提交
 	done             map[string]map[int]bool // [账号][classID] 已成功
 	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
@@ -207,9 +215,10 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		relogging:   make(map[string]bool),
 		rateLimited: make(map[string]map[int]time.Time),
 		chains:      make(map[string]bool),
-		probeSem:    make(chan struct{}, 4), // F17-01：per-account 探测并发上限
-		acctData:    make(map[string]*zhidao.ElectivesData),
-		acctDataAt:  make(map[string]time.Time),
+		probeSem:     make(chan struct{}, 4), // F17-01：per-account 探测并发上限
+		acctData:     make(map[string]*zhidao.ElectivesData),
+		acctDataAt:   make(map[string]time.Time),
+		openTimeDetected: make(map[string]int64),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -428,6 +437,7 @@ func (s *Scheduler) PurgeAccount(acct string) {
 	delete(s.refused, acct)
 	delete(s.acctData, acct)
 	delete(s.acctDataAt, acct)
+	delete(s.openTimeDetected, acct) // 开放时间识别槽随账号全量清理，绝不残留旧批次识别值
 	delete(s.tokenValid, acct)
 	delete(s.reloginAt, acct)
 	delete(s.reloginFail, acct)
@@ -587,7 +597,24 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	defer s.mu.Unlock()
 	st := s.state
 	st.WindowClosed = s.windowClosedLocked() // B29-02：三条判据单源（含兜底），与 WindowClosed() 同真相
-	st.OpenTime = s.openTimeNow()            // 运行时配置优先（热重载立即反映）
+	// 开放时间解析优先级：管理员显式配置（openTimeNow 非零）> 该账号自识别 beginTimes
+	// （存在即 know）> 二者皆无 = 未知（零值 + known=false）。识别值按账号隔离存储——
+	// 该账号没探测过就没有识别值，绝不借用其他账号的识别结果（识别不到=未知）。
+	if t := s.openTimeNow(); !t.IsZero() {
+		st.OpenTime = t
+		st.OpenTimeKnown = true
+	} else if ms, ok := s.openTimeDetected[acct]; ok && ms > 0 {
+		st.OpenTime = time.UnixMilli(ms)
+		st.OpenTimeKnown = true
+	} else if ms, ok := s.openTimeDetected["*"]; ok && ms > 0 {
+		// 全局识别槽兜底（probe() 主体刷新）：该账号自身没探测过，但全校探测已识别到
+		// 平台统一开窗时刻（HAR 实证全校共享单值）——直接展示，无需等待该账号首探。
+		st.OpenTime = time.UnixMilli(ms)
+		st.OpenTimeKnown = true
+	} else {
+		st.OpenTime = time.Time{}
+		st.OpenTimeKnown = false
+	}
 	st.TokenValid = s.tokenValidForLocked(acct)
 	st.Courses = nil
 	for _, c := range s.state.Courses {
@@ -707,6 +734,16 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// 与 B16-M1 已消灭的"写入本地/读对齐"混用模式同族（偏差 ~640ms 对 2s/30s 节流与
 	// `now.After(open)` 窗口判点无实质错误，但契约不自洽）。
 	now := s.nowAligned()
+	// 开放时间识别入账：平台顶层 beginTimes 毫秒数组（HAR 实证全校共享单值，
+	// select.js 只做 1500ms 开窗探测、不按发布/账号区分）。数组非空即把首元素记入
+	// 该账号识别槽；未下发/空数组时清空该账号识别槽（识别不到=未知，绝不保留旧批次
+	// 过期时间）。按账号分别维护——多账号各记各的识别结果，绝不互相借用。
+	if len(data.BeginTimes) > 0 {
+		s.openTimeDetected[acct] = data.BeginTimes[0]
+		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
+	} else {
+		delete(s.openTimeDetected, acct)
+	}
 	s.mu.Lock()
 	if s.acctData == nil {
 		s.acctData = make(map[string]*zhidao.ElectivesData)
@@ -954,6 +991,17 @@ func (s *Scheduler) probe() {
 		}
 		log.Printf("[scheduler] 查询课程失败: %v", err)
 		return
+	}
+	// 开放时间识别入账（全局探测载体更新）：平台顶层 beginTimes 毫秒数组（HAR 实证
+	// 全校共享单值，select.js 只做 1500ms 开窗探测、不按发布/账号区分）。数组非空即把
+	// 首元素记入全局识别槽；未下发/空数组时清空（识别不到=未知，绝不保留旧批次过期
+	// 时间）。全局车（AnyClient）是首个注册账号，与账号级识别（ProbeForAccount 各自
+	// 入账）互不干扰——每个账号都只管自己的识别槽，谁探测到谁用。
+	if len(data.BeginTimes) > 0 {
+		s.openTimeDetected["*"] = data.BeginTimes[0]
+		log.Printf("[scheduler] 识别到开放时间 %s（平台 beginTimes）", time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
+	} else {
+		delete(s.openTimeDetected, "*")
 	}
 	s.mu.Lock()
 	s.probing = false

@@ -69,8 +69,10 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // F9-07：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
   // 且 effect 依赖 [] 时 interval 内读 Date.now() 而非闭包 state——绝不随 target 卡旧值。
   const courses = state?.courses ?? []
+  // 开放时间优先管理员配置，未配置时取平台 beginTimes 自动识别；识别不到 = 未知
+  // （open_time_known=false），倒计时组件 target=null 即显全 00 + 过期态，绝不显示编造时间。
   const openTimeStr =
-    state?.open_time && state.open_time !== "0001-01-01T00:00:00Z" ? state.open_time : null
+    state?.open_time_known && state.open_time ? state.open_time : null
   const cd = useTickingCountdown(openTimeStr)
 
   return (
@@ -200,7 +202,9 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                       <span className="text-white">
                         {openTimeStr
                           ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-                          : "正在同步教务平台时间配置..."}
+                          : state
+                            ? "未识别到开放时间"
+                            : "正在同步教务平台时间配置..."}
                       </span>
                     </span>
                     <span className="text-neutral-500">

@@ -54,11 +54,12 @@ __pycache__/
 Thumbs.db
 
 # ============= 归档区（历史审查文档与重构产物） =============
-# 4-38 轮全模块审查文档已归档到 archive/review-rounds/ 并入库（git mv 保留历史）。
-# archive/ 下其余内容一律忽略（重构临时草稿等）；新增审查文档放 archive/review-rounds/
-# 即自动被跟踪（父目录 !re-include 后子项不受忽略）。
+# 4-38 轮全模块审查文档已归档到 archive/review-rounds/、早期计划与规格归档到
+# archive/superpowers/（git mv 保留历史、参与版本管理）。archive/ 下其余内容一律
+# 忽略（重构临时草稿等）；新增归档物放 archive/<分类>/ 即自动被跟踪。
 archive/*
 !archive/review-rounds/
+!archive/superpowers/
 
 # 重构过程临时草稿（组装 CLAUDE.md 的中间产物，完工即删）
 _rd_*.md

@@ -488,7 +488,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 只有回显已完成（echoedRef 置位）或确证后端无旧目标（/state 已到且 courses 为空）
     // 才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，flush 自然全量提交。
     // 5s 兜底：/state 持续失败时合并永不发生，等无可等继续——flush 内假清空守卫仍拦截
-    // 发布缺席的覆盖（安全方向）。
+    // 发布缺席的覆盖（安全方向）。注意 5s 等待只在"首帧未到"（stateData===undefined）
+    // 或首帧确实携带旧目标（courses 非空）时才会发生——courses 为空（窗口已关/无目标）
+    // 时 echoedRef 已在回显 effect 空分支置位、条件不成立，点击返回立即放行。
     if (
       !echoedRef.current &&
       (stateData === undefined || (stateData.courses?.length ?? 0) > 0)
@@ -503,6 +505,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       await new Promise((r) => setTimeout(r, 0))
     }
     for (let i = 0; i < 3; i++) {
+      // 33-01：首帧未到等满 5s 后，若回显合并仍未发生（/state 持续失败），继续 flush
+      // 是唯一合法路径——flush 内的假清空守卫（发布缺席 + 已有选中）仍拦截覆盖；若
+      // /state 已经成功但 courses 非空，回显 effect 必然已合并完成，5s 内 echoedRef 已
+      // 置位，条件不成立。本循环 flush 消费最新 ref 快照。
       flushTargets()
       // 32-01：flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——
       // 若等待窗口刚有用户改动（pick 的 setRev → effect 挂 400ms 防抖 timer，异步）

@@ -171,6 +171,16 @@ func TestTargetsByAccount(t *testing.T) {
 	if len(l2) != 1 || l2[0].ClassID != 61205 {
 		t.Fatalf("acct2 目标异常: %+v", l2)
 	}
+	// 发布元数据持久化契约：publish_name/begin_date 随目标落库并读回——窗口关闭后
+	// /state 重建课程状态仍自带日期/发布名（scheduler 保存前已补全，store 只需忠实存取）
+	t3 := []scheduler.Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0, PublishName: "高二年体育", BeginDate: "2026-09-13 09:00:00"}}
+	if err := s.SetTargetsForAccount("acct1", t3); err != nil {
+		t.Fatal(err)
+	}
+	l3, _ := s.LoadTargetsForAccount("acct1")
+	if len(l3) != 1 || l3[0].PublishName != "高二年体育" || l3[0].BeginDate != "2026-09-13 09:00:00" {
+		t.Fatalf("发布元数据持久化失败: %+v", l3)
+	}
 	// 替换清空
 	if err := s.SetTargetsForAccount("acct1", nil); err != nil {
 		t.Fatal(err)

@@ -62,6 +62,12 @@ func (p *persistentStore) LoadRefused() (map[string][]int, error) {
 	return out, nil
 }
 
+// SetTargetsForAccount 真实语义的目标落库：persistentStore 继承 fakeStore 的 no-op
+// SetTargetsForAccount（仅测试 refused 顺序契约，不关心目标持久化内容）。
+func (p *persistentStore) SetTargetsForAccount(acct string, targets []Target) error {
+	return nil
+}
+
 // TestRefusedNeverResubmitted 用户手动退选后自动引擎绝不抢回（第 4 轮 MAJOR A2）：
 // RemoveDone 记入 refused 集合，spawnChain 命中即跳过——即使窗口开放、课程未满、
 // 快照显示可报，也绝不再次调用 SelectClass；重新设为目标后 refused 解除，恢复自动接管。

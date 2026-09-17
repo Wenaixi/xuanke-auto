@@ -50,7 +50,7 @@ func refuseLegacy(d *sql.DB) error {
 		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动")
 	}
 	// 旧 v2 库缺列（targets.priority / task_log.account）——不兼容，提示删除重建
-	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}} {
+	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}, {"targets", "publish_name"}, {"targets", "begin_date"}} {
 		ok, err := columnExists(d, col[0], col[1])
 		if err != nil {
 			return err

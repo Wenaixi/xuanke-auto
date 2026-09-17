@@ -15,22 +15,29 @@ import (
 )
 
 // Target 目标课程（同发布多门备选，Priority 越小越先提交）。
+// PublishName/BeginDate 发布元数据（平台快照带入，随目标持久化）：
+// 窗口关闭后 /electives 空发布、前端分组所需映射丢失，这两列保证 /state.courses
+// 自带日期/发布名，分组与展示不依赖 /electives（关闭≠数据消失）。
 type Target struct {
-	PublishID  int    `json:"publish_id"`
-	ClassID    int    `json:"class_id"`
-	CourseName string `json:"course_name"`
-	Priority   int    `json:"priority"`
+	PublishID   int    `json:"publish_id"`
+	ClassID     int    `json:"class_id"`
+	CourseName  string `json:"course_name"`
+	Priority    int    `json:"priority"`
+	PublishName string `json:"publish_name,omitempty"`
+	BeginDate   string `json:"begin_date,omitempty"`
 }
 
 // CourseStatus 单课程任务状态。
 type CourseStatus struct {
-	Account    string `json:"account"`
-	PublishID  int    `json:"publish_id"`
-	ClassID    int    `json:"class_id"`
-	CourseName string `json:"course_name"`
-	Priority   int    `json:"priority"`
-	Status     string `json:"status"` // pending|in_range|submitted|success|failed
-	Result     string `json:"result"`
+	Account     string `json:"account"`
+	PublishID   int    `json:"publish_id"`
+	ClassID     int    `json:"class_id"`
+	CourseName  string `json:"course_name"`
+	Priority    int    `json:"priority"`
+	Status      string `json:"status"` // pending|in_range|submitted|success|failed
+	Result      string `json:"result"`
+	PublishName string `json:"publish_name,omitempty"` // 发布名（发布元数据透传，窗口关闭仍可显示）
+	BeginDate   string `json:"begin_date,omitempty"`   // 发布日期（YYYY-MM-DD 前缀，窗口关闭仍可分组）
 }
 
 // SchedulerState 对外状态快照。
@@ -138,6 +145,7 @@ type Store interface {
 	SaveRefused(acct string, classID int) error   // B9-02：手动退选记库，重启后自动引擎仍不抢回
 	DeleteRefused(acct string) error              // B9-02：重设目标清空该账号全部退选标记
 	DeleteRefusedClass(acct string, classID int) error // 手动重报成功清单条退选行（与内存侧解除对称）
+	SetTargetsForAccount(acct string, targets []Target) error // 保存目标（含发布元数据持久化）
 }
 
 // Scheduler 定时抢课引擎。多账号目标与已完成状态均按账号隔离。
@@ -410,6 +418,33 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	// 全量清理（含 acctData/tokenValid/relogin 族）归 PurgeAccount——管理员删除路径
 	// handleAdminDeleteAccount 必须调它而非本方法。
 	if s.store != nil {
+		// 发布元数据补全：目标选定时平台快照（acctData）通常刚探测、还带全量
+		// publishes——把 publish_id 对应的 publish_name/begin_date 合并进目标，随库
+		// 持久化。窗口关闭后 /electives 空发布、后端快照也空（解析清空），此批补全
+		// 是窗口关闭后日期/发布名仍可显示的唯一机会窗（下一次保存只剩内存残留）。
+		enriched := make([]Target, len(targets))
+		copy(enriched, targets)
+		if data := s.acctData[acct]; data != nil {
+			for i := range enriched {
+				for _, p := range data.Publishes {
+					if p.PublishID == enriched[i].PublishID {
+						if enriched[i].PublishName == "" {
+							enriched[i].PublishName = p.PublishName
+						}
+						if enriched[i].BeginDate == "" {
+							enriched[i].BeginDate = p.BeginDate
+						}
+						break
+					}
+				}
+			}
+		}
+		targets = enriched // 内存态与 store 均用补全后的目标（CourseStatus 随之带元数据）
+		s.acctTargets[acct] = targets
+		// 落库带发布元数据：窗口关闭后 /state.courses 仍自带日期/发布名。
+		if err := s.store.SetTargetsForAccount(acct, targets); err != nil {
+			log.Printf("[scheduler] 账号 %s 保存目标落库失败: %v", acct, err)
+		}
 		// B9-02：重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
 		// B36-01：绝不静默吞错——库内 refused 行残留时，重启恢复序 LoadRefused +
 		// RestoreRefused（RestoreTargets 不清 refused，B10-01 契约）会把已重新接管的课程
@@ -488,13 +523,15 @@ func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target
 			result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 		}
 		s.state.Courses = append(s.state.Courses, CourseStatus{
-			Account:    acct,
-			PublishID:  t.PublishID,
-			ClassID:    t.ClassID,
-			CourseName: t.CourseName,
-			Priority:   t.Priority,
-			Status:     status,
-			Result:     result,
+			Account:     acct,
+			PublishID:   t.PublishID,
+			ClassID:     t.ClassID,
+			CourseName:  t.CourseName,
+			Priority:    t.Priority,
+			Status:      status,
+			Result:      result,
+			PublishName: t.PublishName, // 发布元数据随目标透传（窗口关闭后分组/展示仍在）
+			BeginDate:   t.BeginDate,
 		})
 	}
 }
@@ -735,14 +772,13 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// `now.After(open)` 窗口判点无实质错误，但契约不自洽）。
 	now := s.nowAligned()
 	// 开放时间识别入账：平台顶层 beginTimes 毫秒数组（HAR 实证全校共享单值，
-	// select.js 只做 1500ms 开窗探测、不按发布/账号区分）。数组非空即把首元素记入
-	// 该账号识别槽；未下发/空数组时清空该账号识别槽（识别不到=未知，绝不保留旧批次
-	// 过期时间）。按账号分别维护——多账号各记各的识别结果，绝不互相借用。
+	// select.js 只做 1500ms 开窗探测、不按发布/账号区分）。识别时间 = 平台已训示的
+	// 开窗时刻（事实），窗口关闭后空快照不带 begin_times 但识别值必须保留——
+	// 关闭≠时间消失，前端倒计时归零/显示已结束而非"未知"。空快照不删除识别槽，
+	// 只在下发非空 begin_times 时覆盖（新批次热更仍生效）。
 	if len(data.BeginTimes) > 0 {
 		s.openTimeDetected[acct] = data.BeginTimes[0]
 		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
-	} else {
-		delete(s.openTimeDetected, acct)
 	}
 	s.mu.Lock()
 	if s.acctData == nil {
@@ -993,15 +1029,12 @@ func (s *Scheduler) probe() {
 		return
 	}
 	// 开放时间识别入账（全局探测载体更新）：平台顶层 beginTimes 毫秒数组（HAR 实证
-	// 全校共享单值，select.js 只做 1500ms 开窗探测、不按发布/账号区分）。数组非空即把
-	// 首元素记入全局识别槽；未下发/空数组时清空（识别不到=未知，绝不保留旧批次过期
-	// 时间）。全局车（AnyClient）是首个注册账号，与账号级识别（ProbeForAccount 各自
-	// 入账）互不干扰——每个账号都只管自己的识别槽，谁探测到谁用。
+	// 全校共享单值，select.js 只做 1500ms 开窗探测、不按发布/账号区分）。识别时间 =
+	// 平台已训示的开窗时刻（事实），窗口关闭后空快照不带 begin_times 但识别值必须
+	// 保留——关闭≠时间消失。空快照不删除识别槽，只在下发非空 begin_times 时覆盖。
 	if len(data.BeginTimes) > 0 {
 		s.openTimeDetected["*"] = data.BeginTimes[0]
 		log.Printf("[scheduler] 识别到开放时间 %s（平台 beginTimes）", time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
-	} else {
-		delete(s.openTimeDetected, "*")
 	}
 	s.mu.Lock()
 	s.probing = false

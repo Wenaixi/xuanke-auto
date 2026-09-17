@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 -- 目标课程（按账号隔离 + 备选优先级，priority 越小越先提交）
+-- publish_name/begin_date：发布元数据随目标持久化（窗口关闭后 /state.courses
+-- 仍自带日期/发布名，前端分组零依赖 /electives——关闭≠元数据丢失）
 CREATE TABLE IF NOT EXISTS targets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   account TEXT NOT NULL,
@@ -22,6 +24,8 @@ CREATE TABLE IF NOT EXISTS targets (
   class_id INTEGER NOT NULL,
   course_name TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 0,
+  publish_name TEXT NOT NULL DEFAULT '',
+  begin_date TEXT NOT NULL DEFAULT '',
   allow_swap INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

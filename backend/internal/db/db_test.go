@@ -23,6 +23,27 @@ func TestOpenAndSchema(t *testing.T) {
 	// 新列存在性检查
 	d.QueryRow("SELECT priority FROM targets LIMIT 0").Scan(&n)
 	d.QueryRow("SELECT account FROM task_log LIMIT 0").Scan(&n)
+	d.QueryRow("SELECT publish_name FROM targets LIMIT 0").Scan(&n)
+	d.QueryRow("SELECT begin_date FROM targets LIMIT 0").Scan(&n)
+}
+
+// TestRefuseOldSchemaMissingPublishMeta 缺 publish_name/begin_date 列的旧库必须被拒绝启动——
+// 发布元数据随目标持久化是窗口关闭后日期/发布名仍可显示的数据源，缺列即旧数据形状。
+func TestRefuseOldSchemaMissingPublishMeta(t *testing.T) {
+	for _, col := range []string{"publish_name", "begin_date"} {
+		path := filepath.Join(t.TempDir(), "old.db")
+		d, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Exec("CREATE TABLE targets (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, publish_id INTEGER, class_id INTEGER, course_name TEXT, priority INTEGER, allow_swap INTEGER, created_at TEXT)"); err != nil {
+			t.Fatal(err)
+		}
+		d.Close()
+		if _, err := Open(path); err == nil {
+			t.Fatalf("缺 %s 列的旧库应被拒绝启动", col)
+		}
+	}
 }
 
 // TestRefuseOldSchemaMissingColumns v2 库缺 priority/account 列必须被拒绝启动。

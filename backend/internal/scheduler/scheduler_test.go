@@ -51,6 +51,7 @@ func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
 func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
 func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
 func (f *fakeStore) DeleteRefusedClass(acct string, classID int) error { return nil }
+func (f *fakeStore) SetTargetsForAccount(acct string, targets []Target) error { return nil }
 
 // failStore：带失败开关的 Store——SQLite 落库失败时调度器必须把错误上报/记日志，
 // 静默吞错会让"内存已写、库行没落上"的半态在重启后破坏恢复契约
@@ -277,13 +278,15 @@ func newFakeClient(open bool) *fakeClient {
 	return &fakeClient{
 		data: &zhidao.ElectivesData{
 			Publishes: []zhidao.Publish{
-				{PublishID: 1, PublishName: "高二年体育", InDateRange: open, Classes: []zhidao.Class{
+				// BeginDate 镜像平台真实形态（"2026-09-13 09:00:00" 带时分秒）——
+				// 发布元数据补全/持久化测试依赖它（窗口关闭后 /state 分组的唯一数据源）
+				{PublishID: 1, PublishName: "高二年体育", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
 					{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
 				}},
-				{PublishID: 2, PublishName: "高二年校本1", InDateRange: open, Classes: []zhidao.Class{
+				{PublishID: 2, PublishName: "高二年校本1", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
 					{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 29},
 				}},
-				{PublishID: 3, PublishName: "高二年校本2", InDateRange: open, Classes: []zhidao.Class{
+				{PublishID: 3, PublishName: "高二年校本2", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
 					{ID: 61276, CourseName: "健身瑜伽", SelectedCount: 0, MaxCount: 29},
 				}},
 			},

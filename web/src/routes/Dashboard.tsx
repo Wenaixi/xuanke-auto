@@ -1,6 +1,7 @@
-﻿import { useQuery } from "@tanstack/react-query"
+﻿import { useMemo, useState, useEffect } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
-import type { Account, LogEntry, SchedulerState } from "../types"
+import type { Account, CourseStatus, ElectivesData, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
 import { Badge } from "../components/ui/Badge"
@@ -10,6 +11,7 @@ import {
   ArrowUpRight,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Layers,
   LogOut,
@@ -41,6 +43,69 @@ function isSessionError(err: unknown): boolean {
   return err instanceof ApiError && err.code === 401
 }
 
+// CollapseSection 极简折叠段：时间列表与日期分组共用。
+// 项目无 Radix Collapsible（未安装），且折叠只是"按钮 + 条件渲染"，手写最小实现
+// 符合简洁优先，绝不为此引入新依赖。button 带 aria-expanded/aria-controls，
+// 键盘可聚焦、读屏可感知展开状态，零额外成本的可访问性。
+function CollapseSection({
+  open,
+  onToggle,
+  header,
+  children,
+}: {
+  open: boolean
+  onToggle: () => void
+  header: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 overflow-hidden">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="collapse-body"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors"
+      >
+        <span className="text-xs text-neutral-300 flex items-center gap-2">{header}</span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-neutral-500 shrink-0 transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {open && <div className="px-3 pb-3 border-t border-neutral-900 pt-2">{children}</div>}
+    </div>
+  )
+}
+
+// relativeCountdown 折叠行内联时间摘要：主矩阵 useTickingCountdown 每秒 tick 驱动
+// 整页重渲染（lib effect 无条件 setInterval(1000)），折叠行渲染期直接算 Date.now()
+// 即新鲜（最坏 1 秒陈旧），绝不为此再建额外定时器。
+// 已过/已开放 → "已开放"；今天以内 → "X小时 X分" 紧凑摘要；更远 → 天/时/分全量。
+function relativeCountdown(ms: number, nowMs: number): string {
+  const diff = ms - nowMs
+  if (diff <= 0) return "已开放"
+  const totalMin = Math.floor(diff / 60000)
+  if (totalMin < 60) return `${totalMin}分`
+  const totalHour = Math.floor(totalMin / 60)
+  if (totalHour < 24) {
+    const min = totalMin % 60
+    return `${totalHour}小时${min > 0 ? ` ${min}分` : ""}`
+  }
+  const d = Math.floor(totalHour / 24)
+  const h = totalHour % 24
+  const m = totalMin % 60
+  return `${d}天 ${h}小时 ${m}分`
+}
+
+// parseDateKey 把分组键（"2026-09-13"）解析为本地零点时间戳。
+// 裸字符串 "2026-09-13" 会被 JS 按 UTC 零点解析，与本地时区差 8 小时 →
+// 今天凌晨附近的日期会偏移到昨天。显式拼 "T00:00:00" 锁本地零点。
+function parseDateKey(k: string): number {
+  return new Date(k + "T00:00:00").getTime()
+}
+
 export default function Dashboard({ account, sessionToken, onLogout, onGoSelect }: Props) {
   // n12：窗口已关闭后把轮询降频到 30 秒——状态已定型（快照为空、
   // 不会再有新动静），继续 3 秒高频打 /state 与 /logs 纯属浪费请求与刷屏日志；
@@ -64,6 +129,19 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     refetchInterval: () => (state?.window_closed ? 30000 : 3000),
   })
 
+  // /electives 查询：Dashboard 新增数据源——多开放时间列表（begin_times 数组）
+  // 与发布元数据（publish_id → publish_name/begin_date 映射）都只在这里有。
+  // 与 Select.tsx 同 key 同 URL：两路由互斥挂载但共享 react-query 缓存，切页零重复请求。
+  // 轮询恒 30 秒：本页只消费 begin_times（平台下发后几乎不变）与 publishes 元数据
+  // （学期内静态），不消费 classes 实时名额；后端快照 TTL 40s > 30s，低于 40s 轮询
+  // 大概率拿同一份快照纯耗带宽。窗口关闭后响应是空结构体（begin_times/publishes
+  // 同时清空，契约见 plan），30s 轮询成本≈0 且能发现新一轮开窗。
+  const { data: electives } = useQuery({
+    queryKey: ["electives", account, sessionToken],
+    queryFn: () => api<ElectivesData>("/electives?account=" + encodeURIComponent(account), { session: sessionToken }),
+    refetchInterval: 30000,
+  })
+
   // F8-04：删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
   // 日志列表/状态卡片不再每秒全量重建。数组改为 hooks 层的派生常量，杜绝重复计算
   // F9-07：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
@@ -74,6 +152,73 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   const openTimeStr =
     state?.open_time_known && state.open_time ? state.open_time : null
   const cd = useTickingCountdown(openTimeStr)
+
+  // 折叠行实时标签由主矩阵每秒 tick 的整页重渲染驱动（见 relativeCountdown 注释）。
+  const nowMs = Date.now()
+
+  // 主倒计时 = 调度器有效开放时间（管理员配置 > 平台 beginTimes 首值，与 openTimeStr 同源）；
+  // 其余 begin_times 按从近到远排进"其他开放时间"折叠段。openTimeStr 未识别时用
+  // begin_times[0] 兜底当下主时间，避免"主矩阵未知但折叠列表有值"的悬空。
+  const beginTimesMs = electives?.begin_times ?? []
+  const primaryMs = openTimeStr ? new Date(openTimeStr).getTime() : beginTimesMs[0]
+  const extrasMs = useMemo(
+    () => beginTimesMs.filter((t) => primaryMs !== undefined && t !== primaryMs).sort((a, b) => a - b),
+    [beginTimesMs, primaryMs]
+  )
+  const [extrasOpen, setExtrasOpen] = useState(false)
+
+  // 预选目标按日期分组：以 /electives publishes 的 publish_id → begin_date 映射为键，
+  // /state courses 只带 publish_id，无名称/日期，映射缺失（窗口关闭、幽灵 id）落"未知"。
+  // 窗口关闭后 publishes 空 → 全部课程落单一"未知"组，卡片状态照常显示（组徽章不依赖
+  // 映射），目标可读性不降级——这正是用户窗口关闭后要盯的终态。
+  const dateGroups = useMemo(() => {
+    const pubs = electives?.publishes ?? []
+    const pubById = new Map(pubs.map((p) => [p.publish_id, p]))
+    const byDate = new Map<string, Map<number, CourseStatus[]>>()
+    for (const c of courses) {
+      const dateKey = (pubById.get(c.publish_id)?.begin_date ?? "").slice(0, 10) || "未知"
+      let byPub = byDate.get(dateKey)
+      if (!byPub) {
+        byPub = new Map()
+        byDate.set(dateKey, byPub)
+      }
+      const list = byPub.get(c.publish_id) ?? []
+      list.push(c)
+      byPub.set(c.publish_id, list)
+    }
+    // 日期排序：|日期 - 今天零点| 升序 = 距今天最近的天在前（未来/已过统一成立），
+    // 平局按日期值升序；"未知"恒排最后（窗口关闭兜底组）。
+    const todayMs = parseDateKey(new Date().toISOString().slice(0, 10))
+    const dateKeys = [...byDate.keys()].sort((a, b) => {
+      if (a === "未知") return 1
+      if (b === "未知") return -1
+      const da = Math.abs(parseDateKey(a) - todayMs)
+      const db = Math.abs(parseDateKey(b) - todayMs)
+      return da !== db ? da - db : a < b ? -1 : 1
+    })
+    return dateKeys.map((key) => {
+      const byPub = byDate.get(key)!
+      const groups = [...byPub.entries()]
+        .sort(([a], [b]) => a - b) // 发布按 publish_id 升序
+        .map(([publishId, items]) => ({
+          publish_id: publishId,
+          name: pubById.get(publishId)?.publish_name || `发布 #${publishId}`,
+          items: [...items].sort((a, b) => a.priority - b.priority), // 组内按优先级升序
+        }))
+      const count = groups.reduce((n, g) => n + g.items.length, 0)
+      return { key, count, pubs: groups }
+    })
+  }, [courses, electives?.publishes])
+
+  // 折叠种子：null = 尚未初始化（首次数据到达种下最近的日期组），[] = 用户主动
+  // 全折叠。null/[] 语义分离保证绝不重种——否则用户收起全部后 effect 又把最近组拉出来，
+  // 折叠状态与用户操作打架。首帧种子后不追踪最近组漂移，用户操作即最终话语权。
+  const [expandedDates, setExpandedDates] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (expandedDates === null && dateGroups.length > 0) {
+      setExpandedDates([dateGroups[0].key])
+    }
+  }, [expandedDates, dateGroups])
 
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
@@ -211,6 +356,41 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                       30 秒查询节流
                     </span>
                   </div>
+
+                  {/* 多开放时间折叠段：平台 beginTimes 是数组契约（真实 select.js 遍历全
+                      数组做 1500ms 开窗探测），当前学期只下发单值故本段大概率不出现——
+                      单值路径与改前逐像素一致。其余时间从近到远已排入 extrasMs，
+                      点开逐行显示绝对时间 + 实时摘要。主时间 = 调度器开窗真值，故意
+                      不与 begin_times 合并（管理员配置优先，见 openTimeStr 注释）。 */}
+                  {extrasMs.length > 0 && (
+                    <CollapseSection
+                      open={extrasOpen}
+                      onToggle={() => setExtrasOpen((o) => !o)}
+                      header={
+                        <>
+                          <Clock className="h-3.5 w-3.5 text-neutral-500" />
+                          <span>其他开放时间</span>
+                          <span className="text-neutral-600 font-mono">· {extrasMs.length}</span>
+                        </>
+                      }
+                    >
+                      <div className="space-y-2">
+                        {extrasMs.map((ms) => (
+                          <div
+                            key={ms}
+                            className="flex items-center justify-between text-xs font-mono py-1"
+                          >
+                            <span className="text-white">
+                              {new Date(ms).toLocaleString("zh-CN", { hour12: false })}
+                            </span>
+                            <span className="text-neutral-500">
+                              {relativeCountdown(ms, nowMs)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </CollapseSection>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -289,88 +469,9 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {courses.map((c) => {
-              const isSuccess = c.status === "success"
-              const isFull = isFullFallback(c)
-              const isFailed = c.status === "failed" && !isFull
-              const isInRange = c.status === "in_range" || c.status === "submitted"
-
-              return (
-                <Card
-                  key={c.class_id}
-                  className={`rounded-[var(--radius-lg)] border transition-all duration-200 shadow-none ${
-                    isSuccess
-                      ? "border-white glass-strong"
-                      : "glass border-neutral-800 hover:border-neutral-600"
-                  }`}
-                >
-                  <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
-                    <Badge variant="outline" className="text-[10px] font-mono">
-                      #{c.publish_id} · {priorityName(c.priority)}
-                    </Badge>
-                    <Badge
-                      variant={isSuccess ? "primary" : isFull ? "destructive" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
-                      className="text-[11px]"
-                    >
-                      {isSuccess
-                        ? "已确认选课"
-                        : isFull
-                        ? "已满员·退避备选"
-                        : isFailed
-                        ? "报名异常"
-                        : isInRange
-                        ? "提交中"
-                        : "待命"}
-                    </Badge>
-                  </CardHeader>
-
-                  <CardContent className="p-4 pt-3 space-y-3">
-                    <div>
-                      <div className="text-[11px] text-neutral-500 font-mono">
-                        ID: {c.class_id}
-                      </div>
-                      <h3 className="font-medium text-sm text-white tracking-tight line-clamp-1 mt-0.5">
-                        {c.course_name || `选修课程 ${c.class_id}`}
-                      </h3>
-                    </div>
-
-                    {/* 状态与进度提示 */}
-                    <div className="text-xs pt-2 border-t border-neutral-900 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        {isSuccess && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
-                        {isFailed && <XCircle className="h-3.5 w-3.5 text-neutral-400" />}
-                        {isFull && <XCircle className="h-3.5 w-3.5 text-white" />}
-                        {isInRange && <RefreshCw className="h-3.5 w-3.5 text-white animate-spin" />}
-                        {!isSuccess && !isFailed && !isInRange && !isFull && (
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-600" />
-                        )}
-                        <span className="text-neutral-400">
-                          {isSuccess
-                            ? "席位已确认"
-                            : isFull
-                            ? "该门已满，自动退避至下一备选"
-                            : isFailed
-                            ? "提交未通过"
-                            : isInRange
-                            ? "冲刺提交中"
-                            : "开放时自动提交"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {c.result && (
-                      <div className="p-2.5 rounded-[var(--radius-sm)] glass border border-neutral-800 text-xs text-neutral-400 font-mono break-all leading-relaxed">
-                        {c.result}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )
-            })}
-
-            {courses.length === 0 && (
-              <div className="col-span-full rounded-[var(--radius-lg)] border border-neutral-800 border-dashed glass p-8 text-center flex flex-col items-center justify-center gap-3">
+          <div className="space-y-3">
+            {dateGroups.length === 0 && (
+              <div className="rounded-[var(--radius-lg)] border border-neutral-800 border-dashed glass p-8 text-center flex flex-col items-center justify-center gap-3">
                 <HelpCircle className="h-7 w-7 text-neutral-600" />
                 <p className="text-xs text-neutral-400">
                   当前未添加任何预选课程
@@ -380,6 +481,130 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 </Button>
               </div>
             )}
+
+            {dateGroups.map((g) => {
+              const expanded = expandedDates?.includes(g.key) ?? false
+              return (
+                <CollapseSection
+                  key={g.key}
+                  open={expanded}
+                  onToggle={() =>
+                    setExpandedDates((prev) => {
+                      const cur = prev ?? []
+                      return cur.includes(g.key)
+                        ? cur.filter((k) => k !== g.key)
+                        : [...cur, g.key]
+                    })
+                  }
+                  header={
+                    <>
+                      {g.key === "未知" ? (
+                        <HelpCircle className="h-3.5 w-3.5 text-neutral-500" />
+                      ) : (
+                        <Clock className="h-3.5 w-3.5 text-neutral-500" />
+                      )}
+                      <span className="text-white">
+                        {g.key === "未知" ? "未知日期" : g.key}
+                      </span>
+                      <span className="text-neutral-600 font-mono">· {g.count} 门</span>
+                      {g.key === "未知" && (
+                        <span className="text-neutral-600">窗口已关闭，发布信息不可用</span>
+                      )}
+                    </>
+                  }
+                >
+                  {g.pubs.map((pub) => (
+                    <div key={pub.publish_id} className="mb-4 last:mb-0">
+                      <div className="text-[11px] text-neutral-400 font-medium font-mono uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <Layers className="h-3 w-3 text-neutral-600" />
+                        <span>{pub.name}</span>
+                        <span className="text-neutral-600">· {pub.items.length} 门</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {pub.items.map((c) => {
+                          const isSuccess = c.status === "success"
+                          const isFull = isFullFallback(c)
+                          const isFailed = c.status === "failed" && !isFull
+                          const isInRange = c.status === "in_range" || c.status === "submitted"
+
+                          return (
+                            <Card
+                              key={c.class_id}
+                              className={`rounded-[var(--radius-lg)] border transition-all duration-200 shadow-none ${
+                                isSuccess
+                                  ? "border-white glass-strong"
+                                  : "glass border-neutral-800 hover:border-neutral-600"
+                              }`}
+                            >
+                              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
+                                <Badge variant="outline" className="text-[10px] font-mono">
+                                  #{c.publish_id} · {priorityName(c.priority)}
+                                </Badge>
+                                <Badge
+                                  variant={isSuccess ? "primary" : isFull ? "destructive" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
+                                  className="text-[11px]"
+                                >
+                                  {isSuccess
+                                    ? "已确认选课"
+                                    : isFull
+                                    ? "已满员·退避备选"
+                                    : isFailed
+                                    ? "报名异常"
+                                    : isInRange
+                                    ? "提交中"
+                                    : "待命"}
+                                </Badge>
+                              </CardHeader>
+
+                              <CardContent className="p-4 pt-3 space-y-3">
+                                <div>
+                                  <div className="text-[11px] text-neutral-500 font-mono">
+                                    ID: {c.class_id}
+                                  </div>
+                                  <h3 className="font-medium text-sm text-white tracking-tight line-clamp-1 mt-0.5">
+                                    {c.course_name || `选修课程 ${c.class_id}`}
+                                  </h3>
+                                </div>
+
+                                {/* 状态与进度提示 */}
+                                <div className="text-xs pt-2 border-t border-neutral-900 flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    {isSuccess && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                                    {isFailed && <XCircle className="h-3.5 w-3.5 text-neutral-400" />}
+                                    {isFull && <XCircle className="h-3.5 w-3.5 text-white" />}
+                                    {isInRange && <RefreshCw className="h-3.5 w-3.5 text-white animate-spin" />}
+                                    {!isSuccess && !isFailed && !isInRange && !isFull && (
+                                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-600" />
+                                    )}
+                                    <span className="text-neutral-400">
+                                      {isSuccess
+                                        ? "席位已确认"
+                                        : isFull
+                                        ? "该门已满，自动退避至下一备选"
+                                        : isFailed
+                                        ? "提交未通过"
+                                        : isInRange
+                                        ? "冲刺提交中"
+                                        : "开放时自动提交"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {c.result && (
+                                  <div className="p-2.5 rounded-[var(--radius-sm)] glass border border-neutral-800 text-xs text-neutral-400 font-mono break-all leading-relaxed">
+                                    {c.result}
+                                  </div>
+                                )}
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </CollapseSection>
+              )
+            })}
           </div>
         </section>
 

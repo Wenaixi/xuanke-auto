@@ -43,6 +43,10 @@ export interface CourseStatus {
   priority: number
   status: string // pending|in_range|submitted|success|failed
   result: string
+  // 发布元数据（调度器随目标持久化/透传）：窗口关闭后 /state.courses 仍自带
+  // 发布名与日期前缀，Dashboard 分组零依赖 /electives（关闭≠元数据丢失）。
+  publish_name?: string
+  begin_date?: string
 }
 
 export interface SchedulerState {

@@ -159,24 +159,31 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // 主倒计时 = 调度器有效开放时间（管理员配置 > 平台 beginTimes 首值，与 openTimeStr 同源）；
   // 其余 begin_times 按从近到远排进"其他开放时间"折叠段。openTimeStr 未识别时用
   // begin_times[0] 兜底当下主时间，避免"主矩阵未知但折叠列表有值"的悬空。
-  const beginTimesMs = electives?.begin_times ?? []
-  const primaryMs = openTimeStr ? new Date(openTimeStr).getTime() : beginTimesMs[0]
-  const extrasMs = useMemo(
-    () => beginTimesMs.filter((t) => primaryMs !== undefined && t !== primaryMs).sort((a, b) => a - b),
-    [beginTimesMs, primaryMs]
-  )
+  // 依赖用 electives?.begin_times 稳定引用（react-query 数据不变引用不变），
+  // fallback 空数组在 useMemo 内部——绝不在渲染期新建数组让依赖每次都变。
+  const primaryMs = openTimeStr
+    ? new Date(openTimeStr).getTime()
+    : electives?.begin_times?.[0]
+  const extrasMs = useMemo(() => {
+    const list = electives?.begin_times ?? []
+    return list.filter((t) => primaryMs !== undefined && t !== primaryMs).sort((a, b) => a - b)
+  }, [electives?.begin_times, primaryMs])
   const [extrasOpen, setExtrasOpen] = useState(false)
 
-  // 预选目标按日期分组：以 /electives publishes 的 publish_id → begin_date 映射为键，
-  // /state courses 只带 publish_id，无名称/日期，映射缺失（窗口关闭、幽灵 id）落"未知"。
-  // 窗口关闭后 publishes 空 → 全部课程落单一"未知"组，卡片状态照常显示（组徽章不依赖
-  // 映射），目标可读性不降级——这正是用户窗口关闭后要盯的终态。
+  // 预选目标按日期分组：分组键优先 CourseStatus 自带 begin_date（调度器随目标持久化，
+  // 窗口关闭后 /state 仍自带日期/发布名——关闭≠元数据丢失）；兜底 /electives 映射
+  // （旧目标/历史课程无元数据时），映射也缺失（窗口关闭、幽灵 id）落"未知"。
+  // 窗口关闭后即使映射全空，课程卡片仍按自带元数据正确分组，目标可读性不降级——
+  // 这正是用户窗口关闭后要盯的终态。
   const dateGroups = useMemo(() => {
     const pubs = electives?.publishes ?? []
     const pubById = new Map(pubs.map((p) => [p.publish_id, p]))
     const byDate = new Map<string, Map<number, CourseStatus[]>>()
     for (const c of courses) {
-      const dateKey = (pubById.get(c.publish_id)?.begin_date ?? "").slice(0, 10) || "未知"
+      const dateKey =
+        (c.begin_date ?? "").slice(0, 10) ||
+        (pubById.get(c.publish_id)?.begin_date ?? "").slice(0, 10) ||
+        "未知"
       let byPub = byDate.get(dateKey)
       if (!byPub) {
         byPub = new Map()
@@ -202,7 +209,11 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
         .sort(([a], [b]) => a - b) // 发布按 publish_id 升序
         .map(([publishId, items]) => ({
           publish_id: publishId,
-          name: pubById.get(publishId)?.publish_name || `发布 #${publishId}`,
+          // 发布名优先 CourseStatus 自带（窗口关闭仍可读），兜底 /electives 映射
+          name:
+            items[0].publish_name ||
+            pubById.get(publishId)?.publish_name ||
+            `发布 #${publishId}`,
           items: [...items].sort((a, b) => a.priority - b.priority), // 组内按优先级升序
         }))
       const count = groups.reduce((n, g) => n + g.items.length, 0)

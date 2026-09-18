@@ -6,15 +6,19 @@ import (
 	"time"
 )
 
-// 窗口关闭后开放时间保留契约（主人反馈：关闭≠时间消失）。
+// 窗口关闭后识别槽保留契约（主人反馈：关闭≠时间消失）。
 // 平台 beginTimes 是"已训示的开窗时间"——窗口关闭后探测返回空快照，
-// 识别槽必须保留（倒计时归零/显示已结束），绝不删除变"未知"。
-// 修复前：probe()/ProbeForAccount 空快照分支 delete 识别槽，重探后 open_time 消失。
+// 识别槽必须保留（底层 openTimeDetected 不清空），绝不删除变"未知"。
+// 但"识别过期"语义下 open_time_known 反映识别值是否仍有效：
+// 识别值已落入过去（窗口已关闭）→ open_time_known=false，前端显示"未识别"，
+// 绝不把 5 天前的旧值继续当开放时间挂出来。
+// 日期/发布名等窗口关闭后仍可展示的元数据由目标发布元数据持久化承载（见下一测试）。
 func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.data.BeginTimes = []int64{1789261200000} // 2026-09-13 09:00:00 +0800
+	// 首探识别一个"未来"开窗点（T0+2h），随后用 SetClockOffsetForTest 把对齐时钟
+	// 推进过该识别值（T0+3h）——模拟真实时间流逝：窗口开启又关闭后识别值已落入过去。
+	fc.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, time.Hour)
-	s.SetOpenTimeFn(func() time.Time { return time.Time{} }) // 无管理员配置：识别是唯一来源
 
 	// 开窗前探测：识别到开放时间
 	if _, err := s.ProbeForAccount("acct1"); err != nil {
@@ -24,6 +28,9 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 		t.Fatal("前置：识别应成功")
 	}
 
+	// 时间推进到识别值之后（开窗批次已结束）
+	s.SetClockOffsetForTest(3 * time.Hour)
+
 	// 窗口关闭：平台返回空快照（code:0 空 publishes，begin_times 同时清空）
 	fc.data.Publishes = nil
 	fc.data.BeginTimes = nil
@@ -31,14 +38,17 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 		t.Fatalf("关闭后探测失败: %v", err)
 	}
 
-	// 修复要求：开放时间必须保留（已训示过的事实），且 open_time_known 仍为 true
-	st := s.StateForAccount("acct1")
-	if !st.OpenTimeKnown {
-		t.Fatal("窗口关闭后开放时间必须保留（open_time_known=true）——关闭≠时间消失")
+	// 识别槽必须保留（底层 map 不清空）——关闭≠时间消失
+	s.mu.Lock()
+	kept := s.openTimeDetected["acct1"]
+	s.mu.Unlock()
+	if kept == 0 {
+		t.Fatal("窗口关闭后识别槽必须保留在 openTimeDetected 中（关闭≠时间消失）")
 	}
-	want := "2026-09-13 09:00:00"
-	if got := st.OpenTime.Format("2006-01-02 15:04:05"); got != want {
-		t.Fatalf("窗口关闭后开放时间应为 %s，实际 %s", want, got)
+	// 但识别值已过期（窗口已关闭、平台未再下发新 beginTimes）→ 视为未识别：
+	// 前端显示"未识别到开放时间"，绝不把过期旧值继续当开放时间挂出来
+	if st := s.StateForAccount("acct1"); st.OpenTimeKnown {
+		t.Fatal("识别值已过期必须 open_time_known=false（不把旧值当开放时间）")
 	}
 }
 
@@ -50,7 +60,7 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 func TestTargetPublishMetaPersisted(t *testing.T) {
 	fs := &recordingStore{fakeStore: &fakeStore{}}
 	fc := newFakeClient(false)
-	fc.data.BeginTimes = []int64{1789261200000}
+	fc.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
 	s := New(&fakeAccts{c: fc}, fs, time.Time{}, time.Hour)
 
 	// 前置：先探测一次，让 acctData 带上平台快照（fakeClient 内置发布 1 = "高二年体育"

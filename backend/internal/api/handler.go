@@ -31,7 +31,6 @@ type Deps struct {
 	Sched    *scheduler.Scheduler
 	Accounts *accounts.Manager
 	Sessions *session.Store
-	OpenTime string
 	// Runtime 进程内配置中心（管理员热重载生效）。
 	Runtime *runtime.Store
 	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；管理员账号的密码）。
@@ -696,7 +695,6 @@ type AdminConfigView struct {
 	VisionModel        string `json:"vision_model"`
 	CaptchaEngine      string `json:"captcha_engine"`
 	CaptchaConcurrency int    `json:"captcha_concurrency"`
-	OpenTime           string `json:"open_time"`
 }
 
 // maxCaptchaConcurrency 验证码识别并发上限（D-A1）：并发 1 是安全基线，20 覆盖
@@ -716,7 +714,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionModel:        cfg.VisionModel,
 			CaptchaEngine:      cfg.CaptchaEngine,
 			CaptchaConcurrency: cfg.CaptchaConcurrency,
-			OpenTime:           cfg.OpenTime,
 		}, "")
 	case http.MethodPut:
 		var req struct {
@@ -726,7 +723,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionModel        *string `json:"vision_model"`
 			CaptchaEngine      *string `json:"captcha_engine"`
 			CaptchaConcurrency *int    `json:"captcha_concurrency"`
-			OpenTime           *string `json:"open_time"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -734,7 +730,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		var changed []string
 		// D-A1（历轮）：先校验值域再进 Runtime.Update——非法引擎/越界并发整体拒绝，
-		// 绝不落库也不下发；与 open_time 无效拒绝同策略，杜绝 stats 显示与实际引擎错位。
+		// 绝不落库也不下发，杜绝 stats 显示与实际引擎错位。
 		if req.CaptchaEngine != nil && *req.CaptchaEngine != "vision" && *req.CaptchaEngine != "ddddocr" {
 			writeJSON(w, 1, nil, "识别引擎仅支持 vision 或 ddddocr")
 			return
@@ -742,19 +738,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		if req.CaptchaConcurrency != nil && (*req.CaptchaConcurrency < 1 || *req.CaptchaConcurrency > maxCaptchaConcurrency) {
 			writeJSON(w, 1, nil, "验证码识别并发需在 1-20 之间")
 			return
-		}
-		// B21-04：非空但格式非法的 open_time 必须整体拒绝——校验必须前置到
-		// Runtime.Update 闭包之外：旧实现 `else if FormatOpenTime(...)==nil` 校验失败静默忽略
-		// （混改 PUT 返回"配置已更新"但 open_time 未变，半假成功）；若把 writeJSON+return
-		// 写在闭包内，return 只退出闭包不退出 handler，既会重复写响应（双 JSON body）又会把
-		// 前置字段（如 activation_enabled）部分应用进内存配置——"整体拒绝"名存实亡。
-		// 前置校验与非法引擎/越界并发同策略：整体拒绝、绝不落库也不下发。到这里的错误信息
-		// 已含 "开放时间格式错误" 前缀（FormatOpenTime 自带），此处只补"应为"提示即可。
-		if req.OpenTime != nil && *req.OpenTime != "" {
-			if _, err := scheduler.FormatOpenTime(*req.OpenTime); err != nil {
-				writeJSON(w, 1, nil, "开放时间格式错误（应为 2006-01-02 15:04:05）："+err.Error())
-				return
-			}
 		}
 		d.Runtime.Update(func(c *runtime.Config) {
 			if req.ActivationEnabled != nil {
@@ -783,24 +766,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				c.CaptchaConcurrency = *req.CaptchaConcurrency
 				changed = append(changed, "captcha_concurrency")
 			}
-			if req.OpenTime != nil {
-				if *req.OpenTime == "" {
-					// F7-02：显式空串 = 管理员"清空开放时间"，不再静默忽略。
-					// 此前空串被 FormatOpenTime 判为格式错误而静默丢弃：管理员清空时间点"保存并生效"
-					// 得到的是 code:0 假成功（时间点实际没变），调度器仍按旧时间执行（含已过期的
-					// 2026-09-13 09:00:00）而表单却显示为空——前后端与生效配置三处分叉。
-					// 空串落入 cfg.OpenTime=""，dispatchRuntimeConfig 会把打开时间清零 → 调度器
-					// openTimeNow() 归零后 WindowOpened/WindowClosed 判定不按时间点触发，等同
-					// "管理员手动解除窗口机制"，语义与 loadDotEnv"仅回填空值"一致。
-					c.OpenTime = ""
-					changed = append(changed, "open_time")
-				} else {
-					// 格式校验已由 B21-04 前置在 Runtime.Update 闭包之外统一拒绝（非法值到不了这里），
-					// 此处仅落合法值。
-					c.OpenTime = *req.OpenTime
-					changed = append(changed, "open_time")
-				}
-			}
 		})
 		cfg := d.Runtime.Get()
 		// 先尝试落库（settings 全量替换，重启后恢复）。vision_key 加密落库：
@@ -818,7 +783,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"vision_model":        cfg.VisionModel,
 			"captcha_engine":      cfg.CaptchaEngine,
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
-			"open_time":           cfg.OpenTime,
 		}); sErr != nil {
 			// M-4 修复（历轮）：落库失败绝不静默——配置已内存生效，但重启即回退。
 			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，
@@ -844,7 +808,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionModel:        cfg.VisionModel,
 			CaptchaEngine:      cfg.CaptchaEngine,
 			CaptchaConcurrency: cfg.CaptchaConcurrency,
-			OpenTime:           cfg.OpenTime,
 		}, "配置已更新并生效")
 	default:
 		writeJSON(w, 405, nil, "方法不允许")
@@ -898,13 +861,11 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "读取日志失败: "+lErr.Error())
 		return
 	}
-	open := time.Time{}
-	if !cfg.OpenTimeParsed.IsZero() {
-		open = cfg.OpenTimeParsed
-	}
-	// 零值开放时间输出空串（而非 "0001-01-01 00:00:00" 年份错位值）——前端 stats
-	// 展示依赖 open_time_set 判定"未设置"，字符串本身必须与其一致（配置回显 handleConfig
-	// 对零值已输出空串，stats 此处对齐，杜绝管理员把 year-1 当真实开放时间）。
+	// 开放时间 = 调度器平台 beginTimes 自动识别态（唯一事实源，不再读任何配置）。
+	// 未识别 / 识别过期 → 零值。零值输出空串（而非 "0001-01-01 00:00:00" 年份错位值）——
+	// 前端 stats 展示依赖 open_time_set 判定"未识别"，字符串本身必须与其一致
+	// （配置回显 handleConfig 对零值已输出空串，stats 此处对齐，杜绝管理员把 year-1 当开放时间）。
+	open := d.Sched.RecognizedOpenTime()
 	openTimeStr := ""
 	if !open.IsZero() {
 		openTimeStr = open.Format("2006-01-02 15:04:05")
@@ -949,8 +910,6 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"captcha_engine":      eng,
 		"captcha_concurrency": cfg.CaptchaConcurrency,
 		"token_valid":         tokValid,
-		// N6：open_time_set 按开放时间是否真被配置输出，不再恒 true——
-		// 管理员未设置开放时间时前端如实显示"未设置"，避免误导
 		"open_time_set": !open.IsZero(),
 	}, "")
 }

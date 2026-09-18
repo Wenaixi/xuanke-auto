@@ -487,7 +487,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const [model, setModel] = useState("")
   const [engine, setEngine] = useState("vision")
   const [concurrency, setConcurrency] = useState(1)
-  const [openTime, setOpenTime] = useState("")
   const [activationOn, setActivationOn] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -497,8 +496,8 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   })
 
   // 后端配置加载后回填表单。首次加载回填全部字段；配置保存成功后（configQuery.refetch）
-  // 更新 refetchKey → effect 重跑，把后端"实际生效值"回填（F7-02：后端对 open_time 等
-  // 可能静默忽略/规范化，若表单只回显一次，管理员看到的会是与生效配置分叉的陈旧值）。
+  // 更新 refetchKey → effect 重跑，把后端"实际生效值"回填（F7-02：后端可能静默忽略/
+  // 规范化某些字段，若表单只回显一次，管理员看到的会是与生效配置分叉的陈旧值）。
   const [configEpoch, setConfigEpoch] = useState(0) // 配置重新加载代际：每次自增触发回填
   const loaded = configQuery.data
   useEffect(() => {
@@ -507,15 +506,14 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       setModel(loaded.vision_model)
       setEngine(loaded.captcha_engine || "vision")
       setConcurrency(loaded.captcha_concurrency || 1)
-      setOpenTime(loaded.open_time)
       setActivationOn(loaded.activation_enabled)
     }
   }, [loaded, configEpoch])
 
   const save = async () => {
     // F18-02：配置加载完成前绝不保存——表单未回填时保存会用初始空值
-    // 整体覆盖生效配置（open_time 清空 = B11-A1 调度器挂起提交、激活码机制误开、Vision
-    // 配置清空），按钮已 disabled 锁定，此处再兜一道（加载失败停留初始值的手快路径）。
+    // 整体覆盖生效配置（激活码机制误开、Vision 配置清空），按钮已 disabled 锁定，
+    // 此处再兜一道（加载失败停留初始值的手快路径）。
     if (!loaded) return
     // 在飞幂等：双击保存时按钮 disabled 依赖渲染落地有延迟，入口先查在飞标记短路
     if (saving) return
@@ -527,7 +525,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         vision_model: model.trim(),
         captcha_engine: engine,
         captcha_concurrency: Math.max(1, concurrency || 1),
-        open_time: openTime.trim(),
       }
       // 留空 = 不改动 key（脱敏回显无法完整回填）
       if (apiKey.trim()) body.vision_api_key = apiKey.trim()
@@ -543,10 +540,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         setConfigEpoch((e) => e + 1) // F7-02：用后端生效真值经 effect 回填到表单（与生效配置对齐）
       }
       toast({ title: "配置已保存", description: "已生效，无需重启服务" })
-      // F26-04：密钥输入框清空后移至健康信号之后——旧实现在 PUT 成功
-      // 落地后立刻 setApiKey("")，而用户若在保存进行中（await 返回前）已开始输入新密钥，
-      // 该清空会无提示吞掉新输入（脱敏回显不写 apiKey 字段，回填 effect 也不覆盖）。
-      // 清空挪到确认健康（configEpoch 已自增、toast 已发起）之后，输入窗口收敛到
       // "PUT 完成 → 用户此刻点进密钥框打字"的亚秒窄窗；且保存后才清空仍保证
       // "留空 = 不改动 key"的回显语义不被上次保存的旧输入污染。
       setApiKey("")
@@ -685,21 +678,6 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         </CardContent>
       </Card>
 
-      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
-        <CardHeader className="pb-2 border-b border-neutral-900">
-          <CardTitle className="text-sm font-medium tracking-wide text-white">选课开放时间</CardTitle>
-          <CardDescription className="text-xs text-neutral-500">调度器按此时间切换探测节奏并自动抢报</CardDescription>
-        </CardHeader>
-        <CardContent className="pt-3">
-          <Input
-            value={openTime}
-            onChange={(e) => setOpenTime(e.target.value)}
-            placeholder="2026-09-13 09:00:00"
-            className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
-          />
-        </CardContent>
-      </Card>
-
       {!loaded && (
         <p className="text-[11px] text-amber-400/90">
           配置加载中——表单尚未回填，保存按钮已锁定，避免用初始空值覆盖生效配置
@@ -731,7 +709,9 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
 
   const rows: { label: string; value: string }[] = s
     ? [
-        { label: "开放时间", value: s.open_time_set === false ? "未设置" : s.open_time },
+        // 识别开放时间：唯一事实源 = 平台 beginTimes 自动识别（不可配置）。
+        // open_time_set=false = 未识别/识别过期 → 显示"未识别"（绝不把过期旧值当开放时间）。
+        { label: "识别开放时间", value: s.open_time_set === false ? "未识别" : s.open_time },
         { label: "窗口状态", value: s.window_opened ? "已开放" : "待命中" },
         { label: "激活码机制", value: s.activation_on ? "开启" : "关闭" },
         { label: "账号数", value: String(s.account_count) },

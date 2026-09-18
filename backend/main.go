@@ -62,7 +62,7 @@ func main() {
 		accts.Restore(creds, decrypt)
 	}
 
-	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发 / 开放时间）
+	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发）
 	rt := runtime.New(runtime.Config{
 		ActivationEnabled:  cfg.ActivationCodesEnabled,
 		VisionBaseURL:      cfg.SFBaseURL,
@@ -70,7 +70,6 @@ func main() {
 		VisionModel:        cfg.SFModel,
 		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 vision（云识别），ddddocr 仅显式配置时启用
 		CaptchaConcurrency: 1,
-		OpenTime:           cfg.OpenTime,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）
 	if kv, err := st.LoadSettings(); err != nil {
@@ -106,20 +105,12 @@ func main() {
 					c.CaptchaConcurrency = n
 				}
 			}
-			if v, ok := kv["open_time"]; ok {
-				c.OpenTime = v
-			}
 		})
 	}
 
 	// 调度器（窗口到点立即探测 + 课程快照 + 按账号并发提交）
-	openTime, err := scheduler.FormatOpenTime(rt.Get().OpenTime)
-	if err != nil {
-		log.Fatalf("开放时间配置错误: %v", err)
-	}
-	sched := scheduler.New(accts, st, openTime, 300*time.Millisecond)
-	// 打开时间走运行时配置中心：管理员热改后无需重启，调度器立即按新时间判断窗口
-	sched.SetOpenTimeFn(func() time.Time { return rt.Get().OpenTimeParsed })
+	// 开放时间不做任何配置注入：平台 beginTimes 自动识别是唯一事实源（open_time 零值）。
+	sched := scheduler.New(accts, st, time.Time{}, 300*time.Millisecond)
 
 	if success, err := st.LoadSuccess(); err != nil {
 		log.Printf("[main] 读取成功记录失败: %v", err)
@@ -162,7 +153,7 @@ func main() {
 	defer sessions.Close()
 
 	mux := http.NewServeMux()
-	apiHandler := api.Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, cfg.AdminToken,
+	apiHandler := api.Register(mux, st, sched, accts, sessions, cfg.AdminToken,
 		cfg.AdminName, rt.Get().ActivationEnabled, encrypt, decrypt, rt)
 	mux.Handle("/", web.SpaHandler())
 

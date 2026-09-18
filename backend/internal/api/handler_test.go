@@ -120,11 +120,9 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	accts := accounts.New(zhi.URL, zhidao.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"}, st)
 	sessions := session.New(time.Hour)
 
-	openTime, err := scheduler.FormatOpenTime("2026-09-13 09:00:00")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sched := scheduler.New(accts, st, openTime, time.Hour) // 测试不自动轮询
+	// 开放时间不做任何配置注入：识别槽（平台 beginTimes）是唯一事实源，New 传零值。
+	// 调度器窗口判定/探测/展示全部走自动识别。
+	sched := scheduler.New(accts, st, time.Time{}, time.Hour) // 测试不自动轮询
 	sched.Start()
 	t.Cleanup(sched.Stop)
 
@@ -134,7 +132,6 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 		VisionBaseURL:     zhi.URL,
 		VisionAPIKey:      "***REMOVED***",
 		VisionModel:       "m",
-		OpenTime:          "2026-09-13 09:00:00",
 	})
 	// 与 main 一致：注入真实 AES-256-GCM 加密（凭据与 vision_key 落库前加密）
 	masterKey := make([]byte, 32)
@@ -143,7 +140,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	}
 	enc := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
 	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
-	apiHandler := Register(mux, st, sched, accts, sessions, rt.Get().OpenTime, testAdminToken, adminName,
+	apiHandler := Register(mux, st, sched, accts, sessions, testAdminToken, adminName,
 		rt.Get().ActivationEnabled, enc, dec, rt)
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
 }
@@ -585,9 +582,9 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if cfg["vision_api_key_masked"] != "****D***" {
 		t.Fatalf("Vision key 应脱敏回显后 4 位: %v", cfg)
 	}
-	// 热更新：关闭激活码 + 改打开时间（Vision 保持 mock server 可登录）
+	// 热更新：关闭激活码 + 改识别模型（Vision 保持 mock server 可登录）
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
-		`{"activation_enabled":false,"vision_base_url":"`+d.srv.URL+`","vision_api_key":"***REMOVED***","vision_model":"new-model","open_time":"2026-09-14 10:00:00"}`, adminTok)
+		`{"activation_enabled":false,"vision_base_url":"`+d.srv.URL+`","vision_api_key":"***REMOVED***","vision_model":"new-model"}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("更新配置失败: %d %v", code, j)
 	}
@@ -596,13 +593,16 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if j["code"].(float64) != 0 {
 		t.Fatalf("关闭激活码后登录应直接签发会话: %v", j)
 	}
-	// 新值已落库（重启恢复源）
+	// 新值已落库（重启恢复源）；开放时间不再属于配置项（自动识别唯一事实源），绝不落库。
 	kv, err := d.store.LoadSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kv["activation_enabled"] != "false" || kv["vision_model"] != "new-model" || kv["open_time"] != "2026-09-14 10:00:00" {
+	if kv["activation_enabled"] != "false" || kv["vision_model"] != "new-model" {
 		t.Fatalf("配置未落库: %v", kv)
+	}
+	if _, ok := kv["open_time"]; ok {
+		t.Fatalf("开放时间已从配置项移除，settings 不得再落 open_time 键: %v", kv)
 	}
 	// Vision 地址热重载生效：改成无效地址后，登录的验证码识别应走新地址并失败
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
@@ -614,57 +614,30 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if msg, _ := j["msg"].(string); !strings.Contains(msg, "invalid.example.com") {
 		t.Fatalf("Vision 热重载未生效（登录应打到新地址）: %v", j)
 	}
-	// 无效打开时间应被拒绝（保持原值）
+	// 开放时间不再是配置项：PUT 携带 open_time 字段被 JSON 解码静默忽略（旧前端 payload
+	// 兼容），不再做格式校验/落库/清空——未改任何有效配置项时返回"没有可应用的有效配置项"。
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":"bad-time"}`, adminTok)
-	if j["code"].(float64) == 0 {
-		t.Fatalf("无效打开时间不应接受: %v", j)
+	if j["code"].(float64) != 1 {
+		t.Fatalf("只带 open_time 的 PUT 因无有效配置项应返回 code=1（open_time 已非配置项）: %v", j)
 	}
-	// 无效打开时间必须返回明确格式错误（不得落入"没有可应用的有效配置项"歧义）
-	if msg, _ := j["msg"].(string); !strings.Contains(msg, "开放时间格式错误") {
-		t.Fatalf("无效 open_time 应返回明确格式错误，实际: %v", j)
+	if msg, _ := j["msg"].(string); msg != "没有可应用的有效配置项" {
+		t.Fatalf("只带 open_time 的 PUT 应报“没有可应用的有效配置项”: %v", j)
 	}
-	// B21-04：格式非法的 open_time 混改时整体拒绝——不得让其他字段生效
-	// 造成"配置已更新"半假成功。混改 PUT 里故意带上一个"与当前值不同的合法新字段"
-	// vision_model=MUTANT：整体拒绝生效时它必须保持 new-model 不被应用。
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"vision_model":"MUTANT","open_time":"2026/09/14 10:00:00"}`, adminTok)
-	if j["code"].(float64) == 0 {
-		t.Fatalf("非法 open_time 混改必须整体拒绝（不得半假成功）: %v", j)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("open_time 已非配置项，混改 PUT 应照常生效不做格式校验: %d %v", code, j)
 	}
-	if msg, _ := j["msg"].(string); !strings.Contains(msg, "开放时间格式错误") {
-		t.Fatalf("混改拒绝的报错必须指向格式，实际: %v", j)
-	}
-	// 配置保持原状：vision_model 未因混改而变（仍为上一轮热更新的 new-model）
+	// 配置保持新值：vision_model 已按混改键应用为新值
 	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/config", "", adminTok)
 	if j["code"].(float64) != 0 {
 		t.Fatalf("读取配置失败: %v", j)
 	}
 	cfgKeep, _ := j["data"].(map[string]any)
-	if vm, _ := cfgKeep["vision_model"].(string); vm != "new-model" {
-		t.Fatalf("非法 open_time 混改后原字段不得被改动，vision_model 应仍为 new-model: %v", cfgKeep)
+	if vm, _ := cfgKeep["vision_model"].(string); vm != "MUTANT" {
+		t.Fatalf("混改 PUT 应正常应用 vision_model=MUTANT（open_time 字段被忽略）: %v", cfgKeep)
 	}
-
-	// F7-02：空 open_time 是"显式清空开放时间"，不再静默忽略——
-	// 必须真实生效（内存 + 落库 + admin config 回显全为空），调度器解除窗口机制。
-	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":""}`, adminTok)
-	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("清空开放时间应成功（不再静默忽略）: %d %v", code, j)
-	}
-	// 生效配置回显为空
-	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/config", "", adminTok)
-	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("读取配置失败: %d %v", code, j)
-	}
-	cfg2, _ := j["data"].(map[string]any)
-	if ot, _ := cfg2["open_time"].(string); ot != "" {
-		t.Fatalf("清空 open_time 后回显应为空串（此前假成功是残留旧值），实际 %q", ot)
-	}
-	// 落库也为空（重启恢复源与内存一致）
-	kv2, err := d.store.LoadSettings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if kv2["open_time"] != "" {
-		t.Fatalf("清空 open_time 后落库应为空串，实际 %q", kv2["open_time"])
+	if _, ok := cfgKeep["open_time"]; ok {
+		t.Fatalf("配置回显不得再含 open_time 键: %v", cfgKeep)
 	}
 
 	// m8：带管理员会话 + 表单 Content-Type 的副作用请求必须被拒（CSRF 防线）。
@@ -866,30 +839,50 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 	}
 }
 
-// TestAdminStatsOpenTimeZeroShowsEmptyString 管理员清空开放时间（F7-02 合法操作）后，
-// stats 的 open_time 必须输出空串而非 "0001-01-01 00:00:00" 年份错位值——前端按
-// open_time_set 判定"未设置"，字符串若为 year-1 会与布尔字段自相矛盾（配置回显
-// handleConfig 对零值已输出空串，stats 必须与其对齐）。
-func TestAdminStatsOpenTimeZeroShowsEmptyString(t *testing.T) {
+// TestAdminStatsOpenTimeFromRecognized 开放时间 = 调度器平台 beginTimes 自动识别态
+// （唯一事实源，配置链路已整体移除）——stats 的 open_time 必须输出识别值、open_time_set
+// 反映是否识别到；未识别（零值 / 历史过期值）输出空串而非 "0001-01-01 00:00:00" 年份错位值。
+func TestAdminStatsOpenTimeFromRecognized(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
-	// 通过管理接口合法清空开放时间（F7-02 契约：open_time="" = 显式清空，落库+回显三处对齐）
-	code, j := doJSONAdmin(t, d.api, "PUT", "/api/admin/config", `{"open_time":""}`, adminTok)
-	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("清空 open_time 失败: %d %v", code, j)
-	}
-	// 清空后 stats 的 open_time 必须输出空串而非 "0001-01-01 00:00:00" 年份错位值——
-	// 前端按 open_time_set 判定"未设置"，字符串若为 year-1 会与布尔字段自相矛盾
-	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	// 未识别：stats 的 open_time 输出空串、open_time_set=false（前端按布尔字段判定"未识别"）
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("stats 异常: %d %v", code, j)
 	}
 	st, _ := j["data"].(map[string]any)
 	if s, _ := st["open_time"].(string); s != "" {
-		t.Fatalf("零值开放时间应输出空串，实际 %q", s)
+		t.Fatalf("未识别时 open_time 应输出空串，实际 %q", s)
 	}
 	if st["open_time_set"] != false {
-		t.Fatalf("零值开放时间 open_time_set 应为 false，实际 %v", st["open_time_set"])
+		t.Fatalf("未识别时 open_time_set 应为 false，实际 %v", st["open_time_set"])
+	}
+	// 探测识别：先登录真实账号（建立客户端），再探测。mock 的顶层 beginTimes 是过去值
+	// （1789261200000 = 2026-09-13 09:00:00，今天 2026-09-18）——识别过期语义下自动
+	// 降级为"未识别"（绝不把过期旧值当开放时间），向后兼容 mock 的固定时间戳。
+	if _, err := d.accts.LoginByPassword("acct1", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
+		t.Fatalf("登录失败: %v", err)
+	}
+	if _, err := d.sched.ProbeNow(); err != nil {
+		t.Fatalf("探测失败: %v", err)
+	}
+	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("stats 二次读取异常: %d %v", code, j)
+	}
+	st, _ = j["data"].(map[string]any)
+	// 与调度器识别态必须同源（识别过期 → 空串 + open_time_set=false）。
+	// stats 对零值输出空串（非 year-1），故期望值 = 识别值非零才格式化。
+	recog := d.sched.RecognizedOpenTime()
+	want := ""
+	if !recog.IsZero() {
+		want = recog.Format("2006-01-02 15:04:05")
+	}
+	if s, _ := st["open_time"].(string); s != want {
+		t.Fatalf("stats open_time 应与调度器识别值同源：应为 %q，实际 %q", want, s)
+	}
+	if st["open_time_set"] != (!recog.IsZero()) {
+		t.Fatalf("stats open_time_set 应与调度器识别态同源（识别∈有效→true 否则 false）: %v", st["open_time_set"])
 	}
 }
 

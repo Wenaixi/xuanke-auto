@@ -655,31 +655,6 @@ func TestElectivesSnapshot(t *testing.T) {
 	}
 }
 
-func TestFormatOpenTime(t *testing.T) {
-	tt, err := FormatOpenTime("2026-09-13 09:00:00")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tt.Year() != 2026 || tt.Month() != 9 || tt.Day() != 13 || tt.Hour() != 9 {
-		t.Fatalf("解析错误: %v", tt)
-	}
-}
-
-// TestFormatOpenTimeEmpty B25-01：空串 = 合法"清除开放时间"
-// （F7-02 契约：零值 = 解除窗口机制）。修复前 FormatOpenTime("") 报"开放时间格式
-// 错误"——管理员 PUT open_time=""（合法清空）落库 settings 后重启，main.go:116
-// log.Fatal 拒绝启动，服务永久停摆（只能手工改 DB 删 settings 行）。修复后空串
-// 返回零值 time.Time 不报错，与 runtime.reparse 置 OpenTimeParsed 零值语义对齐。
-func TestFormatOpenTimeEmpty(t *testing.T) {
-	tt, err := FormatOpenTime("")
-	if err != nil {
-		t.Fatal("空串（清空开放时间）= 合法操作，不得报错: " + err.Error())
-	}
-	if !tt.IsZero() {
-		t.Fatalf("空串应返回零值 time.Time，实际: %v", tt)
-	}
-}
-
 // TestBackupFallbackOnFull 同发布多备选：第一备选人数满员（快照对比 selected>=max）→ 自动退避第二备选并成功。
 func TestBackupFallbackOnFull(t *testing.T) {
 	fc := newFakeClient(false)
@@ -1341,22 +1316,18 @@ func TestSubmitIntervalSprint(t *testing.T) {
 	}
 }
 
-// TestSubmitSuspendedWhenOpenTimeCleared B11-A1：管理员显式清空 open_time（F7-02 语义
-// 解除窗口机制，runtime.reparse 置 OpenTimeParsed 为零值）后，tick 必须挂起提交——
-// 此前 !opened && !now.After(open) 在 open=零值 时恒 false，提交循环永续放行，
-// 对"已满员/已成功"目标每 1s 仍刷平台报名接口（空快照下 full 保守不解封、done/refused
-// 只拦一小部分，窗口关闭后防轰炸的 C-3 防线被 open 零值绕过）。
+// TestSubmitSuspendedWhenOpenTimeCleared 窗口机制被显式解除（无有效开窗点：open_time
+// 为空/识别过期）后，tick 必须挂起提交——此前 !opened && !now.After(open) 在 open=零值
+// 时恒 false，提交循环永续放行，对"已满员/已成功"目标每 1s 仍刷平台报名接口。
 func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 	fc := newFakeClient(false)
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, time.Second)
 	// 配置目标账号（无目标时 submitAll 空转不产生调用，测不出零值守卫的作用）
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	// 注入"窗口已开启"状态，模拟已经历过开窗阶段（open 清空前 WindowOpened=true）
 	s.mu.Lock()
 	s.state.WindowOpened = true
 	s.mu.Unlock()
-	// 清空 open_time：SetOpenTimeFn 返回零值时间（管理员 PUT open_time="" 后 runtime.reparse 的行为）
-	s.SetOpenTimeFn(func() time.Time { return time.Time{} })
 
 	// 跑足够多轮 tick（每轮 50ms，共约 1.2s，远超 1s 常态提交间隔）
 	tEnd := time.Now().Add(1200 * time.Millisecond)
@@ -1365,40 +1336,56 @@ func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if n := fc.SelectClassCalls(61115); n != 0 {
-		t.Fatalf("open_time 清空后不得继续提交，实际调用 SelectClass %d 次", n)
+		t.Fatalf("无有效开窗点时不得继续提交，实际调用 SelectClass %d 次", n)
 	}
 
-	// 反向对照：open_time 恢复未来时刻（新一轮窗口）且窗口未开启 → 同样挂起提交
-	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(2*time.Hour), time.Second)
+	// 反向对照：识别值在未来（新一轮窗口）且窗口未开启 → 同样挂起提交
+	fc2 := newFakeClient(false)
+	fc2.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
+	s2 := New(&fakeAccts{c: fc2}, &fakeStore{}, time.Time{}, time.Second)
 	s2.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	if _, err := s2.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("探测失败: %v", err)
+	}
 	s2.mu.Lock()
 	s2.state.WindowOpened = false
 	s2.mu.Unlock()
 	s2.tick()
 	time.Sleep(50 * time.Millisecond)
-	if n := fc.SelectClassCalls(61115); n != 0 {
+	if n := fc2.SelectClassCalls(61115); n != 0 {
 		t.Fatalf("窗口未开启时不得提交，实际调用 SelectClass %d 次", n)
 	}
 }
 
-// TestProbeIntervalZeroOpenTime B15-M2：open_time 为零值（全新部署未配置 / 管理员
-// PUT open_time="" 显式解除窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时，
-// probeIntervalFor 必须按 30s 常态探测——此前 `now.After(open.Add(-nearWindow))`
-// 对零值 open 恒 true 落入临门 2s 分支，且若快照非空（开窗前平台有课程但 in_date_range
-// 全 false）WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData，
-// 正是第 6 轮根因修复的"访问过于频繁"1 分钟熔断触发形态（提交已被 B11-A1 零值守卫挂起，
-// 但探测仍在 2s 高频，行为割裂）。
+// TestProbeIntervalZeroOpenTime 无有效开窗点（open 零值 = 全新部署未识别 / 识别已过期）
+// 时，probeIntervalFor 必须按 30s 常态探测——此前 `now.After(open.Add(-nearWindow))`
+// 对零值 open 恒 true 落入临门 2s 分支，且若快照非空 WindowClosed 恒 false，
+// 探测永久 2s 高频轰炸 findElectivesData，正是"访问过于频繁"1 分钟熔断触发形态。
 func TestProbeIntervalZeroOpenTime(t *testing.T) {
 	fc := newFakeClient(false)
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
-	// 模拟管理员清空 open_time（F7-02 语义）：openTimeFn 返回零值
-	s.SetOpenTimeFn(func() time.Time { return time.Time{} })
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, time.Second)
 	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
 		t.Fatalf("open_time 为零值时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
 	}
-	// 反向对照：恢复未来开窗时间 → 临门期正常 2s 盯守（零值守卫不得误伤新一轮）
-	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
-	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
+	// 识别过期语义：识别值在过去 → 视为无有效开窗点 → 30s 常态（绝不把过期旧值当开窗点）。
+	// 注意用 probe()（全校探测，写 "*" 识别槽）注入——probeIntervalFor 读全校槽，
+	// ProbeForAccount 只写账号槽读不到，断言会落到零值分支而非真正的过期判定。
+	fcPast := newFakeClient(false)
+	fcPast.data.BeginTimes = []int64{time.Now().Add(-time.Hour).UnixMilli()}
+	sPast := New(&fakeAccts{c: fcPast}, &fakeStore{}, time.Time{}, time.Second)
+	sPast.probe()
+	if got := sPast.probeIntervalFor(time.Now()); got != probeIntervalFar {
+		t.Fatalf("识别值已过期时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
+	}
+	// 反向对照：识别值在未来 → 临门期正常 2s 盯守（过期判定不得误伤新一轮）
+	fc2 := newFakeClient(false)
+	// +2 小时（远离开窗点）再显式把时钟推进到临门窗口内：临门判定只关心"距离 ≤5 分钟"，
+	// 且 `now.After(open)` 未过开窗点 → 不落 WindowClosed 兜底，纯临门语义
+	fc2.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
+	s2 := New(&fakeAccts{c: fc2}, &fakeStore{}, time.Time{}, time.Second)
+	s2.probe()
+	s2.SetClockOffsetForTest(2*time.Hour - 4*time.Minute)
+	if got := s2.probeIntervalFor(s2.nowAligned()); got != probeIntervalNear {
 		t.Fatalf("临门期应 2s 盯守，实际 %v", got)
 	}
 }

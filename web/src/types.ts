@@ -50,8 +50,8 @@ export interface CourseStatus {
 }
 
 export interface SchedulerState {
-  // 当前账号的"预计开放时间"（管理员配置或平台 beginTimes 自动识别）；
-  // open_time_known=false = 未识别到（识别不到就是未知），open_time 为零值字符串。
+  // 当前账号的"预计开放时间"（唯一事实源 = 平台 beginTimes 自动识别，不可配置）；
+  // open_time_known=false = 未识别到或识别值已过期（识别不到/过期就是未知），open_time 为零值字符串。
   open_time: string
   open_time_known: boolean
   window_opened: boolean
@@ -94,7 +94,8 @@ export interface ActivationCode {
 
 // ---- 管理员后台类型 ----
 
-// 系统配置（GET /api/admin/config，Vision key 脱敏回显）
+// 系统配置（GET /api/admin/config，Vision key 脱敏回显）。
+// 开放时间已从配置项移除：只走平台 beginTimes 自动识别（识别态在 SchedulerState/AdminStats）。
 export interface AdminConfig {
   activation_enabled: boolean
   vision_base_url: string
@@ -102,11 +103,12 @@ export interface AdminConfig {
   vision_model: string
   captcha_engine: string
   captcha_concurrency: number
-  open_time: string
 }
 
 // 运行状态总览（GET /api/admin/stats）
 export interface AdminStats {
+  // open_time/open_time_set = 调度器平台 beginTimes 自动识别态（不可配置）；
+  // open_time_set=false = 未识别/识别过期，open_time 为空串。
   open_time: string
   activation_on: boolean
   window_opened: boolean

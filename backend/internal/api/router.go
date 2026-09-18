@@ -78,11 +78,11 @@ func requireJSONBody(next http.HandlerFunc) http.HandlerFunc {
 // accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
 // encrypt/decrypt 用于敏感配置（vision_key）加密入库/解密读回；Decrypt 字段仅注入备用（B10-08 起未消费）。
 func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
-	accts *accounts.Manager, sessions *session.Store, openTime, adminToken, adminName string,
+	accts *accounts.Manager, sessions *session.Store, adminToken, adminName string,
 	activationEnabled bool, encrypt, decrypt func(string) (string, error), rt *runtime.Store) http.Handler {
 
 	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
-		OpenTime: openTime, Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
+		Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
 		Encrypt: encrypt, Decrypt: decrypt, AdminName: adminName}
 	// M-6 修复：登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
 	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。

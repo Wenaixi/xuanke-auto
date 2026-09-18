@@ -81,11 +81,13 @@ const (
 // WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
 // 提交已被 B11-A1 零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
-	return s.probeIntervalForOpen(now, s.openTimeNow())
+	// B15-M2：零值/无识别 = 远间隔——识别值已过去（识别过期）也落在零值判定，
+	// 绝不在"未知开窗点"下仍 2s 高频轰炸平台（"访问过于频繁"熔断形态）。
+	return s.probeIntervalForOpen(now, s.openTimeFor(""))
 }
 
-// probeIntervalForOpen 判定探测间隔的纯函数——open 由调用方统一传入（tick 830 行取一次
-// 快照复用），避免各调用点各自 openTimeNow() 在热改亚毫秒窗口读到不同值。
+// probeIntervalForOpen 判定探测间隔的纯函数——open 由调用方统一传入（tick 开头取一次
+// 快照复用），open 零值（未识别/识别过期）= 远间隔，识别值未来才临门 2s 盯守。
 func (s *Scheduler) probeIntervalForOpen(now time.Time, open time.Time) time.Duration {
 	if open.IsZero() {
 		return probeIntervalFar
@@ -155,15 +157,9 @@ type Scheduler struct {
 	openTime time.Time
 	interval time.Duration
 
-	// openTimeFn 运行时打开时间读取器（热重载时代替启动期固化的 openTime；nil 时用 openTime）
-	openTimeFn func() time.Time
-
 	mu               sync.Mutex
 	acctTargets      map[string][]Target // 按账号隔离的目标课程
 	state            SchedulerState
-	// openTimeDetected 按账号隔离的"平台下发 beginTimes 识别结果"（毫秒时间戳）。
-	// 识别时间 = 平台真实开窗时刻（HAR 实证全校共享单值，select.js 用它做 1500ms
-	// 开窗探测）；每个账号只认自己探测识别的值，识别不到 = 未知（绝不借用别账号）。
 	openTimeDetected map[string]int64
 	inflight         map[string]map[int]bool // [账号][classID] 正在提交
 	done             map[string]map[int]bool // [账号][classID] 已成功
@@ -380,22 +376,44 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Unlock()
 }
 
-// SetOpenTimeFn 设置运行时打开时间读取器（管理员热改配置后立即生效；传入 nil 恢复启动值）。
-func (s *Scheduler) SetOpenTimeFn(fn func() time.Time) {
+// openTimeFor 返回指定账号当前"有效开放时间"（平台 beginTimes 自动识别，唯一事实源）：
+// 优先级 = 该账号识别槽 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"] → 零值。
+// 窗口关闭后识别槽保留旧值（"关闭≠时间消失"契约：空快照不删槽），但"有效"判定
+// 必须结合"识别值是否仍在未来"——识别值已过去（窗口关闭 / 上一批次过期）即视为
+// 无有效开窗点，返回零值让调度器按"未识别"处理（挂起提交 + 降频探测 + 展示未识别），
+// 绝不把已过期的旧时间当作开窗点继续判定。
+func (s *Scheduler) openTimeFor(acct string) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.openTimeFn = fn
-	if fn != nil {
-		s.state.OpenTime = fn()
-	}
+	return s.openTimeForLocked(acct)
 }
 
-// openTimeNow 返回当前生效的打开时间（运行时读取器优先）。
-func (s *Scheduler) openTimeNow() time.Time {
-	if s.openTimeFn != nil {
-		return s.openTimeFn()
+// openTimeForLocked 需持 s.mu 的 openTimeFor 实现（tick/windowClosedLocked 锁内复用）。
+func (s *Scheduler) openTimeForLocked(acct string) time.Time {
+	ms := s.openTimeDetected[acct]
+	if ms == 0 {
+		ms = s.openTimeDetected["*"]
 	}
+	if ms > 0 {
+		t := time.UnixMilli(ms)
+		// 识别过期语义：识别值已落在过去 = 该开窗批次已结束（窗口关闭或上一轮已过），
+		// 平台未再下发新 beginTimes 前不构成有效开窗点——返回零值（未识别）。
+		// 用对齐时钟判定"过去"（识别槽是平台绝对时刻，与调度器其余判定同基准，
+		// 避免本地钟与校准钟 ~640ms 漂移在黄金窗口附近把有效开窗点误判为过期）。
+		if t.Before(s.nowAlignedLocked()) {
+			return time.Time{}
+		}
+		return t
+	}
+	// 识别槽无值 → 回退遗留初始化 openTime 字段。生产路径 main.go 传零值后此回退恒零值
+	// （配置链路已整体移除，识别槽是唯一事实源）；保留字段仅为测试兼容与防御性兜底。
 	return s.openTime
+}
+
+// RecognizedOpenTime 返回全校识别的开放时间（未识别 / 已过期返回零值）——管理员 stats
+// 展示用（纯只读，不加锁内部读；调用方不持锁）。
+func (s *Scheduler) RecognizedOpenTime() time.Time {
+	return s.openTimeFor("")
 }
 
 // SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
@@ -615,7 +633,7 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
-	log.Printf("[scheduler] 已启动，轮询间隔 %v（课程探测节流 30 秒），窗口开启时间 %s", s.interval, s.openTimeNow().Format("2006-01-02 15:04:05"))
+	log.Printf("[scheduler] 已启动，轮询间隔 %v（课程探测节流 30 秒），开放时间自动识别开启", s.interval)
 }
 
 // Stop 停止轮询。
@@ -634,23 +652,15 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	defer s.mu.Unlock()
 	st := s.state
 	st.WindowClosed = s.windowClosedLocked() // B29-02：三条判据单源（含兜底），与 WindowClosed() 同真相
-	// 开放时间解析优先级：管理员显式配置（openTimeNow 非零）> 该账号自识别 beginTimes
-	// （存在即 know）> 二者皆无 = 未知（零值 + known=false）。识别值按账号隔离存储——
-	// 该账号没探测过就没有识别值，绝不借用其他账号的识别结果（识别不到=未知）。
-	if t := s.openTimeNow(); !t.IsZero() {
-		st.OpenTime = t
+	// 开放时间解析（唯一事实源 = 平台 beginTimes 自动识别）：
+	// 优先级 = 该账号自识别 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"]。
+	// 识别值必须"仍在未来"才算有效（识别过期 = 上一批次/窗口结束，平台未再下发新
+	// beginTimes → 视为未识别，前端显示"未识别到开放时间"而非把过期旧值挂出来）。
+	// 识别槽本身不删（"关闭≠时间消失"契约：窗口关闭后空快照只覆盖非空 beginTimes，
+	// 保留已识别的开窗事实），过期与否由这里的有效时刻判定区分。
+	st.OpenTime = s.openTimeForLocked(acct)
+	if !st.OpenTime.IsZero() {
 		st.OpenTimeKnown = true
-	} else if ms, ok := s.openTimeDetected[acct]; ok && ms > 0 {
-		st.OpenTime = time.UnixMilli(ms)
-		st.OpenTimeKnown = true
-	} else if ms, ok := s.openTimeDetected["*"]; ok && ms > 0 {
-		// 全局识别槽兜底（probe() 主体刷新）：该账号自身没探测过，但全校探测已识别到
-		// 平台统一开窗时刻（HAR 实证全校共享单值）——直接展示，无需等待该账号首探。
-		st.OpenTime = time.UnixMilli(ms)
-		st.OpenTimeKnown = true
-	} else {
-		st.OpenTime = time.Time{}
-		st.OpenTimeKnown = false
 	}
 	st.TokenValid = s.tokenValidForLocked(acct)
 	st.Courses = nil
@@ -844,10 +854,9 @@ func (s *Scheduler) windowClosedLocked() bool {
 	if s.state.WindowClosed {
 		return true
 	}
-	// open 单快照对三条判据统一（判据2 取一次复用 + 判据3 同快照）——两处独立
-	// openTimeNow() 在管理员热改开放时间的亚毫秒窗口内可能读到新旧两个值（一次触发
-	// 判据、一次不触发）：判据2 已修、判据3 必须同一快照，幽灵窗口挂起/解除一致。
-	open := s.openTimeNow()
+	// open 单快照对三条判据统一（判据2 取一次复用 + 判据3 同快照）——识别槽是唯一
+	// 事实源，一次读取避免"识别值在两次读取间被新批次覆盖"的不一致窗口。
+	open := s.openTimeForLocked("")
 	if s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
 		return true
 	}
@@ -907,7 +916,7 @@ func (s *Scheduler) tick() {
 	now := s.nowAligned()
 	s.mu.Lock()
 	last := s.lastProbe
-	open := s.openTimeNow()
+	open := s.openTimeForLocked("")
 	s.mu.Unlock()
 
 	s.maybePrewarm(now, open)
@@ -931,13 +940,12 @@ func (s *Scheduler) tick() {
 	s.mu.Unlock()
 	// 提交触发条件（或关系）：
 	//   1) 探测已确认窗口开启（WindowOpened）；
-	//   2) 对齐后的时间已过开窗点（openTimeNow）——兜底：平台在到点瞬间把课程列表拉空
+	//   2) 对齐后的时间已过开窗点（识别值）——兜底：平台在到点瞬间把课程列表拉空
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
-	// B11-A1：open 为零值（管理员 PUT open_time="" 显式解除窗口机制，F7-02）
-	// 时恒满足 !now.After(open) → 提交循环永续放行。此时窗口机制已被显式解除，
-	// 但提交仍可能对"已满员/已成功"目标反复刷平台报名接口——挂起提交，绝不放行。
+	// B11-A1：open 为零值（未识别 / 识别过期）时恒满足 !now.After(open) → 提交循环永续放行。
+	// 此时无有效开窗点——挂起提交，绝不放行。
 	if open.IsZero() {
 		return
 	}
@@ -1069,7 +1077,7 @@ func (s *Scheduler) probe() {
 	// TestWindowClosedState 的 -time.Hour 场景不受影响）。
 	// 裕量基准 open 取一次快照复用——同一探测内两处 10s 裕量判定若各自取 open，热改
 	// 亚毫秒窗口内主判据与 EmptyProbeRuns 入账可能基于新旧两个不同 open（B33-02 同族）。
-	open := s.openTimeNow()
+	open := s.openTimeForLocked("")
 	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second))
 	// B20-02：探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
@@ -1713,22 +1721,6 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 	}
 	s.state.Courses[idx].Status = status
 	s.state.Courses[idx].Result = result
-}
-
-// FormatOpenTime 解析开放时间字符串（本地时区）。
-// B25-01：空串 = 合法"清除开放时间"（F7-02 契约：零值 = 解除窗口机制），
-// 返回零值 time.Time 绝不判错——与 runtime.reparse 对空串置 OpenTimeParsed 零值的
-// 语义完全对齐；此前返回错误只是 main.go 启动路径独自严惩空串（热改清空落库后重启
-// log.Fatal 拒绝启动，服务永久停摆）。非空值仍严格校验格式（B21-04 契约不变）。
-func FormatOpenTime(s string) (time.Time, error) {
-	if s == "" {
-		return time.Time{}, nil
-	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local)
-	if err != nil {
-		return time.Time{}, errors.New("开放时间格式错误: " + err.Error())
-	}
-	return t, nil
 }
 
 // CheckClassSelectable 手动报名前的服务端复核（评审 M7）：

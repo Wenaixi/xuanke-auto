@@ -45,10 +45,16 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 	if kept == 0 {
 		t.Fatal("窗口关闭后识别槽必须保留在 openTimeDetected 中（关闭≠时间消失）")
 	}
-	// 但识别值已过期（窗口已关闭、平台未再下发新 beginTimes）→ 视为未识别：
-	// 前端显示"未识别到开放时间"，绝不把过期旧值继续当开放时间挂出来
+	// 但识别值已过期（窗口已关闭、平台未再下发新 beginTimes）→ open_time_known=false：
+	// 前端显示"未识别到开放时间"，绝不把过期旧值继续当开放时间挂出来。
 	if st := s.StateForAccount("acct1"); st.OpenTimeKnown {
 		t.Fatal("识别值已过期必须 open_time_known=false（不把旧值当开放时间）")
+	}
+	// 同时：openTimeForLocked 仍返回已识别的开窗时刻（识别过期只影响 known/展示，
+	// 不截断为零值）——调度判定（tick 提交守卫的第二判据 !now.After(open)）依赖它
+	// 放行"已到点"提交，窗口关闭形态由 WindowClosed 挂起而非零值守卫。
+	if st := s.StateForAccount("acct1"); st.OpenTime.IsZero() {
+		t.Fatal("识别过期只影响 open_time_known，open_time 仍应保留识别值（挂起/展示解耦）")
 	}
 }
 

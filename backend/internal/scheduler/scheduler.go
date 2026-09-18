@@ -376,12 +376,13 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Unlock()
 }
 
-// openTimeFor 返回指定账号当前"有效开放时间"（平台 beginTimes 自动识别，唯一事实源）：
+// openTimeFor 返回指定账号的"已识别开放时间"（平台 beginTimes 自动识别，唯一事实源）：
 // 优先级 = 该账号识别槽 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"] → 零值。
-// 窗口关闭后识别槽保留旧值（"关闭≠时间消失"契约：空快照不删槽），但"有效"判定
-// 必须结合"识别值是否仍在未来"——识别值已过去（窗口关闭 / 上一批次过期）即视为
-// 无有效开窗点，返回零值让调度器按"未识别"处理（挂起提交 + 降频探测 + 展示未识别），
-// 绝不把已过期的旧时间当作开窗点继续判定。
+// 返回已识别的开窗时刻本身（不做过期截断）——"识别过期"语义由展示层 owner：
+// StateForAccount/RecognizedOpenTime 依 now 判定 open_time_known，识别值已过去 = 展示"未识别"。
+// 窗口关闭后识别槽保留旧值（"关闭≠时间消失"契约：空快照不删槽，展示层据此区分
+// "批次已结束"与"从未识别"）。调度判定（tick 提交守卫/probeIntervalFor/windowClosedLocked）
+// 直接用返回的开窗时刻比较 now ——"已到点"天然放行提交、由 WindowClosed 兜底降频。
 func (s *Scheduler) openTimeFor(acct string) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -389,29 +390,26 @@ func (s *Scheduler) openTimeFor(acct string) time.Time {
 }
 
 // openTimeForLocked 需持 s.mu 的 openTimeFor 实现（tick/windowClosedLocked 锁内复用）。
+// 返回"已识别的开窗时刻"（无论未来/过去）——**"识别过期"只影响展示层**（StateForAccount/
+// RecognizedOpenTime 依 now 判定 open_time_known/open_time_set），绝不在此把过期值截断成
+// 零值：tick 提交守卫的第二判据 `!now.After(open)` 天然放行"已到点"的过期识别值，
+// 这里截断会使开窗瞬间起 open 恒零 → 提交循环被第一守卫永久挂起（黄金期自动抢课失效）。
 func (s *Scheduler) openTimeForLocked(acct string) time.Time {
 	ms := s.openTimeDetected[acct]
 	if ms == 0 {
 		ms = s.openTimeDetected["*"]
 	}
 	if ms > 0 {
-		t := time.UnixMilli(ms)
-		// 识别过期语义：识别值已落在过去 = 该开窗批次已结束（窗口关闭或上一轮已过），
-		// 平台未再下发新 beginTimes 前不构成有效开窗点——返回零值（未识别）。
-		// 用对齐时钟判定"过去"（识别槽是平台绝对时刻，与调度器其余判定同基准，
-		// 避免本地钟与校准钟 ~640ms 漂移在黄金窗口附近把有效开窗点误判为过期）。
-		if t.Before(s.nowAlignedLocked()) {
-			return time.Time{}
-		}
-		return t
+		return time.UnixMilli(ms)
 	}
 	// 识别槽无值 → 回退遗留初始化 openTime 字段。生产路径 main.go 传零值后此回退恒零值
 	// （配置链路已整体移除，识别槽是唯一事实源）；保留字段仅为测试兼容与防御性兜底。
 	return s.openTime
 }
 
-// RecognizedOpenTime 返回全校识别的开放时间（未识别 / 已过期返回零值）——管理员 stats
-// 展示用（纯只读，不加锁内部读；调用方不持锁）。
+// RecognizedOpenTime 返回全校识别的开放时间——**未识别（识别槽无值）返回零值**；
+// 识别值已过期（已过去）由展示方依 need 判定：stats 传回给前端靠 open_time_set
+// 表达"识别失效"。管理员 stats 展示用（纯只读，不加锁内部读；调用方不持锁）。
 func (s *Scheduler) RecognizedOpenTime() time.Time {
 	return s.openTimeFor("")
 }
@@ -659,7 +657,10 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	// 识别槽本身不删（"关闭≠时间消失"契约：窗口关闭后空快照只覆盖非空 beginTimes，
 	// 保留已识别的开窗事实），过期与否由这里的有效时刻判定区分。
 	st.OpenTime = s.openTimeForLocked(acct)
-	if !st.OpenTime.IsZero() {
+	// 识别过期语义（展示层 owner）：识别值已过去（批次已结束/窗口关闭）→ open_time_known=false，
+	// 前端显示"未识别到开放时间"，绝不把过期旧值挂出来当"当前开放时间"；识别槽保留
+	// （关闭≠时间消失）。
+	if !st.OpenTime.IsZero() && st.OpenTime.After(s.nowAlignedLocked()) {
 		st.OpenTimeKnown = true
 	}
 	st.TokenValid = s.tokenValidForLocked(acct)
@@ -786,8 +787,12 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// 开窗时刻（事实），窗口关闭后空快照不带 begin_times 但识别值必须保留——
 	// 关闭≠时间消失，前端倒计时归零/显示已结束而非"未知"。空快照不删除识别槽，
 	// 只在下发非空 begin_times 时覆盖（新批次热更仍生效）。
+	// 写入必须在 s.mu 锁内（与 tick/openTimeForLocked 持锁读并发）——map 无锁并发
+	// 读写是 Go 数据竞争（runtime 可 throw），识别槽是调度器核心读路径（每 300ms tick）。
 	if len(data.BeginTimes) > 0 {
+		s.mu.Lock()
 		s.openTimeDetected[acct] = data.BeginTimes[0]
+		s.mu.Unlock()
 		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}
 	s.mu.Lock()
@@ -1040,8 +1045,11 @@ func (s *Scheduler) probe() {
 	// 全校共享单值，select.js 只做 1500ms 开窗探测、不按发布/账号区分）。识别时间 =
 	// 平台已训示的开窗时刻（事实），窗口关闭后空快照不带 begin_times 但识别值必须
 	// 保留——关闭≠时间消失。空快照不删除识别槽，只在下发非空 begin_times 时覆盖。
+	// 写入必须在 s.mu 锁内（与 tick/openTimeForLocked 持锁读并发，见 ProbeForAccount 同款注释）。
 	if len(data.BeginTimes) > 0 {
+		s.mu.Lock()
 		s.openTimeDetected["*"] = data.BeginTimes[0]
+		s.mu.Unlock()
 		log.Printf("[scheduler] 识别到开放时间 %s（平台 beginTimes）", time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}
 	s.mu.Lock()

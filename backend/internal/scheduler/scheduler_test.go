@@ -1357,27 +1357,41 @@ func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 	}
 }
 
-// TestProbeIntervalZeroOpenTime 无有效开窗点（open 零值 = 全新部署未识别 / 识别已过期）
-// 时，probeIntervalFor 必须按 30s 常态探测——此前 `now.After(open.Add(-nearWindow))`
-// 对零值 open 恒 true 落入临门 2s 分支，且若快照非空 WindowClosed 恒 false，
-// 探测永久 2s 高频轰炸 findElectivesData，正是"访问过于频繁"1 分钟熔断触发形态。
+// TestProbeIntervalZeroOpenTime 无识别值（识别槽空 = 从未识别到）时 probeIntervalFor 必须按
+// 30s 常态探测——此前 `now.After(open.Add(-nearWindow))` 对零值 open 恒 true 落入临门 2s 分支，
+// 且若快照非空 WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData，
+// 正是"访问过于频繁"1 分钟熔断触发形态。
+// 注意：识别值已过期是"非零开窗时刻"（挂起/展示解耦后不截断零值），探测节奏由
+// WindowClosed 兜底（空快照+曾开窗 → 30s）；快照非空 + 未开窗时仍 2s 盯守（平台随时开窗）。
 func TestProbeIntervalZeroOpenTime(t *testing.T) {
 	fc := newFakeClient(false)
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, time.Second)
 	if got := s.probeIntervalFor(time.Now()); got != probeIntervalFar {
-		t.Fatalf("open_time 为零值时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
+		t.Fatalf("识别槽为空时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
 	}
-	// 识别过期语义：识别值在过去 → 视为无有效开窗点 → 30s 常态（绝不把过期旧值当开窗点）。
-	// 注意用 probe()（全校探测，写 "*" 识别槽）注入——probeIntervalFor 读全校槽，
-	// ProbeForAccount 只写账号槽读不到，断言会落到零值分支而非真正的过期判定。
+	// 识别值已过期 + WindowClosed（空快照 + 曾开窗 + 开放时间已过）→ 30s 兜底降频
 	fcPast := newFakeClient(false)
+	fcPast.mu.Lock()
+	fcPast.data.Publishes = nil
+	fcPast.mu.Unlock()
 	fcPast.data.BeginTimes = []int64{time.Now().Add(-time.Hour).UnixMilli()}
-	sPast := New(&fakeAccts{c: fcPast}, &fakeStore{}, time.Time{}, time.Second)
+	sPast := New(&fakeAccts{c: fcPast}, &fakeStore{}, time.Time{}, time.Hour)
+	sPast.mu.Lock()
+	sPast.state.WindowOpened = true // 曾开过窗（B18-M1 前提）
+	sPast.mu.Unlock()
 	sPast.probe()
 	if got := sPast.probeIntervalFor(time.Now()); got != probeIntervalFar {
-		t.Fatalf("识别值已过期时应 30s 常态探测（不落入临门 2s 分支），实际 %v", got)
+		t.Fatalf("识别值已过期 + 窗口关闭时应 30s 兜底，实际 %v", got)
 	}
-	// 反向对照：识别值在未来 → 临门期正常 2s 盯守（过期判定不得误伤新一轮）
+	// 反向对照 1：识别值过期但快照非空（平台已下发课程、窗口未开）→ 临门 2s 盯守（合理等待）
+	fcMid := newFakeClient(false)
+	fcMid.data.BeginTimes = []int64{time.Now().Add(-time.Hour).UnixMilli()}
+	sMid := New(&fakeAccts{c: fcMid}, &fakeStore{}, time.Time{}, time.Second)
+	sMid.probe()
+	if got := sMid.probeIntervalFor(time.Now()); got != probeIntervalNear {
+		t.Fatalf("识别值过期 + 快照非空 + 未开窗应临门 2s 盯守（等待平台开窗），实际 %v", got)
+	}
+	// 反向对照 2：识别值在未来 → 临门期正常 2s 盯守（过期判定不得误伤新一轮）
 	fc2 := newFakeClient(false)
 	// +2 小时（远离开窗点）再显式把时钟推进到临门窗口内：临门判定只关心"距离 ≤5 分钟"，
 	// 且 `now.After(open)` 未过开窗点 → 不落 WindowClosed 兜底，纯临门语义
@@ -1431,6 +1445,30 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 	}
 	if got := s3.probeIntervalFor(time.Now()); got != probeIntervalNear {
 		t.Fatalf("未开过窗的空快照应符合临门期 2s 盯守，实际 %v", got)
+	}
+}
+
+// TestOpenTimeForLockedReturnsRecognizedValueEvenWhenPast 识别槽存在时 openTimeForLocked
+// 必须返回识别时刻本身（无论未来/过去）——"识别过期"只影响展示层 open_time_known，
+// 绝不在此截断为零值。审查发现的 CRITICAL：开窗瞬间起平台 beginTimes 恒为该批次
+// 开窗时刻（已过去），若这里截断则 tick 提交守卫第一判据 open.IsZero() 永久挂起
+// 提交（黄金期自动抢课整体失效）。用对齐时钟推进过识别值模拟"开窗后"形态。
+func TestOpenTimeForLockedReturnsRecognizedValueEvenWhenPast(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, time.Hour)
+	if _, err := s.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("探测失败: %v", err)
+	}
+	// 识别值在未来 → 正常返回识别时刻
+	t0 := s.StateForAccount("acct1").OpenTime
+	if t0.IsZero() {
+		t.Fatal("识别值在未来必须返回识别时刻")
+	}
+	// 时间推进过识别值（开窗后形态：平台继续下发同一批次 beginTimes）
+	s.SetClockOffsetForTest(3 * time.Hour)
+	if got := s.openTimeFor("acct1"); got.IsZero() || !got.Equal(t0) {
+		t.Fatalf("识别值已过去仍应返回识别时刻（挂起/展示解耦），实际 %v", got)
 	}
 }
 
@@ -1764,16 +1802,23 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 		t.Fatal("未来开窗点不得镜像时钟兜底为已关闭")
 	}
 
-	// 场景 3：主判据（state.WindowClosed 已置位）照旧镜像 + 非关闭状态不误报
-	s3 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
-	s3.mu.Lock()
-	s3.state.WindowClosed = true
-	s3.mu.Unlock()
-	if !s3.StateForAccount("acct1").WindowClosed {
+	// 场景 3：识别值在未来 + 空快照（正常未开窗/窗口关闭前）→ 不得误标关闭
+	s3 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(2*time.Hour), time.Hour)
+	s3.probe() // 空快照形态（无发布）
+	if s3.WindowClosed() {
+		t.Fatal("识别值在未来 + 空快照不应视同关闭（尚未开窗）")
+	}
+
+	// 场景 3（原）：主判据（state.WindowClosed 已置位）照旧镜像 + 非关闭状态不误报
+	s4 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
+	s4.mu.Lock()
+	s4.state.WindowClosed = true
+	s4.mu.Unlock()
+	if !s4.StateForAccount("acct1").WindowClosed {
 		t.Fatal("主判据置位必须镜像进状态字段")
 	}
-	s4 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
-	if s4.StateForAccount("acct1").WindowClosed {
+	s5 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
+	if s5.StateForAccount("acct1").WindowClosed {
 		t.Fatal("无任何判据命中时 window_closed 必须为 false（不误报）")
 	}
 }

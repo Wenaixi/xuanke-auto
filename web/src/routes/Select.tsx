@@ -627,8 +627,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
-  // 选课开放时间倒计时（来自调度器状态——管理员配置或平台 beginTimes 自动识别，
-  // 识别不到 = 未知，绝不显示编造时间）。
+  // 选课开放时间倒计时（来自调度器状态——平台 beginTimes 自动识别唯一事实源，不可配置；
+  // 识别不到或识别过期 = 未知，绝不显示编造时间）。
   const openTimeStr =
     stateData?.open_time_known && stateData.open_time
       ? stateData.open_time
@@ -705,7 +705,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             ) : !openTimeStr ? (
               <span className="truncate">
                 未识别到开放时间
-                <span className="text-neutral-500">（平台尚未下发 beginTimes）</span>
+                <span className="text-neutral-500">（平台尚未下发或识别已过期）</span>
               </span>
             ) : cd.isExpired ? (
               <span className="truncate">本地已到开窗点，等待平台窗口开放...</span>

@@ -147,8 +147,9 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // F9-07：useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
   // 且 effect 依赖 [] 时 interval 内读 Date.now() 而非闭包 state——绝不随 target 卡旧值。
   const courses = state?.courses ?? []
-  // 开放时间优先管理员配置，未配置时取平台 beginTimes 自动识别；识别不到 = 未知
-  // （open_time_known=false），倒计时组件 target=null 即显全 00 + 过期态，绝不显示编造时间。
+  // 开放时间唯一事实源 = 平台 beginTimes 自动识别（不可配置，识别槽已含"识别过期"
+  // 语义：窗口关闭/批次已过后识别值视为无效）；识别不到 = 未知（open_time_known=false），
+  // 倒计时组件 target=null 即显全 00 + 过期态，绝不显示编造时间。
   const openTimeStr =
     state?.open_time_known && state.open_time ? state.open_time : null
   const cd = useTickingCountdown(openTimeStr)
@@ -156,8 +157,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // 折叠行实时标签由主矩阵每秒 tick 的整页重渲染驱动（见 relativeCountdown 注释）。
   const nowMs = Date.now()
 
-  // 主倒计时 = 调度器有效开放时间（管理员配置 > 平台 beginTimes 首值，与 openTimeStr 同源）；
-  // 其余 begin_times 按从近到远排进"其他开放时间"折叠段。openTimeStr 未识别时用
+  // 主倒计时 = 调度器识别到的有效开放时间（平台 beginTimes 唯一事实源，与 openTimeStr
+  // 同源）；其余 begin_times 按从近到远排进"其他开放时间"折叠段。openTimeStr 未识别时用
   // begin_times[0] 兜底当下主时间，避免"主矩阵未知但折叠列表有值"的悬空。
   // 依赖用 electives?.begin_times 稳定引用（react-query 数据不变引用不变），
   // fallback 空数组在 useMemo 内部——绝不在渲染期新建数组让依赖每次都变。
@@ -371,8 +372,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   {/* 多开放时间折叠段：平台 beginTimes 是数组契约（真实 select.js 遍历全
                       数组做 1500ms 开窗探测），当前学期只下发单值故本段大概率不出现——
                       单值路径与改前逐像素一致。其余时间从近到远已排入 extrasMs，
-                      点开逐行显示绝对时间 + 实时摘要。主时间 = 调度器开窗真值，故意
-                      不与 begin_times 合并（管理员配置优先，见 openTimeStr 注释）。 */}
+                      点开逐行显示绝对时间 + 实时摘要。主时间 = 调度器识别开窗真值，故意
+                      不与 begin_times 合并（识别态唯一事实源，见 openTimeStr 注释）。 */}
                   {extrasMs.length > 0 && (
                     <CollapseSection
                       open={extrasOpen}

@@ -532,8 +532,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       // R27-01：PUT 成功后必须先 refetch 拉取后端"实际生效值"再自增代际——
       // 旧实现只 setConfigEpoch，effect 重跑时用的 loaded 仍是挂载时陈旧快照（configQuery
       // 从未 refetch、缓存 data 未更新），表单被覆盖回旧值；管理员二次保存即把刚生效的
-      // 配置静默回滚（open_time 回退尤其危险：新一轮抢窗时间被改回旧值，B11-A1 挂起语义
-      // 下窗口机制被破坏）。refetch 失败则不自增代际——表单保留用户输入不被陈旧值覆盖，
+      // 配置静默回滚。refetch 失败则不自增代际——表单保留用户输入不被陈旧值覆盖，
       // 后端此时已生效（本次保存并未回滚），toast 照常确认成功。
       const refreshed = await configQuery.refetch()
       if (!refreshed.error && refreshed.data) {

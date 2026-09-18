@@ -11,7 +11,7 @@ import (
 )
 
 // Open 打开（必要时创建）SQLite 数据库并确保表结构存在。
-// 检测到旧版数据形状（account 表 / 空账号目标）时直接报错拒绝启动——政策：不兼容旧数据。
+// 流程：建表（新库）→ 增量迁移旧库缺列 → 拒绝真正不兼容的旧版数据形状。
 func Open(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -25,11 +25,35 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
+	if err := migrateAddPublishMeta(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	if err := refuseLegacy(d); err != nil {
 		d.Close()
 		return nil, err
 	}
 	return d, nil
+}
+
+// migrateAddPublishMeta 为旧库增量补齐 targets 表发布元数据列。
+// ALTER TABLE ADD COLUMN 纯加列、对既有行自动填默认值，不破坏任何数据——发布元数据
+// 随目标持久化是本版本新增需求，旧库缺列绝不拒绝启动（用户积累的账号/目标/成功记录
+// 必须保留，"数据都要保存好啊"契约）。
+func migrateAddPublishMeta(d *sql.DB) error {
+	for _, col := range []string{"publish_name", "begin_date"} {
+		ok, err := columnExists(d, "targets", col)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+		if _, err := d.Exec("ALTER TABLE targets ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("迁移 targets.%s 列失败: %w", col, err)
+		}
+	}
+	return nil
 }
 
 // refuseLegacy 兼容性检查：检测到旧版数据形状直接拒绝启动（政策：不兼容旧数据）。
@@ -50,7 +74,9 @@ func refuseLegacy(d *sql.DB) error {
 		return errors.New("检测到旧版空账号目标数据，本版本不兼容旧数据。请删除 data 目录下的 xuanke.db 后重新启动")
 	}
 	// 旧 v2 库缺列（targets.priority / task_log.account）——不兼容，提示删除重建
-	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}, {"targets", "publish_name"}, {"targets", "begin_date"}} {
+	// 注意：targets.publish_name/begin_date 不在此列——它们由 migrateAddPublishMeta
+	// 增量迁移补齐，缺列绝不拒绝启动（数据保留契约）。
+	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}} {
 		ok, err := columnExists(d, col[0], col[1])
 		if err != nil {
 			return err

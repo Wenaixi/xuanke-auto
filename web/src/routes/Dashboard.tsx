@@ -365,11 +365,17 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                     <span className="flex items-center gap-1.5">
                       <span>预计开放时间：</span>
                       <span className="text-white">
+                        {/* M2：文案行与主倒计时矩阵同源吃 begin_times 兜底——识别槽未建立
+                            （open_time_known=false）但平台已下发开窗点时，矩阵已明确倒数，
+                            文案不能再显"未识别到开放时间"自相矛盾。识别真值优先，兜底只
+                            在识别缺席时生效，识别也缺席才回落到"未识别"/"同步中"。 */}
                         {openTimeStr
                           ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-                          : state
-                            ? "未识别到开放时间"
-                            : "正在同步教务平台时间配置..."}
+                          : electives?.begin_times?.[0] != null
+                            ? new Date(electives.begin_times[0]).toLocaleString("zh-CN", { hour12: false })
+                            : state
+                              ? "未识别到开放时间"
+                              : "正在同步教务平台时间配置..."}
                       </span>
                     </span>
                     <span className="text-neutral-500">

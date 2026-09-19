@@ -479,6 +479,21 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       0
     )
     if (latestRev === 0) return
+    // F41-M2：回显未完成守卫——与防抖回调同款判据（见防抖 effect 内 618 行）：
+    // /state 首帧未到达（stateData===undefined）或首帧携带旧目标（courses 非空）时，
+    // 后端旧目标尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的
+    // selected 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack
+    // 的 5s 等待只保证"等待期间合并完成"——/state 首帧持续失败超时后，守卫在这里
+    // 兜住：置脏跳过、不 PUT，脏块保留（dirtyRef=true），下次进入/刷新/回显完成
+    // 后再落库（安全方向：绝不静默丢改动）。消费时刻读 ref 判首帧，与防抖同源。
+    if (
+      !echoedRef.current &&
+      (stateDataRef.current === undefined ||
+        (stateDataRef.current.courses?.length ?? 0) > 0)
+    ) {
+      dirtyRef.current = true
+      return
+    }
     // F17-01：与防抖回调同款消费时刻守卫（同 F15-01 意图，判据从渲染期
     // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
     // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。

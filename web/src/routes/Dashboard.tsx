@@ -114,6 +114,15 @@ function parseDateKey(k: string): number {
   return new Date(k + "T00:00:00").getTime()
 }
 
+// localTodayMs：本地日期零点（N1）。与 parseDateKey 的本地零点同基准——
+// toISOString() 恒 UTC，UTC+8 凌晨 00:00-07:59 时拿到的是昨天日期，日期分组
+// "距今天最近在前"排序整体错一档；setHours(0,0,0,0) 锁本地零点无此偏移。
+export function localTodayMs(now: Date = new Date()): number {
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  return today.getTime()
+}
+
 export default function Dashboard({ account, sessionToken, onLogout, onGoSelect }: Props) {
   // n12：窗口已关闭后把轮询降频到 30 秒——状态已定型（快照为空、
   // 不会再有新动静），继续 3 秒高频打 /state 与 /logs 纯属浪费请求与刷屏日志；
@@ -212,7 +221,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     }
     // 日期排序：|日期 - 今天零点| 升序 = 距今天最近的天在前（未来/已过统一成立），
     // 平局按日期值升序；"未知"恒排最后（窗口关闭兜底组）。
-    const todayMs = parseDateKey(new Date().toISOString().slice(0, 10))
+    const todayMs = localTodayMs()
     const dateKeys = [...byDate.keys()].sort((a, b) => {
       if (a === "未知") return 1
       if (b === "未知") return -1

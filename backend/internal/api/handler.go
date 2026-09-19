@@ -71,8 +71,20 @@ func (d *Deps) secureEncrypt(v string) (string, error) {
 }
 
 // writeJSON 统一 JSON 响应：{"code":0,"data":...,"msg":""}
+// 项目长期约定：业务码放 body.code，HTTP 状态恒 200（前端契约只读 body）。保持此语义，
+// 故 writeJSON 自身不写 HTTP 状态码——只用于"业务失败仍 200"的正常路径。
 func writeJSON(w http.ResponseWriter, code int, data any, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
+}
+
+// writeJSONStatus 与 writeJSON 同款响应体，且额外写真实 HTTP 状态码。
+// 专用于基础设施错误路径（B39-02）：panic 恢复 500 / 会话 401 / 管理鉴权 403 /
+// 限流 429——监控与反代需要在 HTTP 层识别错误，恒 200 会掩盖后端故障。
+// 正常业务路径继续走 writeJSON（HTTP 恒 200），前端 body.code 契约不受影响。
+func writeJSONStatus(w http.ResponseWriter, status, code int, data any, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
 }
 
@@ -579,7 +591,7 @@ func requireAdminSession(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 			tok = xt
 		}
 		if !d.Sessions.IsAdmin(tok) {
-			writeJSON(w, 403, nil, "需要管理员权限")
+			writeJSONStatus(w, http.StatusForbidden, 403, nil, "需要管理员权限")
 			return
 		}
 		next(w, r)
@@ -1047,7 +1059,7 @@ func requireAuth(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 		}
 		acct, ok := d.Sessions.Account(tok)
 		if !ok {
-			writeJSON(w, 401, nil, "会话无效或已过期，请重新登录")
+			writeJSONStatus(w, http.StatusUnauthorized, 401, nil, "会话无效或已过期，请重新登录")
 			return
 		}
 		ctx := r.Context()
@@ -1151,7 +1163,9 @@ func recoverMiddleware(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("[api] panic recovered: %v", rec)
-				writeJSON(w, 500, nil, "内部错误")
+				// B39-02：panic 是真实 500，必须写 HTTP 状态码——此前恒 200，
+				// 监控/反代在 HTTP 层识别不了后端内部错误。
+				writeJSONStatus(w, http.StatusInternalServerError, 500, nil, "内部错误")
 			}
 		}()
 		next.ServeHTTP(w, r)

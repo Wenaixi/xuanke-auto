@@ -241,18 +241,18 @@ func TestHealth(t *testing.T) {
 
 func TestAuthRequired(t *testing.T) {
 	d := newTestDeps(t)
-	// 无会话访问受保护端点应 401
+	// 无会话访问受保护端点应 401（B39-02：HTTP 状态码真实 401，此前恒 200）
 	code, j := doJSON(t, d.api, "GET", "/api/state", "")
-	if code != 200 || j["code"].(float64) != 401 {
+	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("无会话应 401: %d %v", code, j)
 	}
 	code, j = doJSON(t, d.api, "GET", "/api/electives", "")
-	if code != 200 || j["code"].(float64) != 401 {
+	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("无会话 /electives 应 401: %d %v", code, j)
 	}
 	// 无效会话令牌应 401
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", "bogus-token")
-	if code != 200 || j["code"].(float64) != 401 {
+	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("无效会话应 401: %d %v", code, j)
 	}
 }
@@ -431,15 +431,15 @@ func TestAdminAuth(t *testing.T) {
 	if code != 200 || j["code"].(float64) != 1 {
 		t.Fatalf("错误管理口令登录应 code=1: %d %v", code, j)
 	}
-	// 无会话访问管理接口应 403
+	// 无会话访问管理接口应 403（B39-02：HTTP 状态码真实 403，此前恒 200）
 	code, j = doJSON(t, d.api, "GET", "/api/admin/codes", "")
-	if code != 200 || j["code"].(float64) != 403 {
+	if code != http.StatusForbidden || j["code"].(float64) != 403 {
 		t.Fatalf("无会话访问管理接口应 403: %d %v", code, j)
 	}
 	// 普通用户会话访问管理接口应 403
 	userTok := authenticateDirect(t, d, "acct1")
 	code, j = doJSONAuth(t, d.api, "GET", "/api/admin/codes", "", userTok)
-	if code != 200 || j["code"].(float64) != 403 {
+	if code != http.StatusForbidden || j["code"].(float64) != 403 {
 		t.Fatalf("普通用户会话访问管理接口应 403: %d %v", code, j)
 	}
 	// 正确管理口令登录 admin 成功，会话可访问管理接口
@@ -527,6 +527,12 @@ func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
 	}
 	if msg, _ := j["msg"].(string); !strings.Contains(msg, "内部错误") {
 		t.Fatalf("应统一回显「内部错误」文案: %v", j)
+	}
+	// B39-02：panic 恢复除 body code=500 外，HTTP 状态码必须真实写 500——
+	// 此前 writeJSON 只设 Content-Type 不写 WriteHeader，监控/反代在 HTTP 层
+	// 识别不了后端内部错误（恒 200 假象）。修复后 panic 路径 HTTP 500。
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("panic 恢复应写 HTTP 500（修复前恒 200），实际 %d", rec.Code)
 	}
 }
 
@@ -816,9 +822,9 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 		t.Fatalf("删除账号失败: %d %v", code, j)
 	}
 	// MAJOR-A：删除账号后其既有会话必须立即失效（吊销会话，不等 12h TTL）
-	// 会话失效由业务 code=401 表达（HTTP 200 + body code 恒为项目约定）
+	// 会话失效由业务 code=401 表达（B39-02 后 HTTP 状态码同样真实 401）
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok1)
-	if code != 200 || j["code"].(float64) != 401 {
+	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("删除账号后旧会话应立即失效 code=401，实际 %d %v", code, j)
 	}
 	// 未删除的 acct2 会话不受影响
@@ -1279,11 +1285,22 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestLoginRateLimit(t *testing.T) {
 	d := newTestDeps(t)
-	// 连续 7 次登录：前 5 次应通过，第 6 次起应被限流（body code=429）
+	// 连续 7 次登录：前 5 次应通过，第 6 次起应被限流（body code=429 且 HTTP 真实 429）
 	codes := []float64{}
 	for i := 0; i < 7; i++ {
-		_, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"a","password":"b"}`)
+		req := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"account":"a","password":"b"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		d.api.ServeHTTP(rec, req)
+		var j map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+			t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+		}
 		codes = append(codes, j["code"].(float64))
+		// B39-02：限流响应的 HTTP 状态码必须真实 429（修复前恒 200）
+		if j["code"].(float64) == 429 && rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("限流应写 HTTP 429，实际 %d", rec.Code)
+		}
 	}
 	limited := false
 	for _, c := range codes[5:] {
@@ -1318,12 +1335,22 @@ func TestLoginLimiterGC(t *testing.T) {
 func TestLoginActivateSeparateBuckets(t *testing.T) {
 	d := newTestDeps(t)
 	// 先立刻榨干激活桶：连续 7 次激活（未携带票据，每次都被拒但消耗激活额度）
-	// 第 6 次起应触发激活限流 429
+	// 第 6 次起应触发激活限流 429（B39-02：HTTP 状态码真实 429）
 	limited := false
 	for i := 0; i < 7; i++ {
-		_, j := doJSON(t, d.api, "POST", "/api/activate", `{"account":"x","code":"XK-NOPE","ticket":"t"}`)
+		req := httptest.NewRequest("POST", "/api/activate", strings.NewReader(`{"account":"x","code":"XK-NOPE","ticket":"t"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		d.api.ServeHTTP(rec, req)
+		var j map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+			t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+		}
 		if c, _ := j["code"].(float64); c == 429 {
 			limited = true
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("激活限流应写 HTTP 429，实际 %d", rec.Code)
+			}
 			break
 		}
 	}
@@ -1366,7 +1393,7 @@ func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
 // 从源头封堵 CSRF 触发的副作用登录（攻击者借受害者 IP 分布式爆破）。
 func TestLoginRejectsFormContentType(t *testing.T) {
 	d := newTestDeps(t)
-	// 表单编码提交登录（模拟恶意跨站表单）：应被 403 拒绝
+	// 表单编码提交登录（模拟恶意跨站表单）：应被 403 拒绝（B39-02：HTTP 状态码真实 403）
 	req := httptest.NewRequest("POST", "/api/login", strings.NewReader("account=a&password=b"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -1375,8 +1402,8 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
 		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
 	}
-	if j["code"].(float64) != 403 {
-		t.Fatalf("表单提交登录应被拒绝 code=403，实际 %v", j)
+	if j["code"].(float64) != 403 || rec.Code != http.StatusForbidden {
+		t.Fatalf("表单提交登录应被拒绝 code=403 + HTTP 403，实际 code=%v http=%d", j["code"], rec.Code)
 	}
 	// 表单编码提交激活：同样拒绝
 	req = httptest.NewRequest("POST", "/api/activate", strings.NewReader("account=a&code=XK-123"))
@@ -1386,8 +1413,8 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
 		t.Fatalf("激活响应不是 JSON: %s", rec.Body.String())
 	}
-	if j["code"].(float64) != 403 {
-		t.Fatalf("表单提交激活应被拒绝 code=403，实际 %v", j)
+	if j["code"].(float64) != 403 || rec.Code != http.StatusForbidden {
+		t.Fatalf("表单提交激活应被拒绝 code=403 + HTTP 403，实际 code=%v http=%d", j["code"], rec.Code)
 	}
 }
 

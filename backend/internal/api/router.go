@@ -97,11 +97,12 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		// CSRF 缓解：仅接受 JSON 提交（跨站表单 POST 无法伪造该头）
 		if !jsonContentType(r) {
-			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			writeJSONStatus(w, http.StatusForbidden, 403, nil, "仅接受 JSON 提交")
 			return
 		}
 		if !loginLim.allow(clientIP(r)) {
-			writeJSON(w, 429, nil, "登录尝试过于频繁，请稍后再试")
+			// B39-02：限流是真实 429，必须写 HTTP 状态码（此前恒 200）。
+			writeJSONStatus(w, http.StatusTooManyRequests, 429, nil, "登录尝试过于频繁，请稍后再试")
 			return
 		}
 		d.handleLogin(w, r)
@@ -110,11 +111,12 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	// M-6：激活用独立限流桶——攻击者刷激活码不会消耗他人登录额度，反之亦然
 	mux.HandleFunc("POST /api/activate", func(w http.ResponseWriter, r *http.Request) {
 		if !jsonContentType(r) {
-			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			writeJSONStatus(w, http.StatusForbidden, 403, nil, "仅接受 JSON 提交")
 			return
 		}
 		if !activateLim.allow(clientIP(r)) {
-			writeJSON(w, 429, nil, "激活尝试过于频繁，请稍后再试")
+			// B39-02：激活限流同为真实 429，写 HTTP 状态码。
+			writeJSONStatus(w, http.StatusTooManyRequests, 429, nil, "激活尝试过于频繁，请稍后再试")
 			return
 		}
 		d.handleActivate(w, r)

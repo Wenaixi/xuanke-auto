@@ -112,6 +112,9 @@ export interface AdminStats {
   open_time: string
   activation_on: boolean
   window_opened: boolean
+  // N3：窗口已关闭信号（后端 /api/admin/stats 补发后生效；未下发时 undefined 走"待命中"，
+  // 绝不假报关闭）。
+  window_closed?: boolean
   account_count: number
   targets_count: number
   success_count: number

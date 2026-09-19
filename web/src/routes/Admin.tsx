@@ -711,7 +711,12 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
         // 识别开放时间：唯一事实源 = 平台 beginTimes 自动识别（不可配置）。
         // open_time_set=false = 未识别/识别过期 → 显示"未识别"（绝不把过期旧值当开放时间）。
         { label: "识别开放时间", value: s.open_time_set === false ? "未识别" : s.open_time },
-        { label: "窗口状态", value: s.window_opened ? "已开放" : "待命中" },
+        // N3：窗口关闭信号三态——window_closed 字段依赖后端 /api/admin/stats 补发
+        // （统计口径从学生端 /state 对齐），补发前 undefined 走"待命中"，绝不假报关闭。
+        {
+          label: "窗口状态",
+          value: s.window_closed ? "已关闭" : s.window_opened ? "已开放" : "待命中",
+        },
         { label: "激活码机制", value: s.activation_on ? "开启" : "关闭" },
         { label: "账号数", value: String(s.account_count) },
         { label: "预选目标", value: String(s.targets_count) },

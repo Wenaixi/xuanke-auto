@@ -3087,3 +3087,225 @@ func TestDeletedAccountRebuiltSameNameChainDropsSuccess(t *testing.T) {
 		t.Fatal("同名重建后陈旧旧链不得写回重建身份的 done（B39-01）")
 	}
 }
+
+// waitChainExit 等待指定发布链完全退出（chains 活跃标记消失 = goroutine 的 defer
+// 已执行，成功/静默分支全部落地）。注意绝不能用 inflight 等待：PurgeAccount 已把该
+// 账号的 inflight map 整体删除，读 nil map 恒 false——测试会在旧链写回之前假绿
+// （与 TestRealtimeRecheckDeletedAccountDropsLog/R39 同款等待契约）。
+func waitChainExit(t *testing.T, s *Scheduler, key string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		s.chainMu.Lock()
+		_, active := s.chains[key]
+		s.chainMu.Unlock()
+		if !active {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("链未在 3 秒内退出")
+}
+
+// 删号同名重建的指针身份防线（成功/失效分支已有）只覆盖 err 归并的两条公开缺口与
+// 实时复核满员分支：风控退避（isRateLimitError）、窗口关闭（isWindowClosedError）与
+// 实时人数复核确证满员三条 err 处理路径此前只判账号名存在（ClientFor ok），同名重建
+// 后新身份存在但指针不同——陈旧链命中这三类错误时会把 rateLimited/full 写进重建身份
+// （假"已满员"永久退避黄金期 / 假退避）。三个测试补齐：重建身份绝不落 rateLimited/full。
+func TestDeletedAccountRebuiltSameNameChainDropsRateLimitBackoff(t *testing.T) {
+	// 关键夹具与 R39 同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
+	// （perAccount 值被替换），旧链捕获的是旧 *fakeClient——指针身份比对必然不等。
+	oldClient := newFakeClient(true)
+	oldClient.mu.Lock()
+	oldClient.selectErr[61115] = errors.New("操作过于频繁，请稍后重试") // isRateLimitError 命中文案
+	oldClient.mu.Unlock()
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 旧链在 SelectClass 期间阻塞（模拟真实网络往返）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// 链卡在往返期间，"删号 + 同名重建"：注册表里 acct1 换成新客户端指针
+	newClient := newFakeClient(true)
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1") // 清旧账号全量内存态（重建身份从零开始）
+
+	// 放行旧链网络调用 → 旧 client 返回风控错误 → 旧链走风控退避分支
+	close(release)
+	waitChainExit(t, s, "acct1\x001")
+
+	// 契约：重建身份的 rateLimited 不得被陈旧旧链污染（PurgeAccount 已清空，旧链不得写回）
+	s.mu.Lock()
+	m, ok := s.rateLimited["acct1"]
+	_, inRL := m[61115]
+	s.mu.Unlock()
+	if ok && inRL {
+		t.Fatal("同名重建后陈旧旧链风控退避不得写回重建身份的 rateLimited")
+	}
+}
+
+func TestDeletedAccountRebuiltSameNameChainDropsWindowClosedFull(t *testing.T) {
+	oldClient := newFakeClient(true)
+	oldClient.mu.Lock()
+	oldClient.selectErr[61115] = errors.New("不在选修报名时间范围内，无法选课！") // isWindowClosedError 命中文案
+	oldClient.mu.Unlock()
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{}
+	s.mu.Unlock()
+	s.tick()
+
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// "删号 + 同名重建"
+	newClient := newFakeClient(true)
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1")
+
+	// 放行旧链网络调用 → 旧 client 返回窗口关闭错误 → 旧链按满员记入 full
+	close(release)
+	waitChainExit(t, s, "acct1\x001")
+
+	// 契约：重建身份的 full 不得被陈旧旧链污染（PurgeAccount 已清空，旧链不得写回）
+	s.mu.Lock()
+	_, inFull := s.full["acct1"][61115]
+	s.mu.Unlock()
+	if inFull {
+		t.Fatal("同名重建后陈旧旧链窗口关闭不得写回重建身份的 full")
+	}
+}
+
+func TestDeletedAccountRebuiltSameNameChainDropsRealtimeRecheckFull(t *testing.T) {
+	// 网络失败（非风控/非关闭文案）走实时人数复核；复核经 ClientFor 取到的是"重建后"的
+	// 新客户端（perAccount 已换）。真满员且确认无手动介入 → 回锁 markFullLocked 前必须
+	// 做指针身份复核——陈旧旧链发起时捕获的是旧指针，身份必然不等，full 不得落重建身份。
+	// 注意：旧客户端快照必须"未满"——否则 spawnChain 在快照判满路径就 markFullLocked
+	// 跳过 SelectClass，根本走不到实时复核；新客户端数据置满，供重建后的复核读取。
+	oldClient := newFakeClient(true)
+	oldClient.mu.Lock()
+	oldClient.selectErr[61115] = errors.New("connection reset")
+	oldClient.mu.Unlock()
+	newClient := newFakeClient(true)
+	newClient.mu.Lock()
+	newClient.data.Publishes[0].Classes[0].SelectedCount = 36 // 重建身份实时复核确证满员
+	newClient.mu.Unlock()
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 旧链 SelectClass 阻塞（模拟真实网络往返）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{}
+	s.mu.Unlock()
+	s.tick()
+
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// "删号 + 同名重建"：实时复核经 ClientFor 拿到的是新客户端
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1")
+
+	// 新客户端 IsClassFull 阻塞（模拟复核网络往返，删除/重建精确落在复核在途窗口）
+	entered2 := make(chan struct{})
+	release2 := make(chan struct{})
+	newClient.mu.Lock()
+	newClient.fullBlock = func() {
+		close(entered2)
+		<-release2
+	}
+	newClient.mu.Unlock()
+
+	close(release) // 放行旧链 SelectClass → 网络错误 → 进入实时复核 → newClient.IsClassFull 阻塞
+	select {
+	case <-entered2:
+	case <-time.After(3 * time.Second):
+		t.Fatal("实时复核应已进入 IsClassFull")
+	}
+	close(release2) // 真满员 → 回锁后走 markFullLocked
+	waitChainExit(t, s, "acct1\x001")
+
+	// 契约：重建身份的 full 不得被陈旧旧链实时复核写回
+	s.mu.Lock()
+	_, inFull := s.full["acct1"][61115]
+	s.mu.Unlock()
+	if inFull {
+		t.Fatal("同名重建后陈旧旧链实时复核满员不得写回重建身份的 full")
+	}
+}
+
+// 窗口已被探测确证开启（WindowOpened=true，发布级 inDateRange 实证）但识别槽为空
+// （平台批次未下发非空 beginTimes，openTimeFor 取到零值）时，tick 零值守卫必须在
+// "已开窗"面前放行提交——否则前端显示 window_opened=true 而引擎黄金期 250ms 冲刺 0 次，
+// 产品语义分叉（修复前零值守卫先于两条提判据返回，自动链被永久挂起）。
+func TestSubmitAllowedWhenWindowOpenedWithZeroOpenTime(t *testing.T) {
+	fc := newFakeClient(true) // InDateRange=true：probe 确证开窗；不带 BeginTimes → 识别槽恒空
+	fc.mu.Lock()
+	fc.data.BeginTimes = nil // 平台批次未下发非空 beginTimes
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Time{}, 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+	// 预置窗口已开（模拟 probe 已用发布级 inDateRange 确证开启但识别槽空的组合）
+	s.mu.Lock()
+	s.state.WindowOpened = true
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+	time.Sleep(150 * time.Millisecond) // 等链异步 goroutine 跑完
+	if n := fc.SelectClassCalls(61115); n == 0 {
+		t.Fatal("WindowOpened=true 且识别槽空时 tick 必须放行提交（黄金期 250ms 冲刺），实际 0 次 SelectClass")
+	}
+}

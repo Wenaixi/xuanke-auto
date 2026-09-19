@@ -991,9 +991,13 @@ func (s *Scheduler) tick() {
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
-	// B11-A1：open 为零值（未识别 / 识别过期）时恒满足 !now.After(open) → 提交循环永续放行。
-	// 此时无有效开窗点——挂起提交，绝不放行。
-	if open.IsZero() {
+	// B11-A1：open 为零值（未识别 / 识别过期）且窗口未被探测确证开启时恒满足
+	// !now.After(open) → 提交循环永续放行。此时无有效开窗点——挂起提交，绝不放行。
+	// 例外：WindowOpened=true（probe 已用发布级 inDateRange 确证平台开窗）但识别槽为空
+	// （平台批次未下发非空 beginTimes）时，零值守卫不得挂起提交——否则前端显示
+	// window_opened=true 而黄金期 250ms 冲刺 0 次，产品语义分叉（开窗时刻的缺失只应
+	// 影响展示层"未识别到开放时间"，绝不影响已确证开启的窗口提交）。
+	if open.IsZero() && !opened {
 		return
 	}
 	if !opened && !now.After(open) {
@@ -1513,6 +1517,14 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			}
 			// 平台风控退避：识别到"频繁"或 429 相关错误，为该课程设置 30s 退避，跳过轰炸
 			if isRateLimitError(err) {
+				// 与成功/失效分支同族防线：风控退避也是"写重建身份"的污染点——账号在
+				// SelectClass 往返期间被删并同名重建（注册表现指针已换），陈旧链命中风控
+				// 文案会把 rateLimited 退避写进重建身份（假"退避中"让该课黄金期被静默跳过）。
+				// 指针身份比对：非同一身份即静默放弃整链，绝不为新身份落退避/状态/日志。
+				if !s.sameClientFor(acct, chainClient) {
+					s.mu.Unlock()
+					return
+				}
 				s.markRateLimitedLocked(acct, t.ClassID, 30*time.Second)
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "触发平台风控退避 30 秒: "+err.Error())
 				if s.store != nil {
@@ -1526,7 +1538,13 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// 平台对"选课窗口已关闭"的报名请求返回 code=1 错误（窗口关闭后课程列表已清空）。
 			// 此时课程已无法再报，直接按满员处理记入 full 集合，
 			// 避免每个 tick 都带着失败状态反复刷平台报名接口（窗口关闭后的最后一层防线）。
+			// 与风控退避/成功分支同族防线：陈旧链命中窗口关闭错误会 markFullLocked
+			// 把"已满员"永久退避写进同名重建身份——指针身份比对，非同一身份静默放弃整链。
 			if isWindowClosedError(err) {
+				if !s.sameClientFor(acct, chainClient) {
+					s.mu.Unlock()
+					return
+				}
 				s.markFullLocked(acct, t)
 				s.mu.Unlock()
 				return
@@ -1576,6 +1594,14 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				// 与紧邻的"未现满员"分支（下方 doneHas 复核"绝不覆盖胜利状态"）不对称。
 				// done 一旦置位（手动成功），满员分支必须让位，绝不覆盖胜利状态。
 				if s.doneHas(acct, t.ClassID) {
+					s.mu.Unlock()
+					return
+				}
+				// 与风控退避/成功分支同族防线：复核网络段（最长 15s）内账号可能被删并同名
+				// 重建（1551 行的存在性复核只挡"账号不存在"，挡不住"新身份存在但指针不同"）——
+				// 陈旧链确证满员后 markFullLocked 会把"已满员"永久退避写进重建身份。
+				// 指针身份比对：非同一身份即静默放弃整链，绝不为新身份落 full/状态/日志。
+				if !s.sameClientFor(acct, chainClient) {
 					s.mu.Unlock()
 					return
 				}

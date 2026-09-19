@@ -152,7 +152,15 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // 倒计时组件 target=null 即显全 00 + 过期态，绝不显示编造时间。
   const openTimeStr =
     state?.open_time_known && state.open_time ? state.open_time : null
-  const cd = useTickingCountdown(openTimeStr)
+  // N1：主倒计时输入 openTimeStr 未识别时用 begin_times[0] 兜底（唯一未来开窗点），
+  // 避免"主矩阵全 00 过期态 + 同屏『预计开放时间』显示未来时刻"的自相矛盾；识别槽
+  // 建立（open_time_known=true）后仍以识别真值为准，兜底只在识别缺席时生效。
+  const cd = useTickingCountdown(
+    openTimeStr ??
+      (electives?.begin_times?.[0] != null
+        ? new Date(electives.begin_times[0]).toISOString()
+        : null)
+  )
 
   // 折叠行实时标签由主矩阵每秒 tick 的整页重渲染驱动（见 relativeCountdown 注释）。
   const nowMs = Date.now()

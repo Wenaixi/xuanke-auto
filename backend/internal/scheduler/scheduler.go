@@ -1212,8 +1212,10 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			if client, ok := s.clients.ClientFor(acct); ok {
 				if tok := client.Token(); tok != "" {
 					newTok = tok
-					if uerr := s.store.UpdateIDToken(acct, tok); uerr != nil {
-						log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, uerr)
+					if s.store != nil {
+						if uerr := s.store.UpdateIDToken(acct, tok); uerr != nil {
+							log.Printf("[scheduler] 账号 %s 新 token 落库失败: %v", acct, uerr)
+						}
 					}
 				}
 			}

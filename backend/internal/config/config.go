@@ -30,7 +30,6 @@ func envOr(key, def string) string {
 type Config struct {
 	Port     string // HTTP 监听端口
 	DBPath   string // SQLite 数据库路径
-	OpenTime string // 选课开放时间（本地时区）
 	BaseURL  string // 至道平台根地址
 	// 硅基流动 Vision 验证码识别配置（登录必需）
 	SFBaseURL string
@@ -51,12 +50,14 @@ func Load() Config {
 	envPath := filepath.Join(dataDir(), ".env")
 	ensureEnvFile(envPath)
 	loadDotEnv(envPath)
+	// 开放时间唯一事实源 = 平台 beginTimes 自动识别（scheduler 层），配置层不再注入，
+	// 也不读取 XUANKE_OPEN_TIME 环境变量——旧文档的硬编码 2026 默认值已整体移除，
+	// 避免"识别槽为空时把过期日期当开窗点"的误导。
 	dbPath := envOr("XUANKE_DB", filepath.Join(dataDir(), "xuanke.db"))
 	return Config{
-		Port:     envOr("XUANKE_PORT", "3091"),
-		DBPath:   dbPath,
-		OpenTime: envOr("XUANKE_OPEN_TIME", "2026-09-13 09:00:00"),
-		BaseURL:  "https://www.zhidao.fj.cn",
+		Port:    envOr("XUANKE_PORT", "3091"),
+		DBPath:  dbPath,
+		BaseURL: "https://www.zhidao.fj.cn",
 		SFBaseURL: envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
 		SFAPIKey:  os.Getenv("SF_API_KEY"),
 		SFModel:   envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
@@ -148,9 +149,6 @@ XUANKE_CAPTCHA_ENGINE=vision
 
 # 激活码机制开关：on=启用（默认）；off=完全关闭，登录直接进入系统
 XUANKE_ACTIVATION=on
-
-# 选课开放时间（可选，留空用内置默认值）
-# XUANKE_OPEN_TIME=2026-09-13 09:00:00
 
 # 服务端口与数据库路径（可选）
 # XUANKE_PORT=3091

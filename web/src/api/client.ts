@@ -8,6 +8,19 @@
 // 避免 401 迟到返回时事件监听器闭包里的 current 已切到其他账号而误杀。
 export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
+// 从请求路径反查 ?account= 穿透目标（展示线索，F10-05：绝不用它判定归属——归属
+// 以发起请求的 Bearer 会话令牌为准）。F41-N2 抽出纯函数：HTTP 状态码 401 必须在
+// r.json() 之前广播失效事件（网关/反代返回 HTML/文本 401 时 JSON 解析会抛错，若
+// 事件依赖解析后的 j.code 就永不广播、失效会话账号前端永久残留），此函数在广播
+// 路径复用，与响应处理不再耦合。
+export function extractAccountFromPath(path: string): string {
+  if (path.includes("account=")) {
+    const match = path.match(/[?&]account=([^&]+)/)
+    if (match) return decodeURIComponent(match[1])
+  }
+  return ""
+}
+
 export class ApiError extends Error {
   code: number
   // F11-A1：ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
@@ -44,6 +57,16 @@ export async function api<T>(
   try {
     const r = await fetch(BASE + path, { headers, ...rest, signal: rest.signal ?? ctrl.signal })
     let j: { code: number; data: T; msg: string }
+    // F41-N2：HTTP 状态码 401 在 r.json() 之前先广播失效事件——反向代理/网关返回
+    // 非 JSON 错误体（HTML/文本 401）时 r.json() 会抛错走 -2 文案，若失效广播挂在
+    // JSON 解析之后的 j.code 判断上就永不执行，失效会话账号在前端永久残留。事件先到
+    // App.onUnauthorized 摘除账号，JSON 解析失败仍抛 -2 文案，二者互不阻塞。
+    if (r.status === 401) {
+      const account = extractAccountFromPath(path)
+      window.dispatchEvent(
+        new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
+      )
+    }
     try {
       j = await r.json()
     } catch {

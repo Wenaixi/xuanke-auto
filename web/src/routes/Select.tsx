@@ -139,7 +139,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const { data: stateData } = useQuery({
     queryKey: ["state", account, sessionToken],
     queryFn: () => api<SchedulerState>("/state?account=" + encodeURIComponent(account), { session: sessionToken }),
-    refetchInterval: (query) => (query.state.data?.window_closed ? 30000 : 2000),
+    refetchInterval: (query) => {
+      // F40-M3：失败态/无数据时统一降频 30s——react-query 失败后 data 为最后一次
+      // 成功值或 undefined，原回调查询失败时恒取 2000ms，网络挂断/后端重启期间
+      // /state + /electives 双查询叠加固定 2s 轰炸日志与代理层（与"失败分级退避"防
+      // 轰炸理念相悖）。error 或 status==="error" 即降频，成功态按 window_closed 升/降频。
+      if (query.state.error || query.state.status === "error") return 30000
+      return query.state.data?.window_closed ? 30000 : 2000
+    },
   })
 
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})

@@ -297,13 +297,16 @@ func newFakeClient(open bool) *fakeClient {
 }
 
 // fakeAccts 伪账号注册表：所有账号共享一个 fakeClient（测试用）。
+// perAccount 可选：按账号返回独立客户端指针——B39-01 构造"同名重建"（删号后重建的
+// 新客户端指针 ≠ 旧链发起时的旧指针）场景，验证成功分支做指针身份比对而非仅账号名。
 type fakeAccts struct {
 	c             *fakeClient
+	perAccount    map[string]*fakeClient // 可选：账号 -> 专属客户端（nil 时回退 c）
 	relogErr      error  // 重登错误（可编程）
 	relog         func() // 重登钩子（可编程，记录是否被调用）
 	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
 
-	mu      sync.Mutex      // 保护 removed（测试并发读写）
+	mu      sync.Mutex      // 保护 removed/perAccount（测试并发读写）
 	removed map[string]bool // 已删除账号（ClientFor 返回不存在）
 }
 
@@ -312,6 +315,9 @@ func (f *fakeAccts) ClientFor(acct string) (Client, bool) {
 	defer f.mu.Unlock()
 	if f.removed != nil && f.removed[acct] {
 		return nil, false
+	}
+	if f.perAccount != nil && f.perAccount[acct] != nil {
+		return f.perAccount[acct], true
 	}
 	return f.c, true
 }
@@ -357,6 +363,11 @@ func (c *countingLogStore) logCount() int {
 	return c.log
 }
 func (f *fakeAccts) AnyClientWithAccount() (string, Client, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.perAccount != nil && f.perAccount["acct1"] != nil {
+		return "acct1", f.perAccount["acct1"], true
+	}
 	return "acct1", f.c, true
 }
 func (f *fakeAccts) Relogin(acct string) (bool, error) {
@@ -2992,5 +3003,87 @@ func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
 	}
 	if !s.TokenValidFor(acct) {
 		t.Fatal("store=nil 时重登成功仍应恢复 token 有效（落库只是持久化动作，不影响内存态）")
+	}
+}
+
+// TestDeletedAccountRebuiltSameNameChainDropsSuccess 删除账号后同名重建（换绑/误删加回）
+// 时，陈旧在飞链返回成功不得写回重建身份——B39-01 核心场景。
+// 缺陷形态：spawnChain 成功分支只校验"账号名当前是否在注册表"（ClientFor ok），不校验
+// "客户端是否仍是发起提交时的同一身份"。删号后同名重建会用新 *zhidao.Client 顶替，
+// 旧链在 SelectClass 网络往返期间被顶替，返回后 ClientFor(acct) 仍 ok（新客户端）→
+// 旧链把 success 状态与 success 行写进**重建身份**（重启后假成功 / 已删账号状态复活）。
+// 修复：链 goroutine 启动时捕获发起提交的 client 指针，返回后与 ClientFor(acct) 结果做
+// 指针身份比对——旧指针 ≠ 注册表现指针即静默放弃（清 inflight 后 return）。
+func TestDeletedAccountRebuiltSameNameChainDropsSuccess(t *testing.T) {
+	// 关键夹具：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient（perAccount 值被替换），
+	// 旧链发起时捕获的是旧 *fakeClient——指针身份比对必然不等，旧链成功被丢弃。
+	oldClient := newFakeClient(true)
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	store := &fakeStore{}
+	s := New(fa, store, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 旧链在 SelectClass 期间阻塞（模拟真实网络往返）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+
+	// 等旧链进入网络往返（inflight 已置位、旧 client 的 SelectClass 卡住）
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// 链卡在往返期间，"删号 + 同名重建"：注册表里 acct1 换成新客户端指针
+	// （模拟 Admin 删除后重新登录：PurgeAccount + Accounts.Remove + 新 Client 注册）
+	newClient := newFakeClient(true)
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient // 同名重建：注册表现指针已换
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1") // 清旧账号全量内存态（重建身份从零开始）
+
+	// 放行旧链网络调用 → 旧 client 返回成功
+	close(release)
+
+	// 等链完全退出（chains 活跃标记消失 = goroutine 的 defer 已执行，成功/静默分支全部
+	// 落地）。注意绝不能用 inflight 等待：PurgeAccount 已把 acct1 的 inflight map 整体删除，
+	// 读 nil map 恒 false——测试会在旧链写回之前假绿（B39-01 实测踩坑，与
+	// TestRealtimeRecheckDeletedAccountDropsLog 同款等待契约）。
+	deadline := time.Now().Add(3 * time.Second)
+	key := "acct1\x001"
+	for time.Now().Before(deadline) {
+		s.chainMu.Lock()
+		_, active := s.chains[key]
+		s.chainMu.Unlock()
+		if !active {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// B39-01 契约：重建身份不得落库 success 行（重启后假成功）
+	store.mu.Lock()
+	rows := store.successRows["acct1\x0061115"]
+	store.mu.Unlock()
+	if rows != 0 {
+		t.Fatalf("同名重建后陈旧旧链成功不得写回重建身份（B39-01），实际 %d 行 success", rows)
+	}
+	// 重建身份的内存 done 也不得被旧链污染（PurgeAccount 已清空，旧链不得写回）
+	s.mu.Lock()
+	_, inDone := s.done["acct1"][61115]
+	s.mu.Unlock()
+	if inDone {
+		t.Fatal("同名重建后陈旧旧链不得写回重建身份的 done（B39-01）")
 	}
 }

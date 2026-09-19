@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -198,6 +199,33 @@ type Scheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	start  bool
+}
+
+// sameClientFor 复核账号在注册表中的客户端是否仍是发起提交时的同一身份（需持 s.mu）。
+// B39-01：仅判"账号名存在"挡不住同名重建——删号后同名重建会用新 *zhidao.Client 顶替，
+// 旧链返回后 ClientFor(acct) 仍 ok 却指向新身份。接口值比对用反射的指针身份（unpack
+// 具体类型指针取 Pointer 值），nil 视为非同一身份；账号已删（ClientFor 不存在）也非同一。
+// 调用点：spawnChain 成功/失效分支写状态与落库前。
+func (s *Scheduler) sameClientFor(acct string, chainClient Client) bool {
+	current, ok := s.clients.ClientFor(acct)
+	if !ok || current == nil {
+		return false
+	}
+	return clientIdentity(current) == clientIdentity(chainClient)
+}
+
+// clientIdentity 返回客户端接口动态值的唯一身份标识（指针值）。
+// scheduler.Client 是接口，*zhidao.Client 与测试的 *fakeClient 都是具体指针实现——
+// reflect.ValueOf(x).Pointer() 对指针动态类型返回底层指针值，同一实例恒等。
+func clientIdentity(c Client) uintptr {
+	if c == nil {
+		return 0
+	}
+	v := reflect.ValueOf(c)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return 0
+	}
+	return v.Pointer()
 }
 
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
@@ -1356,6 +1384,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 		if !ok || client == nil {
 			return
 		}
+		// B39-01：链顶捕获发起提交的客户端指针——同名校验只保证"账号名当前在注册表"，
+		// 不保证"仍是发起时的同一身份"。删号后同名重建（换绑/误删加回）会用新客户端顶替，
+		// 旧链在 SelectClass 网络往返期间被顶替，返回后 ClientFor 仍 ok（新身份）却把成功
+		// 状态与 success 行写进重建身份（重启假成功/已删账号状态复活）。后续成功分支与
+		// 失效分支复核处都要用"指针身份比对"而非仅"账号名存在"。
+		chainClient := client
 		for _, t := range ts {
 			s.mu.Lock()
 			// 重登期间跳过该账号全部提交（无效 token 请求纯浪费 + 熔断风险）
@@ -1423,10 +1457,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			if errors.Is(err, zhidao.ErrUnauthorized) {
 				s.maybeRelogin(acct)
 				s.mu.Lock()
-				// 账号存在复核：maybeRelogin 只串行化"决策发起"（锁外 goroutine 执行登录），
-				// 其间管理员可删除该账号——已删的幽灵账号不再写状态行与审计日志（与成功分支
-				// B18-M2 同款防线；重登 goroutine 内 B21-03 也只护成功写回路径，此分支此前裸露）。
-				if _, ok := s.clients.ClientFor(acct); !ok {
+				// B39-01：指针身份复核——失效分支此前只判账号名存在（ClientFor ok），
+				// 同名重建后旧链命中 ErrUnauthorized 也会把"教务令牌失效"状态写进新身份。
+				// 发起时捕获的 chainClient 与注册表现指针比对：非同一身份即静默放弃整链
+				//（不写状态、不落日志），与成功分支同族防线（B18-M2 的账号名存在复核保留
+				// 在 sameClientFor 内部——已删账号首先就不通过）。
+				if !s.sameClientFor(acct, chainClient) {
 					delete(s.inflight[acct], t.ClassID)
 					s.mu.Unlock()
 					return
@@ -1445,14 +1481,14 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Lock()
 			delete(s.inflight[acct], t.ClassID)
 			if err == nil {
-				// B18-M2：写成功/落库前复核账号仍存在——管理员 DeleteAccount
-				// （先清 credentials/accounts/targets/success 表 + Accounts.Remove）与在飞
-				// spawnChain 网络往返（SelectClass 最长 15s）竞态时，本链在删除完成后才返回
-				// 成功，若不复核会 SaveSuccess/SaveRefused 把已删账号的 success 行写回，
-				// 重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态。重登完成路径已有
-				// 同款 ClientFor 复核（891 行），提交链成功分支此前漏了同一防线。
-				if _, ok := s.clients.ClientFor(acct); !ok {
-					log.Printf("[scheduler] 账号 %s 已被删除，放弃写成功落库", acct)
+				// B18-M2 + B39-01：写成功/落库前复核"账号仍存在且仍是发起时的同一身份"——
+				// 管理员 DeleteAccount（清凭据表 + Accounts.Remove）与在飞 spawnChain 网络往返
+				// （SelectClass 最长 15s）竞态时，本链在删除完成后才返回成功；同名重建（换绑/
+				// 误删加回）后注册表现指针已换成新客户端，若只判账号名存在（ClientFor ok）
+				// 会把旧链成功写进重建身份（重启后重新登录被 RestoreDone 恢复成"已报名成功"
+				// 假状态）。指针身份比对：非同一身份即静默放弃写 done/状态/库行。
+				if !s.sameClientFor(acct, chainClient) {
+					log.Printf("[scheduler] 账号 %s 客户端身份已变更（同名重建/删除），放弃写成功落库", acct)
 					s.mu.Unlock()
 					return
 				}

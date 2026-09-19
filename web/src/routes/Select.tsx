@@ -274,8 +274,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // F40-M1：发布集合整体重建（开窗瞬间平台清空又恢复、publish_id 全变）后，
     // selected 仍残留旧 publish_id 的非空 key——对应 Tab 已消失、用户无法通过界面
     // 清除，守卫命中的"置脏跳过"会把保存链永久静默拦截（黄金期改目标永不落库）。
-    // 随重建清理即可解锁：只删"非空且不在当前发布集合"的 key（空数组键 = 用户主动
-    // 清空，保留语义），防抖 effect 因 selected 变化重跑，自动落库当前目标。
+    // F41-M1：随重建清理已下沉为独立 effect（见 publishes 声明之后）——原本挂在
+    // 本 effect 内却被首行 echoedRef 短路、只覆盖首次回显，已回显账号的发布重建
+    // 后 stale 永不清理。此处只做回显数据过滤（currentIds 与消费时刻守卫同判据），
+    // 清理职责移交给独立 effect。
     if (selectedHasStalePublish(selected, pubs)) {
       setSelected((prev) => cleanStaleSelected(prev, currentIds))
       toast({
@@ -289,6 +291,31 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   }, [stateData, data, rev, selected, toast])
 
   const publishes = data?.publishes ?? []
+  // F41-M1：发布集合重建清理独立 effect——F40-M1 原挂在回显 effect（首行
+  // `if (echoedRef.current) return`）内，已完成回显的账号 echoedRef 恒 true，回显
+  // effect 不再执行，之后发布集合整体重建（开窗瞬间平台清空又恢复、publish_id 全变）
+  // 残留旧 publish_id 的 selected 永不被清理；挡在它前面的 stale 守卫把保存链静默
+  // 锁死至整页刷新（黄金期最不该打断用户的操作）。
+  // 本 effect 只依赖 [publishes, stateData, echoedRef, toast]——不依赖 echoedRef 的
+  // 反向逻辑，而是正向条件"已回显过才清理"：发布重建瞬间本 effect 随 publishes
+  // 变化重跑，命中 stale 即 setSelected 清理 + toast 提示；selected 变化触发防抖
+  // effect（依赖含 selected）重跑，自动落库当前目标（自愈链与 F40-M1 同款）。
+  // 未回显（echoedRef=false）时不清理——回显合并与 currentIds 同判据过滤幽灵条目，
+  // 此刻抢先清理可能干扰重建前旧目标的合并/回显时序，绝无必要。
+  // 只删"非空且不在当前发布集合"的 key（空数组键 = 用户主动清空，保留语义）。
+  // 声明在 `const publishes` 之后合理使用已声明常量（F18-01 同款 TDZ 防护）。
+  useEffect(() => {
+    if (!echoedRef.current || publishes.length === 0) return
+    const currentIds = new Set(publishes.map((p) => p.publish_id))
+    if (!selectedHasStalePublish(selected, publishes)) return
+    setSelected((prev) => cleanStaleSelected(prev, currentIds))
+    toast({
+      title: "发布已更新",
+      description: "旧批次目标已失效并自动清理，新批次目标将重新保存",
+      variant: "warning",
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishes, echoedRef, toast])
 
   const tabs = useMemo(
     () =>

@@ -10,7 +10,7 @@ import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
-import { selectedHasStalePublish, cleanStaleSelected } from "../lib/targetGuard"
+import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave } from "../lib/targetGuard"
 import {
   ArrowLeft,
   ArrowDownWideNarrow,
@@ -61,6 +61,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
       // F5-05：窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
       // 清空，继续 10s 高频打 findElectivesData 纯浪费；与 /state 同信号降 30s，全站统一。
+      // F42-M3：自身失败态优先降频——react-query 失败后 data 为最后一次成功值或
+      // undefined（失败不清缓存 data），原回调在 /state 失败（缓存无 data，st===undefined）
+      // 期间只看 inRange：开窗瞬间 publishes 短暂为空时 inRange=false → 每 10s 慢轮询进
+      // 黄金期，窗口状态模糊；且失败态恒不降频（同 F40-M3 未覆盖 /electives 的另一半）。
+      // 失败即 30s 降频（不再 2s/10s 轰炸代理层），成功态才走升/降频逻辑。
       // F9-05：澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
       // electives 自身响应（ElectivesData）无 window_closed 字段，且 /state 每 2s 刷新
       // 触发组件重渲染，react-query 用最新闭包重调度轮询间隔，闭包永不陈旧。
@@ -68,6 +73,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 在 useQuery 创建实例时即被同步调用，此刻 stateData 的 const 声明尚未执行，
       // 直读会命中 JS 暂存死区（TDZ）抛 ReferenceError，整个组件渲染中断黑屏。
       // 改从 react-query 缓存按查询 key 读取 /state 最新值，与 stateData 同源且零时序依赖。
+      if (query.state.error || query.state.status === "error") return 30000
       const st = queryClient.getQueryData<SchedulerState>(["state", account, sessionToken])
       const pubs = query.state.data?.publishes ?? []
       const inRange = pubs.some((p) => p.in_date_range)
@@ -296,10 +302,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // effect 不再执行，之后发布集合整体重建（开窗瞬间平台清空又恢复、publish_id 全变）
   // 残留旧 publish_id 的 selected 永不被清理；挡在它前面的 stale 守卫把保存链静默
   // 锁死至整页刷新（黄金期最不该打断用户的操作）。
-  // 本 effect 只依赖 [publishes, stateData, echoedRef, toast]——不依赖 echoedRef 的
-  // 反向逻辑，而是正向条件"已回显过才清理"：发布重建瞬间本 effect 随 publishes
-  // 变化重跑，命中 stale 即 setSelected 清理 + toast 提示；selected 变化触发防抖
-  // effect（依赖含 selected）重跑，自动落库当前目标（自愈链与 F40-M1 同款）。
+  // 本 effect 依赖 [publishes, selected, echoedRef, toast]——selected 加入依赖：
+  // 发布重建瞬间（publishes 引用变）effect 用"重建前的旧 selected"清理一次，若同一
+  // 时刻 /state 首帧交错到达（回显 effect 其后把旧 publish_id 课程合并进 selected），
+  // 合并必然带出 stale 非空 key——依赖补 selected 后合并的那次渲染本 effect 随
+  // selected 变化重跑，掉队的旧残留及时被清理，不再依赖"清理先于回显合并"的时序
+  // 巧合；cleanStaleSelected 无变更返回原引用、不引出不必要的重渲染，清理也会随
+  // selected 变化自然地触发防抖 effect（依赖含 selected）重跑落库当前目标。
   // 未回显（echoedRef=false）时不清理——回显合并与 currentIds 同判据过滤幽灵条目，
   // 此刻抢先清理可能干扰重建前旧目标的合并/回显时序，绝无必要。
   // 只删"非空且不在当前发布集合"的 key（空数组键 = 用户主动清空，保留语义）。
@@ -315,7 +324,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       variant: "warning",
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [publishes, echoedRef, toast])
+  }, [publishes, selected, echoedRef, toast])
 
   const tabs = useMemo(
     () =>
@@ -479,18 +488,15 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       0
     )
     if (latestRev === 0) return
-    // F41-M2：回显未完成守卫——与防抖回调同款判据（见防抖 effect 内 618 行）：
-    // /state 首帧未到达（stateData===undefined）或首帧携带旧目标（courses 非空）时，
-    // 后端旧目标尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的
-    // selected 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack
-    // 的 5s 等待只保证"等待期间合并完成"——/state 首帧持续失败超时后，守卫在这里
-    // 兜住：置脏跳过、不 PUT，脏块保留（dirtyRef=true），下次进入/刷新/回显完成
-    // 后再落库（安全方向：绝不静默丢改动）。消费时刻读 ref 判首帧，与防抖同源。
-    if (
-      !echoedRef.current &&
-      (stateDataRef.current === undefined ||
-        (stateDataRef.current.courses?.length ?? 0) > 0)
-    ) {
+    // 回显未完成守卫：与防抖回调同款判据（见防抖 effect 内 618 行）——/state 首帧
+    // 未到达（stateData===undefined）或首帧携带旧目标（courses 非空）时，后端旧目标
+    // 尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的 selected
+    // 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack 的 5s
+    // 等待只保证"等待期间合并完成"——/state 首帧持续失败超时后，守卫在这里兜住：
+    // 置脏跳过、不 PUT，脏块保留（dirtyRef=true），下次进入/刷新/回显完成后再落库
+    // （安全方向：绝不静默丢改动）。判据为纯数据（shouldDeferSave 不依赖 echoedRef）：
+    // /state 数据到达触发防抖 effect 重跑自愈，唯一解锁不求刷新。
+    if (shouldDeferSave(stateDataRef.current)) {
       dirtyRef.current = true
       return
     }
@@ -565,23 +571,23 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 回显合并先行：/state 首帧晚于用户首次点击到达时（stateData 仍为 undefined），
     // 后端旧目标尚未经回显 effect 合并进 selected——此刻直接 flush 会用当前 selected
     // （只含用户新改动）整包 PUT 覆盖删掉后端旧目标（"添加一门"变"替换全部"）。
-    // 只有回显已完成（echoedRef 置位）或确证后端无旧目标（/state 已到且 courses 为空）
-    // 才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，flush 自然全量提交。
+    // 只有回显合并完成（/state 已到且 courses 为空，即确证后端无旧目标）或首帧携带
+    // 旧目标已合并完毕才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，
+    // flush 自然全量提交。判据与防抖/flush 同源（shouldDeferSave 纯数据判据，不依赖
+    // echoedRef）——保持数据处于"回显完成"语义才结束等待。
     // 关键：等待只在"用户实际有改动"（revRef>0）时才需要——纯浏览（rev===0，SELECTED 0）
     // 时 flush 本就在 F13-C1 的 rev===0 处直接跳过、零覆盖风险，绝无理由等首帧。
     // 5s 兜底：/state 持续失败时合并永不发生，等无可等继续——flush 内假清空守卫仍拦截
     // 发布缺席的覆盖（安全方向）。注意 5s 等待只在"首帧未到"（stateData===undefined）
     // 或首帧确实携带旧目标（courses 非空）时才会发生——courses 为空（窗口已关/无目标）
-    // 时 echoedRef 已在回显 effect 空分支置位、条件不成立，点击返回立即放行。
-    if (
-      revRef.current > 0 &&
-      !echoedRef.current &&
-      (stateData === undefined || (stateData.courses?.length ?? 0) > 0)
-    ) {
+    // 时回显 effect 已置位 echoedRef、条件不成立，点击返回立即放行。
+    if (revRef.current > 0 && shouldDeferSave(stateDataRef.current)) {
       const deadline = Date.now() + 5000
       // 轮询间隔 50ms：回显合并是 React 状态更新+渲染（一帧约 16ms），50ms 足够感知
       // 完成且不抢调度；10ms 会让 5s 窗口内连开约 500 个定时器空转主线程。
-      while (!echoedRef.current && Date.now() < deadline) {
+      // 数据判据：/state 到达且 courses 空即视为回显完成（courses 空=确证后端无旧目标，
+      // 回显 effect 空分支已置 echoedRef）。首帧持续失败时等满 5s 兜底继续（安全方向）。
+      while (shouldDeferSave(stateDataRef.current) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50))
       }
       // 等合并 effect 的 setSelected 渲染提交落地，selectedRef 同步到含旧目标的合并结果
@@ -657,11 +663,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // "首帧是否已到/是否存在旧目标"——首帧未到或有旧目标 → 置脏等回显合并（合并
       // 触发 selected 变化 → effect 重跑 → 新 timer 携带完整目标落库，自愈）；courses
       // 为空 = 确证后端无旧目标，直接放行。
-      if (
-        !echoedRef.current &&
-        (stateDataRef.current === undefined ||
-          (stateDataRef.current.courses?.length ?? 0) > 0)
-      ) {
+      // 判据为纯数据（shouldDeferSave 不依赖 echoedRef）：防抖 effect 只在 selected
+      // 变化时重跑——若守卫依赖"由 /state 首帧置位的 echoedRef"，/state 持续失败期间
+      // 守卫命中置脏后 selected 无变化（setSelected 返回同引用被 React bailout）→
+      // 订阅永不重入、保存链死锁至整页刷新；改由 stateData 驱动后，/state 数据到达
+      // 触发 effect 重跑 → 新 timer → 守卫通过 → 落库自愈。
+      if (shouldDeferSave(stateDataRef.current)) {
         dirtyRef.current = true
         return
       }
@@ -719,7 +726,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 回显 effect 只置 echoedRef/echoDone、不改 selected，若无此依赖置脏的改动永不
     // 重试落库；非空合并场景由 selected 变化驱动（双路并保）。回显只完成一次，不会
     // 重置 400ms 防抖窗口。
-  }, [rev, selected, sessionToken, toast, hasPublishes, echoDone])
+    // stateData：/state 数据到达触发 effect 重跑自愈——守卫（shouldDeferSave）命中的
+    // 改动置脏跳过时 selected 无变化（React bailout 不重跑），/state 首帧/刷新到达后
+    // 依赖 stateData 的重跑挂新 timer、守卫通过即落库（唯一解锁不求整页刷新）。
+  }, [rev, selected, sessionToken, toast, hasPublishes, echoDone, stateData])
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 

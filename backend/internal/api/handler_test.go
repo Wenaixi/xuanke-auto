@@ -289,8 +289,13 @@ func TestAccountOverrideRequiresAdminSession(t *testing.T) {
 	d := newTestDeps(t)
 
 	// 准备三个账号：student（普通学生）、victim（被攻击目标）、adminName（名为 admin 的普通学生）
+	// authenticateDirect 直连批量注册多个账号：重置全局重登频率闸门预算（夹具语义
+	// 不关心登录流程，纯注册账号建会话），避免同一分钟窗口内被 B42-01 准入闸门误拦
+	d.accts.ResetGateForTest()
 	studentTok := authenticateDirect(t, d, "student")
+	d.accts.ResetGateForTest()
 	victimTok := authenticateDirect(t, d, "victim")
+	d.accts.ResetGateForTest()
 	adminNameTok := authenticateDirect(t, d, "admin")
 
 	// 1. 普通会话（student）携带 ?account=victim 改目标：必须只写进 student 自己的目标表，victim 不受影响

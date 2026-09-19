@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"xuanke-auto/backend/internal/zhidao"
 )
@@ -92,6 +94,87 @@ func TestLoginFailRemovesFreshShell(t *testing.T) {
 	}
 	if _, ok := m.AnyClient(); ok {
 		t.Fatal("登录失败的空壳客户端不得作为 AnyClient 探测载体")
+	}
+}
+
+// gateSrv 假教务平台：识别恒成功、doLogin 恒放行，并统计 doLogin 调用次数——
+// 构造"手动登录（LoginByPassword）是否真实触达平台 doLogin"的断言依据。
+func gateSrv(t *testing.T) (*httptest.Server, *int32) {
+	t.Helper()
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{"content": "abcd"}}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/login/doLogin"):
+			atomic.AddInt32(&calls, 1)
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "tok-new"})
+		default: // /login 与 /login/captcha
+			w.Write([]byte("ok"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// TestLoginByPasswordRejectsWhenGateBudgetExhausted B42-01：学生手动登录（LoginByPassword）
+// 必须先经全局 doLogin 频率闸门做非阻塞准入——窗口内 quota 已满（gateUsed == gateLoginPerMin）
+// 时立即返回明确错误，绝不触达平台 doLogin，杜绝与排队重登并发打爆出口 IP（平台按 IP
+// 计"登录失败次数过多"）。管理员换绑同走此收口（低频操作被拦一次重试即可，统一收敛更安全）。
+// 修复前（无准入直发）：红——quota 已满仍触达 doLogin。
+// 修复后（gateTryAcquire 非阻塞准入）：绿——拒绝且 doLogin 0 次。
+func TestLoginByPasswordRejectsWhenGateBudgetExhausted(t *testing.T) {
+	srv, calls := gateSrv(t)
+	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+
+	// 构造窗口 quota 已满现场：gateMu 下把窗口起点拨到当前、gateUsed 置满
+	m.gateMu.Lock()
+	m.gateWindow = time.Now()
+	m.gateUsed = gateLoginPerMin
+	m.gateMu.Unlock()
+
+	if _, err := m.LoginByPassword("acct1", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err == nil {
+		t.Fatal("quota 已满时手动登录必须被拒绝")
+	}
+	if n := atomic.LoadInt32(calls); n != 0 {
+		t.Fatalf("被闸门拒绝时绝不得触达平台 doLogin，实际 %d 次", n)
+	}
+	// 被拒后不得残留空壳客户端占位（与 B23-02 失败清理同语义）
+	if _, ok := m.ClientFor("acct1"); ok {
+		t.Fatal("被闸门拒绝不得注册空壳客户端")
+	}
+}
+
+// TestLoginByPasswordAllowedWhenGateBudgetAvailable B42-01 对偶守卫：窗口内 quota 充足时
+// 手动登录必须正常放行（且消耗一次预算，与排队重登共享同一闸门计数）——绝不误伤正常登录。
+func TestLoginByPasswordAllowedWhenGateBudgetAvailable(t *testing.T) {
+	srv, calls := gateSrv(t)
+	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+
+	// 预置旧窗口（跨分钟）：确保 gateTryAcquire 内部按"窗口已过期重置"分支放行
+	m.gateMu.Lock()
+	m.gateWindow = time.Now().Add(-2 * time.Minute)
+	m.gateUsed = 0
+	m.gateMu.Unlock()
+
+	if _, err := m.LoginByPassword("acct1", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
+		t.Fatalf("quota 充足时手动登录应正常成功: %v", err)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Fatalf("成功登录应恰好触达 1 次 doLogin，实际 %d", n)
+	}
+	// 消耗的预算必须计入闸门（与 gateWait 共享计数）
+	m.gateMu.Lock()
+	used := m.gateUsed
+	m.gateMu.Unlock()
+	if used != 1 {
+		t.Fatalf("成功登录应消耗 1 次闸门预算，实际 gateUsed=%d", used)
+	}
+	if _, ok := m.ClientFor("acct1"); !ok {
+		t.Fatal("登录成功后客户端应已注册")
 	}
 }
 

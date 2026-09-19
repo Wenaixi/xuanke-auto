@@ -3112,6 +3112,71 @@ func waitChainExit(t *testing.T, s *Scheduler, key string) {
 // 实时人数复核确证满员三条 err 处理路径此前只判账号名存在（ClientFor ok），同名重建
 // 后新身份存在但指针不同——陈旧链命中这三类错误时会把 rateLimited/full 写进重建身份
 // （假"已满员"永久退避黄金期 / 假退避）。三个测试补齐：重建身份绝不落 rateLimited/full。
+// TestDeletedAccountRebuiltSameNameChainDropsRelogin B42-02：失效分支必须先做指针身份
+// 复核、再决定是否 maybeRelogin——旧链命中 ErrUnauthorized 且账号已删/同名重建（身份已变）
+// 时，绝不得调用 maybeRelogin：否则幽灵账号残留 reloginFail 计数（Manager.Relogin 对已删
+// 账号 ClientFor 不存在仍递增失败计数），污染同名重建账号的首次自动重登（无辜退避 30s）。
+// 修复前（maybeRelogin 在复核之前无条件调用）：红——relogCalls == 1。
+// 修复后（先复核通过才 maybeRelogin）：绿——relogCalls == 0。
+func TestDeletedAccountRebuiltSameNameChainDropsRelogin(t *testing.T) {
+	// 关键夹具与 R39 同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
+	// （perAccount 值被替换），旧链发起时捕获的是旧 *fakeClient——指针身份比对必然不等。
+	oldClient := newFakeClient(true)
+	oldClient.mu.Lock()
+	oldClient.selectErr[61115] = zhidao.ErrUnauthorized // 旧链报名命中失效
+	oldClient.mu.Unlock()
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 旧链在 SelectClass 期间阻塞（模拟真实网络往返）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
+	s.mu.Unlock()
+	s.tick()
+
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// 链卡在往返期间，"删号 + 同名重建"：注册表里 acct1 换成新客户端指针
+	newClient := newFakeClient(true)
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient // 同名重建：注册表现指针已换
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1") // 清旧账号全量内存态（重建身份从零开始）
+
+	// 放行旧链网络调用 → 旧 client 返回失效 → 走失效分支
+	close(release)
+	waitChainExit(t, s, "acct1\x001")
+
+	// 契约：身份已变，maybeRelogin 不得被调用（幽灵 reloginFail 不得污染重建身份）
+	oldClient.mu.Lock()
+	relogCalls := oldClient.relogCalls
+	oldClient.mu.Unlock()
+	if relogCalls != 0 {
+		t.Fatalf("同名重建后陈旧旧链命中失效不得触发自动重登（B42-02），实际 %d 次", relogCalls)
+	}
+	// 重建身份的 reloginFail 不得有残留计数（PurgeAccount 已清空，旧链不得写回）
+	s.mu.Lock()
+	_, hasFail := s.reloginFail["acct1"]
+	s.mu.Unlock()
+	if hasFail {
+		t.Fatal("同名重建后 reloginFail 不得残留（B42-02）")
+	}
+}
+
 func TestDeletedAccountRebuiltSameNameChainDropsRateLimitBackoff(t *testing.T) {
 	// 关键夹具与 R39 同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
 	// （perAccount 值被替换），旧链捕获的是旧 *fakeClient——指针身份比对必然不等。

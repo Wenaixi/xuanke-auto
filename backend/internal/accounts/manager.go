@@ -76,6 +76,16 @@ func (m *Manager) GatePump() {
 	m.gateCond.Broadcast()
 }
 
+// ResetGateForTest 测试专用：清空全局重登频率闸门计数与窗口起点。
+// api 层测试夹具 authenticateDirect（语义"不关心登录流程，仅注册账号建会话"）在同一分钟
+// 窗口内连续注册多个账号用，避免夹具被闸门预算误拦；正式代码不调用。
+func (m *Manager) ResetGateForTest() {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	m.gateWindow = time.Time{}
+	m.gateUsed = 0
+}
+
 // New 创建多账号客户端注册表。
 func New(baseURL string, vision zhidao.VisionConfig, st Store) *Manager {
 	m := &Manager{
@@ -205,9 +215,35 @@ func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
 	}
 }
 
+// gateTryAcquire 非阻塞申请一次 doLogin 预算（tokenBucket 语义借用 gateWait 同款计数）：
+// 窗口内 quota 充足则消耗并返回 true，已满则返回 false——绝不阻塞等待下个窗口。
+// 学生手动登录（LoginByPassword）用它收口全局 doLogin 频率闸门：窗口已满时立即拒绝
+//（提示稍后再试），不挂起用户登录响应（排队重登可能数分钟）；与 gateWait 共享同一
+// gateMu 与 gateUsed 计数，排队重登与手动登录严格共享全账号每分钟 doLogin 预算。
+func (m *Manager) gateTryAcquire() bool {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	if time.Since(m.gateWindow) >= time.Minute {
+		m.gateWindow = time.Now()
+		m.gateUsed = 0
+	}
+	if m.gateUsed < gateLoginPerMin {
+		m.gateUsed++
+		return true
+	}
+	return false
+}
+
 // LoginByPassword 用账密登录该账号独立客户端；成功后加密密码与 token 落库。
-// 管理员入口（换绑定新账密）不受全局重登闸门约束，仍走平台登录接口。
+// doLogin 前先经全局频率闸门非阻塞准入（B42-01）：窗口内预算已满立即返回明确错误，
+// 绝不放行直发平台 doLogin——多账号集中失效自动重登排队时，任一学生手动重登与排队
+// 重登并发触达平台，N+1 并发可刷爆出口 IP（平台"登录失败次数过多"按 IP 计数）。
+// 管理员入口（换绑定新账密）同样收口到此闸门：换绑是低频操作，被拦一次重试即可，
+// 统一收敛更安全（管理员登录本身走 handleLogin 单独分支，不触碰教务登录不受影响）。
 func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (string, error)) (string, error) {
+	if !m.gateTryAcquire() {
+		return "", fmt.Errorf("登录尝试过于频繁，请稍后再试")
+	}
 	c := m.ensure(acct)
 	// B24-01：判别本次是不是"纯新建的空壳"再决定失败清理——
 	// 需在 Login 前快照，因为 Login 成功分支会 SetCredentials 写 token，失败返回时

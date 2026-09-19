@@ -1459,7 +1459,6 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			msg, err = client.SelectClass(t.ClassID)
 			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复
 			if errors.Is(err, zhidao.ErrUnauthorized) {
-				s.maybeRelogin(acct)
 				s.mu.Lock()
 				// B39-01：指针身份复核——失效分支此前只判账号名存在（ClientFor ok），
 				// 同名重建后旧链命中 ErrUnauthorized 也会把"教务令牌失效"状态写进新身份。
@@ -1471,6 +1470,13 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 					s.mu.Unlock()
 					return
 				}
+				// B42-02：重登必须落在身份复核之后——旧链命中 ErrUnauthorized 但身份已变
+				//（删号/同名重建）时不得触发 maybeRelogin：Manager.Relogin 对已删账号虽然
+				// 报"未注册"，但失败计数仍写进已删账号 map，污染同名重建账号的首次自动重登
+				//（无辜退避）。身份已验证为同一发起链，重登才真正作用于该账号。
+				s.mu.Unlock()
+				s.maybeRelogin(acct)
+				s.mu.Lock()
 				delete(s.inflight[acct], t.ClassID) // 清提交标记（避免残留占用）
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
 				if s.store != nil {

@@ -1040,25 +1040,29 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               </div>
                             </div>
 
-                            {/* 容量统计 */}
-                            <div className="space-y-1.5 pt-1.5">
-                              <div className="flex items-center justify-between text-[11px]">
-                                <span className="text-neutral-500 flex items-center gap-1 font-mono">
-                                  <Users className="h-3 w-3" />
-                                  <span>已报容量</span>
-                                </span>
-                                <span className="text-white font-mono tabular-nums">
-                                  {unannounced
-                                    ? `${c.selected_count} 人已报 · 名额未公布`
-                                    : `${c.selected_count} / ${c.max_count} 人 (${rate}%)`}
-                                </span>
+                              {/* 容量统计 */}
+                              <div className="space-y-1.5 pt-1.5">
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-neutral-500 flex items-center gap-1 font-mono">
+                                    <Users className="h-3 w-3" />
+                                    <span>已报容量</span>
+                                  </span>
+                                  <span className="text-white font-mono tabular-nums">
+                                    {unannounced
+                                      ? `${c.selected_count} 人已报 · 名额未公布`
+                                      : `${c.selected_count} / ${c.max_count} 人 (${rate}%)`}
+                                  </span>
+                                </div>
+                                {/* F41-N1：名额未公布（max_count=0）时 Progress 空条——原实现
+                                    max={c.max_count || 1} 把分母变 1，selected_count 数十到数百
+                                    渲染成满条，与"名额未公布"文案并存误导。value=0 恒空条，
+                                    aria-valuenow 亦如实反映"未公布无进度"语义。 */}
+                                <Progress
+                                  value={unannounced ? 0 : c.selected_count}
+                                  max={unannounced ? 1 : c.max_count}
+                                  indicatorColor={progressColor}
+                                />
                               </div>
-                              <Progress
-                                value={c.selected_count}
-                                max={c.max_count || 1}
-                                indicatorColor={progressColor}
-                              />
-                            </div>
 
                             {/* 操作按钮区 */}
                             <div className="pt-2 border-t border-neutral-800/70 mt-0.5 flex flex-col gap-1.5">

@@ -1,3 +1,5 @@
+import type { SchedulerState } from "../types"
+
 // 目标自动保存前置守卫（TDD 纯函数，供 Select.tsx 防抖回调与 flushTargets 两处消费时刻
 // 复用，与回显 effect 的 currentIds 过滤同判据）：
 //   selected 中残留"非空数组但键不属于当前发布集合"的条目 = 发布集合整体重建后旧
@@ -38,4 +40,18 @@ export function cleanStaleSelected<T>(
     next[id] = arr
   }
   return changed ? next : selected
+}
+
+// F42-M1：防抖保存"回显未完成"守卫判据抽纯函数——/state 首帧未到（undefined）或
+// 首帧携带旧目标（courses 非空）时，后端旧目标尚未经回显合并进 selected，此刻整包
+// PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）→ 推迟保存（返回 true），置脏
+// 跳过等回显完成/数据到达自愈。courses 空 = 确证后端无旧目标（回显已完成语义）→
+// 放行（返回 false）。纯数据判据、不依赖 echoedRef——防抖 effect 只在 selected 变化
+// 时重跑，守卫若依赖"由 /state 首帧置位的 echoedRef"，/state 持续失败期间守卫命中
+// 置脏后 selected 无变化 → React bailout → 防抖订阅永不重入，保存链死锁至整页刷新；
+// 守卫改由 stateData 本身驱动后，/state 数据到达触发 effect 重跑即自愈解锁。
+export function shouldDeferSave(stateData: SchedulerState | undefined): boolean {
+  return (
+    stateData === undefined || (stateData.courses?.length ?? 0) > 0
+  )
 }

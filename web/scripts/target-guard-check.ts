@@ -1,10 +1,13 @@
-// TDD 守护：selectedHasStalePublish 纯函数断言——
+// TDD 守护：selectedHasStalePublish / cleanStaleSelected / shouldDeferSave 纯函数断言——
 // 发布集合整体重建（平台开窗瞬间清空又恢复、publish_id 全变）后，selected 仍残留
 // 旧 publish_id 的非空数组；构建目标只遍历当前发布集合会静默丢弃它们，产出"仅含新
 // 发布课程"的整包 PUT 整包覆盖删除后端旧目标（数据丢失）。守卫必须判"有过期条目"
 // 并置脏跳过。空数组键 = 用户主动清空该发布（清空语义绝不复活），绝不判过期。
-// 用法：node --import tsx scripts/target-guard-check.ts（退出码非 0 即断言失败）
-import { selectedHasStalePublish, cleanStaleSelected } from "../src/lib/targetGuard"
+// shouldDeferSave：防抖保存"回显未完成"守卫（/state 首帧未到或首帧携带旧目标时，
+// 后端旧目标尚未经回显合并进 selected，整包 PUT 会覆盖删除——置脏跳过等自愈）。
+// 用法：node --import jiti scripts/target-guard-check.ts（退出码非 0 即断言失败）
+import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave } from "../src/lib/targetGuard"
+import type { SchedulerState } from "../src/types"
 
 let failed = 0
 const assert = (name: string, got: boolean, want: boolean) => {
@@ -26,6 +29,33 @@ const pubs = [
     classes: [],
   },
 ]
+
+// F42-M1：shouldDeferSave 断言——防抖保存"回显未完成"守卫抽纯函数：
+// /state 首帧未到（undefined）或首帧携带旧目标（courses 非空）→ 推迟保存（返回 true），
+// 后端旧目标尚未经回显合并进 selected，此刻整包 PUT 会覆盖删除（"加一门"变"替换全部"）。
+// courses 空 = 确证后端无旧目标（回显已完成语义）→ 放行（返回 false）。
+const deferAssert = (name: string, got: boolean, want: boolean) => {
+  const ok = got === want
+  console.log(`${ok ? "  ✓" : "  ✗"} ${name}${ok ? "" : `（期望 ${want}，实际 ${got}）`}`)
+  if (!ok) failed++
+}
+// 场景 K：/state 首帧未到（undefined）→ 推迟保存（回显尚未发生，不能覆盖后端旧目标）
+deferAssert("首帧未到(undefined) → 推迟", shouldDeferSave(undefined), true)
+// 场景 L：/state 已到且 courses 空（确证后端无旧目标）→ 放行保存
+deferAssert("courses 空 → 放行", shouldDeferSave({ courses: [], open_time: "", open_time_known: false, window_opened: false, window_closed: false, token_valid: true } satisfies SchedulerState), false)
+// 场景 M：/state 已到且 courses 非空（回显尚未完成，后端有旧目标）→ 推迟保存
+deferAssert(
+  "courses 非空 → 推迟",
+  shouldDeferSave({
+    courses: [{ publish_id: 9, class_id: 11, course_name: "健美操", priority: 0, status: "pending", result: "" }],
+    open_time: "",
+    open_time_known: false,
+    window_opened: false,
+    window_closed: false,
+    token_valid: true,
+  } satisfies SchedulerState),
+  true
+)
 
 // 场景 A（缺陷触发）：旧发布 P1 仍有课 + 新发布 P9 新课 → 必须判"有过期条目"置脏，
 // 绝不让只含 P9 课程的整包 PUT 覆盖删除后端 [P1课,P9课]

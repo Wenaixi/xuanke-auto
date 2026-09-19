@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react"
+﻿import { useEffect, useMemo, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
@@ -58,7 +58,9 @@ export default function App() {
   // 初始值读 localStorage 恢复，刷新后自定义管理员名不丢
   const [adminName, setAdminName] = useState<string>(loadAdminName)
 
-  const accounts = Object.keys(sessions)
+  // 账号列表派生值用 useMemo 稳定引用：Object.keys 每次渲染新建数组会让下方账号迁移
+  // effect 每次渲染都重跑（体内仅条件 setState，当前无功能影响，属反模式）。
+  const accounts = useMemo(() => Object.keys(sessions), [sessions])
   const sessionToken = current ? sessions[current] : undefined
 
   // 登录成功：写入（或覆盖）该账号会话，登录即自动加入账号列表

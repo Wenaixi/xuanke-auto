@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from "react"
+﻿import { useMemo, useState, useEffect, useId } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
 import type { Account, CourseStatus, ElectivesData, LogEntry, SchedulerState } from "../types"
@@ -58,12 +58,16 @@ function CollapseSection({
   header: React.ReactNode
   children: React.ReactNode
 }) {
+  // N2：aria-controls 指向的 id 此前是硬编码 "collapse-body"——正文 div 无 id 落位
+  // （悬空，读屏收不到跟随目标），且组件多处实例化（extras 折叠段 + 每个日期组）
+  // 时重复 id 违反 DOM 唯一性。useId 保证单实例唯一、零冲突。
+  const id = useId()
   return (
     <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 overflow-hidden">
       <button
         type="button"
         aria-expanded={open}
-        aria-controls="collapse-body"
+        aria-controls={id}
         onClick={onToggle}
         className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors"
       >
@@ -74,7 +78,11 @@ function CollapseSection({
           }`}
         />
       </button>
-      {open && <div className="px-3 pb-3 border-t border-neutral-900 pt-2">{children}</div>}
+      {open && (
+        <div id={id} className="px-3 pb-3 border-t border-neutral-900 pt-2">
+          {children}
+        </div>
+      )}
     </div>
   )
 }

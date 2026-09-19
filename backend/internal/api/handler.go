@@ -901,6 +901,10 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"open_time":           openTimeStr,
 		"activation_on":       cfg.ActivationEnabled,
 		"window_opened":       windowOpened,
+		// window_closed 与学生端 /state 同源（WindowClosed 三判据单源 windowClosedLocked）：
+		// 前端管理后台三态展示（待命中/已开放/已关闭）靠此字段区分，缺失时窗口关闭后
+		// 后台仍显"待命中"误导管理员。
+		"window_closed":       d.Sched.WindowClosed(),
 		"account_count":       len(accounts),
 		"targets_count":       targetsCount,
 		"success_count":       len(success),

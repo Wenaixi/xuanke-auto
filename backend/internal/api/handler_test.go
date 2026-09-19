@@ -913,6 +913,15 @@ func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
 		t.Fatalf("stats(window_opened=%v) 与调度器探测状态(%v) 不同源",
 			st["window_opened"], openedBySched)
 	}
+	// B39-05：window_closed 必须下发且与学生端 /state 同源（WindowClosed 三判据单源）——
+	// 前端管理后台三态展示靠此字段区分，缺失时窗口关闭后后台仍显"待命中"误导管理员。
+	if _, ok := st["window_closed"]; !ok {
+		t.Fatalf("stats 必须下发 window_closed 字段（前端三态展示依赖），实际 %v", st)
+	}
+	if st["window_closed"] != d.sched.WindowClosed() {
+		t.Fatalf("stats(window_closed=%v) 与调度器关闭判定(%v) 不同源",
+			st["window_closed"], d.sched.WindowClosed())
+	}
 }
 
 // TestElectiveSelectRejectsWindowClosed 手动报名服务端复核（M7）：

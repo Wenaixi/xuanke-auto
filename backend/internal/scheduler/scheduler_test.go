@@ -2951,3 +2951,46 @@ func TestSpawnChainSkipsWhenTokenInvalid(t *testing.T) {
 		t.Fatal("token 失效跳过不得把状态置为 failed")
 	}
 }
+
+// TestReloginSuccessWithNilStoreNoPanic 重登成功分支在 store 为 nil（测试直构 Scheduler
+// 不注入 Store 的形态）时不得 nil panic——全仓库其余落库点都包 `if s.store != nil`，
+// 唯有重登成功分支的 UpdateIDToken 此前裸写（B39-03 修复前此测试 panic 即红灯）。
+// 语义：nil store = 无持久化需求，跳过落库继续完成重登恢复。
+func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
+	fc := newFakeClient(false)
+	relogStart := make(chan bool) // 重登开始信号
+	relogDone := make(chan bool)  // 重登完成信号（阻塞重登，让测试断言成功分支执行完毕）
+	fa := &fakeAccts{c: fc, relog: func() {
+		relogStart <- true
+		<-relogDone
+	}}
+	s := New(fa, nil, time.Now().Add(time.Hour), time.Hour) // store=nil
+	acct := "acct1"
+
+	// 探测命中 token 失效 → 触发自动重登
+	fc.err = zhidao.ErrUnauthorized
+	s.maybeRelogin(acct)
+	select {
+	case <-relogStart:
+	case <-time.After(3 * time.Second):
+		t.Fatal("自动重登应已进入 Relogin")
+	}
+	close(relogDone) // 放行重登完成（成功返回 relogged=true）
+	// 等重登 goroutine 落地（relogging 被清理）——成功分支执行后应无 panic 且正常恢复
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.relogging[acct]
+		s.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("重登 goroutine 未在 3 秒内落地")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !s.TokenValidFor(acct) {
+		t.Fatal("store=nil 时重登成功仍应恢复 token 有效（落库只是持久化动作，不影响内存态）")
+	}
+}

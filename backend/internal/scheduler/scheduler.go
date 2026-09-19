@@ -899,13 +899,6 @@ func (s *Scheduler) windowClosedLocked() bool {
 	return false
 }
 
-// emptyRunsFor 统计该开放时间下"空快照且未开窗"的连续探测轮数——由 probe() 在每次探测
-// 结果入账时同步推进，判据与探测轮数对齐（无时钟依赖）。闭源：仅有 WindowClosed/probe 使用。
-func (s *Scheduler) emptyRunsFor(open time.Time) int {
-	_ = open
-	return s.state.EmptyProbeRuns
-}
-
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
 // 命中 token 失效（ErrUnauthorized）时同步触发该账号自动重登——用户刷新课程页
 // 不必等调度器下个 30s 周期探测才发现并恢复（异步重登，不阻塞响应）。

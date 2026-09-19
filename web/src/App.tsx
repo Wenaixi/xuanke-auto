@@ -130,6 +130,10 @@ export default function App() {
     setSessions(next)
     setTargetAccount((prev) => (prev === acct ? null : prev))
     if (current === acct) setCurrent("")
+    // 删除的是管理员自己：必须同步退出管理态——否则 inAdmin 残留 true，账号迁移
+    // effect 把 current 切到剩余学生账号后，渲染 `inAdmin || current === adminName`
+    // 仍命中 Admin 分支，拿学生令牌去拉五个管理 Tab 连环 401（与 onUnauthorized 同族）。
+    if (acct === adminName) setInAdmin(false)
   }
 
   // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。

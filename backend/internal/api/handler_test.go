@@ -1418,6 +1418,35 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 	}
 }
 
+// TestRequireJSONBodyRejectsFormContentType requireJSONBody 是副作用请求的 CSRF
+// 第一道门（POST 选课/退选/目标设置/管理改配），其拒绝分支必须写真实 HTTP 403——
+// 与登录/激活两处 CSRF 门同款。HTTP 层状态分裂会让安全扫描/反代无法识别被 CSRF
+// 拒掉的副作用请求（此前 writeJSON 恒 200，B39-02 改漏的最后一处）。
+func TestRequireJSONBodyRejectsFormContentType(t *testing.T) {
+	d := newTestDeps(t)
+	// 构造一个需登录 + requireJSONBody 的副作用路由（POST /api/electives/select 最典型）
+	tok := authenticateDirect(t, d, "acct1")
+	// 表单编码提交报名：应被 403 拒绝，绝不进入 handler（handler 侧空 body 解码会报业务错误）
+	req := httptest.NewRequest("POST", "/api/electives/select", strings.NewReader("classId=61115"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	d.api.ServeHTTP(rec, req)
+	var j map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
+		t.Fatalf("响应不是 JSON: %s", rec.Body.String())
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("表单编码提交选课应被 HTTP 403 拒绝，实际 http=%d（body=%s）", rec.Code, rec.Body.String())
+	}
+	if j["code"].(float64) != 403 {
+		t.Fatalf("表单编码提交选课应 body code=403，实际 %v", j["code"])
+	}
+	if !strings.Contains(j["msg"].(string), "JSON") {
+		t.Fatalf("拒绝文案应明示仅接受 JSON，实际 %v", j["msg"])
+	}
+}
+
 // TestClientIPTrustedProxy B6-05：clientIP 可信反代 IP 透传。
 // 默认（未设 XUANKE_TRUSTED_PROXY）绝不信 XFF——攻击者可伪造任意 IP 刷爆他人
 // 限流桶或绕过自身限流；仅当开关=on 且 RemoteAddr 确实是回环地址（真正的本机

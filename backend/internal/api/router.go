@@ -64,10 +64,12 @@ func jsonContentType(r *http.Request) bool {
 }
 
 // requireJSONBody 复用 jsonContentType 拒绝非 JSON 提交的副作用请求（m8）。
+// 拒绝分支必须写真实 HTTP 403（与登录/激活两处 CSRF 门同款）：安全扫描/反代需要在
+// HTTP 层识别被 CSRF 拒的副作用请求，恒 200 会让监控与安全工具漏判。
 func requireJSONBody(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !jsonContentType(r) {
-			writeJSON(w, 403, nil, "仅接受 JSON 提交")
+			writeJSONStatus(w, http.StatusForbidden, 403, nil, "仅接受 JSON 提交")
 			return
 		}
 		next(w, r)

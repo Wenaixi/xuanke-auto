@@ -10,6 +10,7 @@ import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
+import { selectedHasStalePublish } from "../lib/targetGuard"
 import {
   ArrowLeft,
   ArrowDownWideNarrow,
@@ -440,6 +441,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       dirtyRef.current = true // 发布缺席：保留脏，绝不假清空覆盖；下次进入/恢复后再落库
       return
     }
+    // C1：发布集合整体重建后 selected 仍残留旧 publish_id 的非空条目——build()
+    // 只遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
+    // 后端已保存的旧目标（数据丢失）。前置守卫判有过期条目即置脏跳过；空数组键 =
+    // 用户主动清空（清空语义绝不复活），不判过期。与回显 effect 的 currentIds 过滤同判据。
+    if (selectedHasStalePublish(latestSelected, publishesRef.current)) {
+      dirtyRef.current = true // selected 残留旧发布：保留脏，绝不整包覆盖后端旧目标
+      return
+    }
     const targets: Target[] = []
     for (const p of publishesRef.current) {
       const list = latestSelected[p.publish_id] ?? []
@@ -593,6 +602,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 意图，跳过本次保存保留脏（等发布恢复/下次改动再落库）；selectedCount 只可能
       // 偏保守（用户已清空时为假阳守卫，安全方向），绝不会放过真实假清空。
       if (publishesRef.current.length === 0 && selectedCount > 0) {
+        dirtyRef.current = true
+        return
+      }
+      // C1：防抖消费时刻同款前置守卫——发布集合整体重建后 selected 残留旧 publish_id
+      // 非空条目时，build() 只产出新发布课程，整包 PUT 覆盖删除后端已保存的旧目标。
+      // 判定置于构建之前（残留旧发布时根本不该产出可 PUT 的目标）；空数组键 =
+      // 用户主动清空该发布（清空语义绝不复活），不判过期。
+      if (selectedHasStalePublish(selected, publishesRef.current)) {
         dirtyRef.current = true
         return
       }

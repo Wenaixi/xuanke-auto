@@ -10,7 +10,7 @@ import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
-import { selectedHasStalePublish } from "../lib/targetGuard"
+import { selectedHasStalePublish, cleanStaleSelected } from "../lib/targetGuard"
 import {
   ArrowLeft,
   ArrowDownWideNarrow,
@@ -239,8 +239,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       const hasTouched = Object.keys(prev).length > 0
       // 用户已明确全清空（rev>0 且无任何条目）→ 绝不合并回显（清空语义不可侵犯）
       if (rev > 0 && !anyHas) return prev
-      // 部分发布已被用户触碰（key 存在，含空数组=用户主动清空该发布）→ 只补
-      // 用户未触碰发布的旧目标；已触碰发布保留用户现状，绝不覆盖用户本次操作。
       const next = { ...prev }
       let merged = false
       for (const c of ordered) {
@@ -266,9 +264,22 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       if (!hasTouched && !merged) return prev
       return next
     })
+    // F40-M1：发布集合整体重建（开窗瞬间平台清空又恢复、publish_id 全变）后，
+    // selected 仍残留旧 publish_id 的非空 key——对应 Tab 已消失、用户无法通过界面
+    // 清除，守卫命中的"置脏跳过"会把保存链永久静默拦截（黄金期改目标永不落库）。
+    // 随重建清理即可解锁：只删"非空且不在当前发布集合"的 key（空数组键 = 用户主动
+    // 清空，保留语义），防抖 effect 因 selected 变化重跑，自动落库当前目标。
+    if (selectedHasStalePublish(selected, pubs)) {
+      setSelected((prev) => cleanStaleSelected(prev, currentIds))
+      toast({
+        title: "发布已更新",
+        description: "旧批次目标已失效并自动清理，新批次目标将重新保存",
+        variant: "warning",
+      })
+    }
     echoedRef.current = true
     setEchoDone(true)
-  }, [stateData, data, rev])
+  }, [stateData, data, rev, selected, toast])
 
   const publishes = data?.publishes ?? []
 
@@ -445,8 +456,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 只遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
     // 后端已保存的旧目标（数据丢失）。前置守卫判有过期条目即置脏跳过；空数组键 =
     // 用户主动清空（清空语义绝不复活），不判过期。与回显 effect 的 currentIds 过滤同判据。
+    // F40-M1：命中给明确提示——守卫本身正确（保数据 > 可保存），但旧残留 key 的
+    // 对应 Tab 已消失、用户无法通过界面清除，若全程静默保存链就被锁死（黄金期改
+    // 目标永不落库且无任何反馈）。发布重建路径已在回显 effect 随建随清（首选出路），
+    // 此处 toast 兜底"清理未覆盖到的旧残留"，并把恢复路径指给用户（刷新后重新选择）。
     if (selectedHasStalePublish(latestSelected, publishesRef.current)) {
       dirtyRef.current = true // selected 残留旧发布：保留脏，绝不整包覆盖后端旧目标
+      if (!unmountedRef.current) {
+        toast({
+          title: "发布已更新",
+          description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
+          variant: "warning",
+        })
+      }
       return
     }
     const targets: Target[] = []
@@ -609,8 +631,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 非空条目时，build() 只产出新发布课程，整包 PUT 覆盖删除后端已保存的旧目标。
       // 判定置于构建之前（残留旧发布时根本不该产出可 PUT 的目标）；空数组键 =
       // 用户主动清空该发布（清空语义绝不复活），不判过期。
+      // F40-M1：命中给明确提示（防抖回调可能迟于卸载执行，卸载后绝不弹 toast 轰炸）。
       if (selectedHasStalePublish(selected, publishesRef.current)) {
         dirtyRef.current = true
+        if (!unmountedRef.current) {
+          toast({
+            title: "发布已更新",
+            description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
+            variant: "warning",
+          })
+        }
         return
       }
       const next = build()

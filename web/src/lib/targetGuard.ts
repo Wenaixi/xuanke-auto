@@ -15,3 +15,27 @@ export function selectedHasStalePublish(
     return arr !== undefined && arr.length > 0
   })
 }
+
+// F40-M1：发布集合重建时清理 selected 中"非空且不在当前发布集合"的残留 key——
+// 旧 publish_id 对应 Tab 已消失、用户无法通过界面清除，若守卫只置脏跳过后保存链被
+// 永久静默拦截（黄金期改目标永不落库）。随重建清理即解锁，防抖重跑自然落库当前目标。
+// 只删"非空且不在集合"的 key：空数组键 = 用户主动清空（清空语义绝不复活），保留。
+// 无任何变更时返回原对象引用（不触发不必要的重渲染）。
+export function cleanStaleSelected<T>(
+  selected: Record<number, T[]>,
+  currentPublishIds: readonly number[] | Set<number>
+): Record<number, T[]> {
+  const ids = currentPublishIds instanceof Set ? currentPublishIds : new Set(currentPublishIds)
+  let changed = false
+  const next: Record<number, T[]> = {}
+  for (const k of Object.keys(selected)) {
+    const id = Number(k)
+    const arr = selected[id]
+    if (!ids.has(id) && arr !== undefined && arr.length > 0) {
+      changed = true
+      continue // 残留非空旧 key：清理
+    }
+    next[id] = arr
+  }
+  return changed ? next : selected
+}

@@ -63,6 +63,8 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 // 透传给 CourseStatus——/state.courses 自带日期/发布名，前端分组不再依赖 /electives
 // （窗口关闭后 /electives 空发布、映射丢失是"未知日期"根因）。
 // 修复前：Target 只有 publish_id/class_id/course_name/priority，无发布名/日期。
+// 兜底补全：专属帧缺失/过期时回退全校帧 lastData——HTTP 直存目标不触发探测，
+// 专属帧常空，靠全校帧（开窗前 30s 常态保鲜）补全。
 func TestTargetPublishMetaPersisted(t *testing.T) {
 	fs := &recordingStore{fakeStore: &fakeStore{}}
 	fc := newFakeClient(false)
@@ -111,6 +113,42 @@ func TestTargetPublishMetaPersisted(t *testing.T) {
 	}
 	if c.BeginDate == "" {
 		t.Fatal("CourseStatus.BeginDate 不应为空")
+	}
+}
+
+// TestTargetPublishMetaFallbackToGlobalFrame 兜底补全契约：该账号专属帧缺失/过期时，
+// SetTargetsForAccount 必须回退全校帧 lastData 补全发布元数据——HTTP 直存目标不触发
+// 探测（B6-04/B20-04 契约），专属帧常空；窗口关闭后 /electives 空发布，若全校帧也
+// 不带本轮批次则重存空元数据落库（窗口重开后重存自愈）。修复前：只读 acctData[acct]，
+// 专属帧空 → 空元数据落库 → "未知日期"。
+func TestTargetPublishMetaFallbackToGlobalFrame(t *testing.T) {
+	fs := &recordingStore{fakeStore: &fakeStore{}}
+	fc := newFakeClient(false)
+	fc.data.BeginTimes = []int64{time.Now().Add(2 * time.Hour).UnixMilli()}
+	s := New(&fakeAccts{c: fc}, fs, time.Time{}, time.Hour)
+
+	// 只写全校帧 lastData（模拟"专属帧不存在"的浏览账号形态）：
+	// probe() 内部 FindElectives 成功后 s.lastData 被填、acctData 不填（无目标账号
+	// 不被 per-account 探测），与 B22-01/B28-01 的"无目标账号回退全校帧"同构。
+	s.probe()
+
+	// HTTP 直存目标（不触发探测，专属帧仍空）
+	s.SetTargetsForAccount("acct1", []Target{
+		{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0},
+	})
+
+	// 兜底补全生效：落库行带全校帧的发布元数据
+	fs.mu.Lock()
+	rows := append([]targetRow(nil), fs.targets...)
+	fs.mu.Unlock()
+	if len(rows) != 1 {
+		t.Fatalf("应落库 1 行，实际 %d", len(rows))
+	}
+	if rows[0].publishName != "高二年体育" {
+		t.Fatalf("落库 publish_name 应回退全校帧'高二年体育'，实际 %q", rows[0].publishName)
+	}
+	if rows[0].beginDate == "" {
+		t.Fatal("落库 begin_date 应回退全校帧毕日期（不得为空）")
 	}
 }
 

@@ -434,28 +434,13 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	// 全量清理（含 acctData/tokenValid/relogin 族）归 PurgeAccount——管理员删除路径
 	// handleAdminDeleteAccount 必须调它而非本方法。
 	if s.store != nil {
-		// 发布元数据补全：目标选定时平台快照（acctData）通常刚探测、还带全量
-		// publishes——把 publish_id 对应的 publish_name/begin_date 合并进目标，随库
-		// 持久化。窗口关闭后 /electives 空发布、后端快照也空（解析清空），此批补全
-		// 是窗口关闭后日期/发布名仍可显示的唯一机会窗（下一次保存只剩内存残留）。
-		enriched := make([]Target, len(targets))
-		copy(enriched, targets)
-		if data := s.acctData[acct]; data != nil {
-			for i := range enriched {
-				for _, p := range data.Publishes {
-					if p.PublishID == enriched[i].PublishID {
-						if enriched[i].PublishName == "" {
-							enriched[i].PublishName = p.PublishName
-						}
-						if enriched[i].BeginDate == "" {
-							enriched[i].BeginDate = p.BeginDate
-						}
-						break
-					}
-				}
-			}
-		}
-		targets = enriched // 内存态与 store 均用补全后的目标（CourseStatus 随之带元数据）
+		// 发布元数据补全：把 publish_id 对应的 publish_name/begin_date 合并进目标，随库
+		// 持久化。窗口关闭后 /electives 空发布、后端快照也空（解析清空），此批补全是
+		// 窗口关闭后日期/发布名仍可显示的关键机会窗（下一次保存只剩内存残留）。
+		// enrichTargetPubMetaLocked 数据源：该账号专属帧 acctData[acct] 优先，兜底全校帧
+		// lastData——HTTP 直存时该账号专属帧常过期/为空（目标保存不触发探测），
+		// 而全校探测帧开窗前 30s 常态保鲜、更可能带着本轮批次。
+		targets = s.enrichTargetPubMetaLocked(acct, targets) // 内存态与 store 均用补全后的目标
 		s.acctTargets[acct] = targets
 		// 落库带发布元数据：窗口关闭后 /state.courses 仍自带日期/发布名。
 		if err := s.store.SetTargetsForAccount(acct, targets); err != nil {
@@ -510,8 +495,44 @@ func (s *Scheduler) PurgeAccount(acct string) {
 func (s *Scheduler) RestoreTargets(acct string, targets []Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.acctTargets[acct] = targets
-	s.rebuildCoursesForAccountLocked(acct, targets)
+	// 重启恢复同样兜底补全发布元数据（与 SetTargetsForAccount 同源）：历史库若因
+	// HTTP 直存快照缺失留下空元数据行，重启后恢复时兜底全校帧 lastData 补全——
+	// 启动后 probe 很快填充全校帧，补全后 /state.courses 分组不再落"未知日期"。
+	s.acctTargets[acct] = s.enrichTargetPubMetaLocked(acct, targets)
+	s.rebuildCoursesForAccountLocked(acct, s.acctTargets[acct])
+}
+
+// enrichTargetPubMetaLocked 为目标补全 publish_name/begin_date（需持 s.mu）。
+// 数据源：该账号专属帧 acctData[acct] 优先，兜底全校帧 lastData（见
+// SetTargetsForAccount 注释——HTTP 直存时专属帧常过期/为空，全校帧更可能带本轮批次）。
+// 两者都无 → 保持原样（semantics：窗口重开后重存目标自愈）。
+func (s *Scheduler) enrichTargetPubMetaLocked(acct string, targets []Target) []Target {
+	var pubs []zhidao.Publish
+	if data := s.acctData[acct]; data != nil {
+		pubs = data.Publishes
+	} else if data := s.lastData; data != nil {
+		pubs = data.Publishes
+	}
+	out := make([]Target, len(targets))
+	for i, t := range targets {
+		if t.PublishName != "" && t.BeginDate != "" {
+			out[i] = t
+			continue
+		}
+		for _, p := range pubs {
+			if p.PublishID == t.PublishID {
+				if t.PublishName == "" {
+					t.PublishName = p.PublishName
+				}
+				if t.BeginDate == "" {
+					t.BeginDate = p.BeginDate
+				}
+				break
+			}
+		}
+		out[i] = t
+	}
+	return out
 }
 
 // rebuildCoursesForAccountLocked 重建指定账号的课程状态（需持有锁）：

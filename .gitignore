@@ -1,5 +1,7 @@
 # ============= 归档区（Python 老版逆向产物，不再参与开发） =============
-# 逆向脚本与抓包归档到 legacy/，全部忽略（README 内说明用途即可）
+# 逆向脚本与抓包全部归档到 legacy/，一律不参与版本管理
+# 逆向契约的真实取证物保留在哪、以什么形式保留，见 CLAUDE.md「真实网站源码对照
+# 基线」（该基线引用的 HAR 大样本在用户本地 data/ 归档，git 里不重复保管）
 legacy/
 
 # ps1/sh/bat 本地操作脚本不入库
@@ -14,6 +16,9 @@ backend/xuanke.exe
 backend/xuanke-dev.exe
 backend/xuanke-e2e.exe
 backend/xuanke-e2e.exe~
+
+# 发布打包产物目录（手动交叉编译/CI 下载物）
+dist-release/
 
 # Go 构建缓存
 *.test
@@ -35,6 +40,7 @@ data/
 backend/data/
 
 # ============= Node / 前端构建 =============
+node_modules/
 web/node_modules/
 web/dist/
 backend/web/dist/
@@ -52,14 +58,34 @@ __pycache__/
 .omc/
 .DS_Store
 Thumbs.db
+*.sw?
+.idea/
+.vscode/
 
-# ============= 归档区（历史审查文档与重构产物） =============
+# ============= 运行时残留 =============
+# 临时/草稿产物
+_rd_*.md
+backup-*.db
+tmp/
+artifacts/
+
+# ============= 会话与本地状态 =============
+.claude/
+
+# ============= 会话与本地状态 =============
+.claude/
+docs/
+
+# ============= 项目核心记忆库（本地专有，不入库） =============
+# CLAUDE.md 是项目核心记忆库（全局指令要求维护），主人决定它本地专有、不参与
+# 版本管理——避免每次大规模重构的提交噪音、也避免记忆库内容随仓库外流。若将来
+# 要恢复入库：先删掉下面这一行，然后 git add CLAUDE.md。
+CLAUDE.md
+
+# ============= 归档区（历史审查文档） =============
 # 4-38 轮全模块审查文档已归档到 archive/review-rounds/、早期计划与规格归档到
 # archive/superpowers/（git mv 保留历史、参与版本管理）。archive/ 下其余内容一律
 # 忽略（重构临时草稿等）；新增归档物放 archive/<分类>/ 即自动被跟踪。
 archive/*
 !archive/review-rounds/
 !archive/superpowers/
-
-# 重构过程临时草稿（组装 CLAUDE.md 的中间产物，完工即删）
-_rd_*.md

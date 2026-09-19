@@ -459,7 +459,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   </span>
                 </div>                <div className="py-2.5 flex items-center justify-between">
                   <span className="text-neutral-400">频控保护策略</span>
-                  <span className="text-white">单次熔断冷却</span>
+                  <span className="text-white">分级退避 · 自动恢复</span>
                 </div>
               </div>
 

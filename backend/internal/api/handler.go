@@ -905,7 +905,11 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		targetsCount += len(ts)
 	}
 	if targetErr != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, 1, nil, "统计目标数失败: "+targetErr.Error())
+		// F50-M1：HTTP-500 家族 body code 统一 500——F48-O3 落库失败分支（810 行）
+		// 已用 body=500 表示"服务端持久化层错误"，此处 stats 目标数失败同属该族，
+		// body=1 会被按 body code 归类的脚本误判为业务失败。前端契约只读 body code!=0，
+		// 行为不变；HTTP 500 + body 500 双通道对齐。
+		writeJSONStatus(w, http.StatusInternalServerError, 500, nil, "统计目标数失败: "+targetErr.Error())
 		return
 	}
 	// window_opened 与调度器实际探测状态保持一致（学生端 /state 同源），

@@ -45,7 +45,7 @@ export default function Login({ onLogin }: Props) {
         method: "POST",
         body: JSON.stringify({ account: account.trim(), password }),
       })
-      // 管理员登录响应带 adminName；普通登录没有 → 传入可选的额外参数
+      // 管理员登录响应带 adminName；普通学生（含撞名学生）登录没有 → 传入可选的额外参数
       onLogin(data.token, data.account, data.adminName)
     } catch (e: any) {
       if (e.code === 1001) {

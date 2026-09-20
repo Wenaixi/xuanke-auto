@@ -77,6 +77,12 @@ export async function api<T>(
       // F10-05：session 恒为 401 的真实主体，account 只作展示线索——
       // 管理员代看学生大厅时 URL account 是学生名，与失效的管理员令牌无映射；
       // 此前 account 优先导致 App 反查落空、管理员卡死在代理页。
+      // N-1（R45）：HTTP 401 已在 r.json() 前广播（F41-N2，防网关非 JSON 体），
+      // writeJSONStatus 家族（requireAuth）返回「HTTP 401 + body 401」时若此分支再广播
+      // 一次即同一响应双发 UNAUTHORIZED_EVENT（App.onUnauthorized 幂等无害，但批量
+      // 吊销时事件风暴翻倍）——r.status===401 前置已广播，此处跳过 body 层重复广播；
+      // 旧式「HTTP 200 + body 401」形态仍由本分支覆盖，三种形态各单次广播。
+      if (r.status !== 401) {
       let account = ""
       if (path.includes("account=")) {
         const match = path.match(/[?&]account=([^&]+)/)
@@ -85,6 +91,7 @@ export async function api<T>(
       window.dispatchEvent(
         new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
       )
+      }
       throw new ApiError(j.code, j.msg || "会话已失效", j.data)
     }
     if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败", j.data)

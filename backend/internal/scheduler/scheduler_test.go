@@ -3374,3 +3374,39 @@ func TestSubmitAllowedWhenWindowOpenedWithZeroOpenTime(t *testing.T) {
 		t.Fatal("WindowOpened=true 且识别槽空时 tick 必须放行提交（黄金期 250ms 冲刺），实际 0 次 SelectClass")
 	}
 }
+
+// TestMaybeReloginDeletedAccountSkipsMaps 探测定时路径（ProbeForAccount/ProbeNow/probe 三处
+// ErrUnauthorized 直调 maybeRelogin）在账号已被删除（PurgeAccount 清空全部内存态、ClientFor
+// 不再存在）时必须静默放弃——入口此前只查 relogging/reloginFail/reloginAt 三组 map，
+// 没有 ClientFor 存在性复核：删号与在飞探测返回 ErrUnauthorized 同帧时，会把
+// tokenValid=true / reloginFail++ / reloginAt / relogging=true 重新写进已删账号的 map key
+// （PurgeAccount 已清），同名重建后新账号 tokenValid 残留 true（前端"已失效"）+ spawnChain
+// 整链挂起 + 首登无辜退避 30s。B21-03 只护重登 goroutine 写回侧，决策侧裸露。
+// 修复前（入口直接写 map）：红——四 map 均残留 key。
+// 修复后（入口先 ClientFor 复核）：绿——四 map 均无 key。
+func TestMaybeReloginDeletedAccountSkipsMaps(t *testing.T) {
+	fc := newFakeClient(false)
+	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
+	s := New(fa, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
+	acct := "acct1"
+	// 模拟完整删号时序：PurgeAccount 清空内存态 + removed 让 ClientFor 返回不存在
+	s.PurgeAccount(acct)
+	fa.mu.Lock()
+	fa.removed[acct] = true
+	fa.mu.Unlock()
+
+	// 探测定时路径命中 ErrUnauthorized 时对已删账号直调 maybeRelogin
+	s.maybeRelogin(acct)
+
+	// 契约：已删账号绝不写任何 relogin 族 map（tokenValid/reloginFail/reloginAt/relogging）
+	s.mu.Lock()
+	_, tv := s.tokenValid[acct]
+	_, rf := s.reloginFail[acct]
+	_, ra := s.reloginAt[acct]
+	_, rg := s.relogging[acct]
+	s.mu.Unlock()
+	if tv || rf || ra || rg {
+		t.Fatalf("已删账号不得写回任何 relogin 族 map（tokenValid=%v reloginFail=%v reloginAt=%v relogging=%v）",
+			tv, rf, ra, rg)
+	}
+}

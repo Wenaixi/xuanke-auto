@@ -1188,6 +1188,16 @@ func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
 	s.mu.Lock()
+	// B43-01：入口先做账号存在性复核——B21-03 只护重登 goroutine 的"写回侧"，
+	// 决策侧裸露：探测定时三处（ProbeForAccount/ProbeNow/probe）对 ErrUnauthorized 直调本入口，
+	// 若删号与在飞探测返回 ErrUnauthorized 同帧（窗口约 15s），下方会重新把
+	// tokenValid/reloginFail/reloginAt/relogging 写进已删账号的 map key（PurgeAccount 已清）——
+	// 同名重建后新账号 tokenValid 残留 true（前端"已失效"）+ spawnChain 整链挂起 + 首登无辜退避 30s。
+	// 账号已删不发起重登、不写任何 map；与 spawnChain 失效分支 B42-02 的先身份复核同族防线。
+	if _, ok := s.clients.ClientFor(acct); !ok {
+		s.mu.Unlock()
+		return
+	}
 	if s.relogging[acct] {
 		s.mu.Unlock()
 		return // 已有重登 goroutine 在跑，绝不再开第二条

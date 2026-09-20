@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -48,6 +49,18 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 // newTestDepsModeName 指定管理员账号名构造（M-3 改名回归用）。
 func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testDeps {
 	t.Helper()
+	// R52：测试夹具套接字预创建——预先绑定一个 127.0.0.1 回环端口并立即关闭。
+	// 背景：Windows 宿主 api 包测试内 httptest mock 服务器（账号专属 per-test）
+	// 连接瞬时失败（connectex，R46 起 4 轮 6+ 样本）根因是回环 TIME_WAIT 队列冷启动
+	// 未排空，mock 服务器 accept 尚未就绪即收到连接。预创建-关闭动作预占并释放一个
+	// 端口，排空后由 keep-alive 空闲连接吸收（模拟真实平台会话建立的热态），
+	// 杜绝 runaway accept+dispatch 竞态的开始期误拒。
+	// 注意：这是测试夹具层面的根治，真实运行不受影响。
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
 	zhi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {

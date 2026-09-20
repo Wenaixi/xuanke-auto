@@ -52,7 +52,10 @@ jobs:
       - name: Run Backend Unit Tests
         run: |
           cd backend
-          go test -v ./...
+          # -p 2 限制并行包数：Windows 宿主下 api/zhidao 两个登录链路测试包偶发
+          # httptest 连接 flake（connectex：并行 10 包 + 每包多 httptest server 的
+          # 端口/连接队列争抢），-p 2 大幅降并发压力（R46 MAJOR-46-01）。
+          go test -p 2 -v ./...
 
       - name: Verify Backend Single-Binary Compilation
         run: |

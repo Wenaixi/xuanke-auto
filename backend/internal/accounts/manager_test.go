@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -233,5 +234,36 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	cc2, _ := c2.(*zhidao.Client)
 	if r := cc2.CurrentRecognizer(); r == nil {
 		t.Fatal("SetVision 不得清掉模板引擎（B29-01：新客户端必须继续拿到 ddddocr）")
+	}
+}
+
+// TestLoginByPasswordEncryptFailLogs B44-01 回归钉：加密函数失败时登录必须仍成功返回
+// token（加密失败不阻断登录本身），且凭据绝不落库（fakeStore.saved 保持 false）——
+// 自动重登将无保存账密，日志是唯一审计线索（决策锚 17 零吞错对称）。
+// 修复前（无 else log）：退化为静默吞错，无测试覆盖。
+func TestLoginByPasswordEncryptFailLogs(t *testing.T) {
+	srv, calls := gateSrv(t)
+	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+
+	m.gateMu.Lock()
+	m.gateWindow = time.Now().Add(-2 * time.Minute)
+	m.gateUsed = 0
+	m.gateMu.Unlock()
+
+	tok, err := m.LoginByPassword("acct1", "pwd", func(s string) (string, error) {
+		return "", fmt.Errorf("encrypt boom")
+	})
+	if err != nil {
+		t.Fatalf("加密失败不应阻断登录成功: %v", err)
+	}
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Fatalf("应恰好触达 1 次 doLogin，实际 %d", n)
+	}
+	st := m.st.(*fakeStore)
+	if st.saved {
+		t.Fatal("加密失败时凭据不得落库")
+	}
+	if tok == "" {
+		t.Fatal("登录应返回有效 token")
 	}
 }

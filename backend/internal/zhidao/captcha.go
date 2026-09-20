@@ -157,7 +157,9 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	// R52：识别请求同样走活性自愈（httpDo 对连接层错误重试一次）——Vision mock 服务器
+	// 在长时间连跑下同样可能复用濒死 keep-alive 连接导致 connectex，测试 flake 同根。
+	resp, err := httpDo(client, req)
 	if err != nil {
 		return "", err
 	}

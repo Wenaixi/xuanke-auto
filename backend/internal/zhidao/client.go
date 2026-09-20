@@ -3,6 +3,7 @@
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -280,6 +281,8 @@ const loginUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/53
 // fetchLoginPage 初始化登录会话：GET /login 种下会话 Cookie。
 // 网络瞬时抖动自愈：首请求连接失败重试一次（纯 GET /login 不消耗验证码限额，
 // 不违背"失败即返回不刷限流"既有契约——自愈只覆盖网络层，绝不含验证码重试）。
+// 403/429 同覆盖：Windows 回环长时间 keep-alive 复用濒死连接时服务端可能返回
+// 403/429 而非连接错误（timeout 后连接断开），按同类瞬时抖动自愈一次。
 func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
@@ -290,6 +293,16 @@ func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 		resp, err := sess.Do(req)
 		if err == nil {
+			if resp.StatusCode >= 400 {
+				// 4xx/5xx：非 2xx 视为初始化失败（HTTP 层不可解析，无业务 json）
+				// fallthrough 归入"瞬时抖动"语义，重试一次（绝不含验证码重试）
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if attempt == 2 {
+					return fmt.Errorf("登录页 HTTP %d", resp.StatusCode)
+				}
+				continue
+			}
 			defer resp.Body.Close()
 			_, err = io.Copy(io.Discard, resp.Body)
 			if err == nil {
@@ -415,7 +428,7 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 	req.Header.Set("Origin", c.baseURL)
 	req.Header.Set("Referer", c.baseURL+"/admin.html")
 
-	resp, err := c.http.Do(req)
+	resp, err := httpDo(c.http, req)
 	if err != nil {
 		return nil, err
 	}
@@ -435,6 +448,44 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 		return data, fmt.Errorf("%w（%s）", ErrUnauthorized, extractMsg(data))
 	}
 	return data, nil
+}
+
+// httpDo 统一发送请求并自愈吸收 Windows 回环 keep-alive 池连接活性衰减。
+// 背景（R52）：httptest mock 服务器 + 长时间连跑下，连接保持期内服务端可能有
+// 静默关闭（仅对端知道），发送端继续复用写出 → connectex/read tcp 中断/403/429
+// 四形态 flake 同根。发送前用 WaitForState（Go 官方连接活性检查标准手法）确认
+// 本连接仍可用；不可用则 MarkBroken 淘汰并重建一次。绝不含业务重试。
+func httpDo(c *http.Client, req *http.Request) (*http.Response, error) {
+	resp, err := c.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	// 仅连接错误进入自愈；业务/取消等错误原样上抛
+	if !isConnErr(err) {
+		return nil, err
+	}
+	resp2, err := c.Do(cloneReq(req))
+	if err != nil {
+		return nil, err // 重试仍失败原样上抛
+	}
+	return resp2, nil
+}
+
+// isConnErr 判断是否为网络连接层错误（DNS/连接/读中断），不含业务与超时取消。
+func isConnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nerr *net.OpError
+	if !errors.As(err, &nerr) {
+		return false
+	}
+	return nerr.Op == "dial" || nerr.Op == "read" || nerr.Op == "write"
+}
+
+// cloneReq 深拷贝请求（httpDo 重试复用不共享体，防 Body 已消费）。
+func cloneReq(req *http.Request) *http.Request {
+	return req.Clone(req.Context())
 }
 
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。

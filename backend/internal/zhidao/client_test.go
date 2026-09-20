@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,10 +14,24 @@ import (
 	"testing"
 )
 
+// socketPreheat 测试夹具端口预加热：预创建并关闭一个 127.0.0.1 回环套接字，
+// 排空 Windows 宿主回环 TIME_WAIT 队列冷启动期（httptest mock 服务器 accept 尚未
+// 就绪即收到连接 → connectex 连接拒绝，R46 起多轮 flake 同根）。
+// 与 api 包 newTestDepsModeName 的套接字预创建同款根治；本包装内各测试独立
+// 建 httptest server，全量串行下首个 server 仍有冷启动窗口，故每个用 server 的
+// 测试入口都调用一次。
+func socketPreheat() {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		l.Close()
+	}
+}
+
 // loginMockServer 构造登录链路 mock。
 // failRecognize: 前 N 次识别返回空串（识别失败）；failSubmit: 前 M 次提交被拒。
 func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Server, *int32, *int32) {
 	t.Helper()
+	socketPreheat()
 	var captchas int32
 	var submits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

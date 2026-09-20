@@ -14,6 +14,7 @@ func init() {
 }
 
 func TestRecognizeCaptcha(t *testing.T) {
+	socketPreheat() // R52：端口预加热，防冷启动 connectex（同 client_test）
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("Authorization header 缺失或错误: %q", r.Header.Get("Authorization"))
@@ -43,6 +44,7 @@ func TestRecognizeCaptchaNoKey(t *testing.T) {
 // 但同一时刻实际进入识别核心的至多 2 个（并发上限）。
 func TestCaptchaConcurrency(t *testing.T) {
 	NewCaptchaSemaphore(2) // 上限 2
+	socketPreheat()        // R52：端口预加热（同 client_test）
 
 	var mu sync.Mutex
 	inFlight := 0

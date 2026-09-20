@@ -3548,3 +3548,18 @@ func TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight(t *testing.T) {
 		t.Fatal("同名重建后陈旧旧链成功身份复核失败必须清 inflight 位，实际残留（手动报名被永久阻塞）")
 	}
 }
+
+// TestScheduleIntervalClamped F46-O1：interval 非正数兜底——NewTicker(0) 直接 panic
+// 会让 Start() 协程整崩且无 recover（与 tick 无 recover 同族防御缺口）；New 内
+// clamp 到 300ms 后 Start 正常运转。修复前（无 clamp）：红——NewTicker(0) panic。
+// 修复后（clamp）：绿——Start 可正常起停。
+func TestScheduleIntervalClamped(t *testing.T) {
+	accts := &fakeAccts{c: newFakeClient(true)}
+	s := New(accts, &fakeStore{}, time.Time{}, 0)
+	s.Start()
+	t.Cleanup(s.Stop) // Stop 内部 close(stopCh)+WaitGroup.Wait——若 panic 则此处 t.Fatal/panic 暴露
+	// 只要 Start 未 panic、随后能正常 Stop，即证明 interval 已被 clamp 到合法正值
+	if got := s.interval; got <= 0 {
+		t.Fatalf("interval 应被 clamp 到正数，实际 %v", got)
+	}
+}

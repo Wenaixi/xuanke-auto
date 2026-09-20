@@ -230,6 +230,13 @@ func clientIdentity(c Client) uintptr {
 
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
 func New(clients AccountClients, store Store, openTime time.Time, interval time.Duration) *Scheduler {
+	// F46-O1：interval 非正数兜底——time.NewTicker(非正) 直接 panic（实测 NewTicker(0)
+	// 抛 non-positive interval），生产 main 恒传 300ms、测试全部传正，此处防御未来
+	// 配置化/时间操控传入 0|负值导致 Start() 协程整崩且无 recover 兜底（与 tick 无
+	// recover 同族防御缺口）。
+	if interval <= 0 {
+		interval = 300 * time.Millisecond
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
 		clients:     clients,

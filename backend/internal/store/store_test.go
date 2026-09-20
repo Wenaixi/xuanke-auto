@@ -27,9 +27,29 @@ func TestLoadLogsWindowKeepsRecent(t *testing.T) {
 	t.Cleanup(func() { d.Close() })
 	s := New(d)
 
-	// 插入 30050 行（窗口 20000 之外的旧行 + 窗口内的新行）
-	for i := 0; i < 30050; i++ {
-		if err := s.AppendLog("acct1", 61115, "select", "批量填充", true); err != nil {
+	// 插入 30050 行（窗口 20000 之外的旧行 + 窗口内的新行）。
+	// 事务批插（每 1000 行一批）：逐条 INSERT 会让每次提交都触发 WAL 同步落盘
+	// （实测 30050 行 ~225s，击穿 go test 默认 10m 超时）；批事务实测 ~0.5s，
+	// 测试只关心"窗口裁剪最近 20000 条"的语义，不关心逐行提交路径。
+	batchSize := 1000
+	for start := 0; start < 30050; start += batchSize {
+		tx, err := d.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := start + batchSize
+		if end > 30050 {
+			end = 30050
+		}
+		for i := start; i < end; i++ {
+			if _, err := tx.Exec(
+				"INSERT INTO task_log (account, class_id, action, result, is_ok) VALUES (?, ?, ?, ?, ?)",
+				"acct1", 61115, "select", "批量填充", 1); err != nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
 	}

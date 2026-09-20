@@ -176,31 +176,38 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 }
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求（期望非连接错误响应），
-// 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败重试一次（自愈吸收残余
-// 抖动的完整语义），仍失败原样上抛由调用方 Fatal。探测请求恰好也排空首个连接的
-// TIME_WAIT 队列，之后测试请求全部落在已就绪 server 上。
+// 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms 间隔 × 5 次，
+// 总窗口 ~1s，实测覆盖冷启动 TIME_WAIT 队列排空——R53 的单次重试在更宽窗口下仍
+// connectex，api 隔离 2/5 轮 FAIL 实证），全部失败才上抛由调用方 Fatal。
+// 探测请求恰好也排空首个连接的 TIME_WAIT 队列，之后测试请求全部落在已就绪 server 上。
 func readyProbe(baseURL string) error {
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/ready", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		req2, err2 := http.NewRequest(http.MethodGet, baseURL+"/ready", nil)
-		if err2 != nil {
-			return err2
-		}
-		var resp2 *http.Response
-		resp2, err = http.DefaultClient.Do(req2)
-		if err == nil {
-			resp = resp2
-		} else {
+	// 轮询重试：连接层失败后短暂休眠重试，把探测成功前的冷启动窗口彻底前移
+	const (
+		probeRetries = 5
+		probeDelay   = 200 * time.Millisecond
+	)
+	var lastErr error
+	for i := 0; i <= probeRetries; i++ {
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/ready", nil)
+		if err != nil {
 			return err
 		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			_, err = io.Copy(io.Discard, resp.Body)
+			if err == nil {
+				return nil
+			}
+			lastErr = err
+		} else {
+			lastErr = err
+		}
+		if i < probeRetries {
+			time.Sleep(probeDelay)
+		}
 	}
-	defer resp.Body.Close()
-	_, err = io.Copy(io.Discard, resp.Body)
-	return err
+	return lastErr
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path, body string) (int, map[string]any) {

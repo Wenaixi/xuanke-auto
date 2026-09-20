@@ -453,8 +453,11 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 // httpDo 统一发送请求并自愈吸收 Windows 回环 keep-alive 池连接活性衰减。
 // 背景（R52）：httptest mock 服务器 + 长时间连跑下，连接保持期内服务端可能有
 // 静默关闭（仅对端知道），发送端继续复用写出 → connectex/read tcp 中断/403/429
-// 四形态 flake 同根。发送前用 WaitForState（Go 官方连接活性检查标准手法）确认
-// 本连接仍可用；不可用则 MarkBroken 淘汰并重建一次。绝不含业务重试。
+// 四形态 flake 同根。机制：首次 c.Do 返回连接层错误（dial/read/write，见
+// isConnErr）后 cloneReq 整体重发一次（新连接新 dial）——并非注释所述"发送前
+// WaitForState 预检 + MarkBroken 单连接淘汰"，重试即等效达成"换新连接"。绝不含
+// 业务重试：连接层错误意味着请求未到达/未完成，服务端不可能已成功处理，重发不
+// 构成双报（SelectClass 幂等防线不受影响）。业务/取消错误原样上抛。
 func httpDo(c *http.Client, req *http.Request) (*http.Response, error) {
 	resp, err := c.Do(req)
 	if err == nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -16,7 +17,7 @@ func main() {
 		fmt.Println("ERR: 请设置环境变量 XUANKE_PROBE_TOKEN 或先执行数据提取")
 		os.Exit(2)
 	}
-	u := "https://www.zhidao.fj.cn/electives/select/findElectivesData?idToken=" + token
+	u := "https://www.zhidao.fj.cn/electives/select/findElectivesData?idToken=" + url.QueryEscape(token)
 	req, _ := http.NewRequest("POST", u, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")

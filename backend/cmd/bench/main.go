@@ -19,6 +19,11 @@ func main() {
 	url := flag.String("url", "http://localhost:3091/api/state", "目标接口")
 	flag.Parse()
 
+	// MINOR-53-02：参数边界防御——-n ≤0 时回退默认（杜绝 0 次平均除零 / 负时长乱象）
+	if *times <= 0 {
+		*times = 200
+	}
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	var total time.Duration
 	var max time.Duration

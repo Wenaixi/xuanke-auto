@@ -76,6 +76,10 @@ func main() {
 	zhidao.NewCaptchaSemaphore(1) // 识别并发限流 1（与主程序默认一致）
 
 	var passed, failed int
+	// MINOR-53-02：参数边界防御——-limit ≤0 或超账号数时收敛到真实账号数（杜绝 slice 越界 panic）
+	if *limit <= 0 || *limit > len(creds) {
+		*limit = len(creds)
+	}
 	for i, cd := range creds {
 		if i >= *limit {
 			break

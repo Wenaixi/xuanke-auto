@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -55,12 +56,20 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	// 未排空，mock 服务器 accept 尚未就绪即收到连接。预创建-关闭动作预占并释放一个
 	// 端口，排空后由 keep-alive 空闲连接吸收（模拟真实平台会话建立的热态），
 	// 杜绝 runaway accept+dispatch 竞态的开始期误拒。
+	// MAJOR-53-01 收尾（R53）：预创建只解决"连接池里有濒死连接"，解决不了
+	// "每个测试新建 mock server 自身 accept 就绪前的最首请求"——httptest.NewServer
+	// 返回后 server 在独立 goroutine accept，Windows 回环冷启动窗口仍可让首个测试
+	// 请求 connectex（api 12 轮 1 FAIL 实证）。构造完 zhi 后主动发一条健康探测
+	// 请求把冷启动窗口前移到夹具构造期，之后测试请求全落在已就绪 server 上。
 	// 注意：这是测试夹具层面的根治，真实运行不受影响。
+	// socket 预放仍保留：探测后首个测试请求仍可能复用"探测刚建立的连接"前的
+	// TIME_WAIT 队列残余，双保险。
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	listener.Close()
+
 	zhi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -123,6 +132,14 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	}))
 	t.Cleanup(zhi.Close)
 
+	// MAJOR-53-01 收尾：mock 服务器就绪探测——httptest.NewServer 返回后 server 已在
+	// 独立 goroutine accept，但 Windows 回环冷启动窗口（TIME_WAIT 队列未排空）仍可让
+	// 首个测试请求 connectex（api 12 轮 1 FAIL 实证）。向 mock 发一条健康探测请求
+	// 把冷启动窗口前移到夹具构造期，之后测试请求全落在已就绪 server 上。
+	if err := readyProbe(zhi.URL); err != nil {
+		t.Fatalf("mock 服务器就绪探测失败: %v", err)
+	}
+
 	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +173,34 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	apiHandler := Register(mux, st, sched, accts, sessions, testAdminToken, adminName,
 		rt.Get().ActivationEnabled, enc, dec, rt)
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
+}
+
+// readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求（期望非连接错误响应），
+// 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败重试一次（自愈吸收残余
+// 抖动的完整语义），仍失败原样上抛由调用方 Fatal。探测请求恰好也排空首个连接的
+// TIME_WAIT 队列，之后测试请求全部落在已就绪 server 上。
+func readyProbe(baseURL string) error {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/ready", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		req2, err2 := http.NewRequest(http.MethodGet, baseURL+"/ready", nil)
+		if err2 != nil {
+			return err2
+		}
+		var resp2 *http.Response
+		resp2, err = http.DefaultClient.Do(req2)
+		if err == nil {
+			resp = resp2
+		} else {
+			return err
+		}
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(io.Discard, resp.Body)
+	return err
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path, body string) (int, map[string]any) {

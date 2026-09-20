@@ -491,14 +491,32 @@ func isConnErrRetryable(err error) bool {
 	return nerr.Op == "dial" || nerr.Op == "write"
 }
 
-// IsReadErr 判断是否为 read 类连接错误（服务端已完整消费请求体但响应读取中断）。
-// 语义：请求已发出且平台可能已处理（报名成功但未响应），上抛方应给"可能已处理"
-// 的提示而非"失败"——scheduler 记日志/状态时区分文案（R59 MINOR-59-02）。
+// IsReadErr 判断是否为"请求已发出、响应读取中断"类错误——语义：服务端已完整
+// 消费请求体、可能已处理（报名成功但未响应），上抛方应给"可能已处理"的提示而非
+// "失败"——scheduler/api 记日志/状态时区分文案（R59 MINOR-59-02 / R60 MINOR-60-01）。
+// 覆盖三种形态（R60 独立程序实证形态矩阵）：
+//   - RST（有未读数据时 SO_LINGER(0) 关闭）：*net.OpError.Op=="read"（errors.As 穿透
+//     url.Error 包装链命中）
+//   - FIN（服务端读完 body 后正常 Close，真实平台"处理完成未响应"的典型形态）：
+//     url.Error{Err: io.EOF}（不带 net.OpError）→ errors.Is(err, io.EOF)
+//   - 超时（平台已处理但响应超过客户端 Timeout）：Client.Timeout exceeded while
+//     awaiting headers → strings.Contains 判定
+//
 // 与 isConnErrRetryable 对称（互斥：retryable 只含 dial/write，read 恒 false）。
 func IsReadErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// FIN 形态：对端完成处理但正常关闭连接，客户端读到 io.EOF（最强"已处理"信号）
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	// 超时形态：平台可能已处理但响应慢于客户端超时（awaiting headers 是请求头已发送、
+	// 等待响应头超时——请求体已到达服务端）
+	if strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") {
+		return true
+	}
+	// RST 形态：连接重置（*net.OpError.Op=="read"，穿透 url.Error 包装链）
 	var nerr *net.OpError
 	if !errors.As(err, &nerr) {
 		return false

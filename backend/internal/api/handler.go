@@ -350,11 +350,16 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
 			return
 		}
+		// R60 MINOR-60-03：read 类错误（请求已发出、平台可能已处理）手动路径同样区分
+		// 文案——与 scheduler 自动链同款（R59 MINOR-59-02），避免"read tcp ..."生硬
+		// 网络错误误导用户（平台可能已成功处理这次报名）。
+		if zhidao.IsReadErr(err) {
+			writeJSON(w, 1, nil, "报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
+			return
+		}
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}
-
-	// 5. 报名成功：同步调度器 done 状态并持久化
 	_ = d.Sched.MarkDone(acct, req.ClassID, req.CourseName, msg)
 	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
 }
@@ -412,6 +417,11 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, zhidao.ErrUnauthorized) {
 			d.Sched.MaybeRelogin(acct)
 			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
+			return
+		}
+		// R60 MINOR-60-03：退选路径与报名路径对称区分 read 文案
+		if zhidao.IsReadErr(err) {
+			writeJSON(w, 1, nil, "退选请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
 			return
 		}
 		writeJSON(w, 1, nil, err.Error())

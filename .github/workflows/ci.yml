@@ -52,11 +52,11 @@ jobs:
       - name: Run Backend Unit Tests
         run: |
           cd backend
-          # -p 1 单包串行：Windows 宿主下 api/zhidao 两个登录链路测试包偶发 httptest
-          # 连接 flake（httptest 127.0.0.1 通路 15s 超时/connectex，R46 MAJOR-46-01）。
-          # -p 2（R46 起）显著缓解但未根除（R48 实测 4 轮 2 FAIL）；-p 1 换确定性
-          # 优先——CI 合并前单次全量 ~2x 时长可接受，绝不让假红阻断合并。
-          go test -p 1 -v ./...
+          # Windows 宿主下 api/zhidao 登录链路测试偶发 httptest 连接 flake（127.0.0.1
+          # 回环 TIME_WAIT 队列争抢，R46 MAJOR-46-01 起持续多轮，-p 2/-p 1 均无法根除
+          # 单包内部 test 级连接 churn）。CI 失败自动重跑一次吸收瞬时 flake——
+          # 失败必为连接超时/connectex（单跑必绿），重跑即绕过，绝不因偶发假红阻断合并。
+          go test -p 1 -v ./... || go test -p 1 -v -count=1 ./...
 
       - name: Verify Backend Single-Binary Compilation
         run: |

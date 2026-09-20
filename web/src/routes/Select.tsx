@@ -496,7 +496,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 置脏跳过、不 PUT，脏块保留（dirtyRef=true），下次进入/刷新/回显完成后再落库
     // （安全方向：绝不静默丢改动）。判据为纯数据（shouldDeferSave 不依赖 echoedRef）：
     // /state 数据到达触发防抖 effect 重跑自愈，唯一解锁不求刷新。
-    if (shouldDeferSave(stateDataRef.current)) {
+    if (shouldDeferSave(stateDataRef.current, latestSelectedCount > 0)) {
       dirtyRef.current = true
       return
     }
@@ -568,6 +568,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // （publishes 恒空）不在此列——那是 F15/F16/F17 链的刻意安全方向，等无可等，绝不
   // 强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
   const handleBack = async () => {
+    // 消费时刻读 selectedRef 算"当前是否留有选中"（handleBack 无渲染闭包可直接用）：
+    // shouldDeferSave 第二参数——首帧携带旧目标但用户已全清空（hasSelected=false）时
+    // 放行立即保存，绝不等 5s 又当"待回显"打回（见 handleBack 下方注释的守卫语义）。
+    const hasSelectedNow = () =>
+      Object.values(selectedRef.current).reduce((n, arr) => n + arr.length, 0) > 0
     // 回显合并先行：/state 首帧晚于用户首次点击到达时（stateData 仍为 undefined），
     // 后端旧目标尚未经回显 effect 合并进 selected——此刻直接 flush 会用当前 selected
     // （只含用户新改动）整包 PUT 覆盖删掉后端旧目标（"添加一门"变"替换全部"）。
@@ -581,13 +586,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 发布缺席的覆盖（安全方向）。注意 5s 等待只在"首帧未到"（stateData===undefined）
     // 或首帧确实携带旧目标（courses 非空）时才会发生——courses 为空（窗口已关/无目标）
     // 时回显 effect 已置位 echoedRef、条件不成立，点击返回立即放行。
-    if (revRef.current > 0 && shouldDeferSave(stateDataRef.current)) {
+    if (revRef.current > 0 && shouldDeferSave(stateDataRef.current, hasSelectedNow())) {
       const deadline = Date.now() + 5000
       // 轮询间隔 50ms：回显合并是 React 状态更新+渲染（一帧约 16ms），50ms 足够感知
       // 完成且不抢调度；10ms 会让 5s 窗口内连开约 500 个定时器空转主线程。
       // 数据判据：/state 到达且 courses 空即视为回显完成（courses 空=确证后端无旧目标，
       // 回显 effect 空分支已置 echoedRef）。首帧持续失败时等满 5s 兜底继续（安全方向）。
-      while (shouldDeferSave(stateDataRef.current) && Date.now() < deadline) {
+      while (shouldDeferSave(stateDataRef.current, hasSelectedNow()) && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50))
       }
       // 等合并 effect 的 setSelected 渲染提交落地，selectedRef 同步到含旧目标的合并结果
@@ -668,7 +673,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 守卫命中置脏后 selected 无变化（setSelected 返回同引用被 React bailout）→
       // 订阅永不重入、保存链死锁至整页刷新；改由 stateData 驱动后，/state 数据到达
       // 触发 effect 重跑 → 新 timer → 守卫通过 → 落库自愈。
-      if (shouldDeferSave(stateDataRef.current)) {
+      if (shouldDeferSave(stateDataRef.current, selectedCount > 0)) {
         dirtyRef.current = true
         return
       }

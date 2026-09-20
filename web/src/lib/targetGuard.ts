@@ -50,8 +50,13 @@ export function cleanStaleSelected<T>(
 // 时重跑，守卫若依赖"由 /state 首帧置位的 echoedRef"，/state 持续失败期间守卫命中
 // 置脏后 selected 无变化 → React bailout → 防抖订阅永不重入，保存链死锁至整页刷新；
 // 守卫改由 stateData 本身驱动后，/state 数据到达触发 effect 重跑即自愈解锁。
-export function shouldDeferSave(stateData: SchedulerState | undefined): boolean {
-  return (
-    stateData === undefined || (stateData.courses?.length ?? 0) > 0
-  )
+// 第二参数 hasSelected（当前是否有任何选中课程，布尔）：区分"回显未完成"与"用户显式
+// 全清空"——首帧携带旧目标但用户一个都没选 = 清空意图确凿（回显 effect 的 rev>0 且
+// 无任何条目守卫已承认清空语义绝不合并旧目标），放行 PUT []，绝不把清空当"待回显"
+// 打回置脏（否则清空永不落库，返回后旧目标复活=静默撤销）。
+export function shouldDeferSave(
+  stateData: SchedulerState | undefined,
+  hasSelected: boolean
+): boolean {
+  return stateData === undefined || ((stateData.courses?.length ?? 0) > 0 && hasSelected)
 }

@@ -40,21 +40,30 @@ const deferAssert = (name: string, got: boolean, want: boolean) => {
   if (!ok) failed++
 }
 // 场景 K：/state 首帧未到（undefined）→ 推迟保存（回显尚未发生，不能覆盖后端旧目标）
-deferAssert("首帧未到(undefined) → 推迟", shouldDeferSave(undefined), true)
+deferAssert("首帧未到 + 有选中 → 推迟", shouldDeferSave(undefined, true), true)
+deferAssert("首帧未到 + 全清空 → 推迟", shouldDeferSave(undefined, false), true)
 // 场景 L：/state 已到且 courses 空（确证后端无旧目标）→ 放行保存
-deferAssert("courses 空 → 放行", shouldDeferSave({ courses: [], open_time: "", open_time_known: false, window_opened: false, window_closed: false, token_valid: true } satisfies SchedulerState), false)
+const emptyState: SchedulerState = { courses: [], open_time: "", open_time_known: false, window_opened: false, window_closed: false, token_valid: true }
+deferAssert("courses 空 + 有选中 → 放行", shouldDeferSave(emptyState, true), false)
+deferAssert("courses 空 + 全清空 → 放行", shouldDeferSave(emptyState, false), false)
 // 场景 M：/state 已到且 courses 非空（回显尚未完成，后端有旧目标）→ 推迟保存
+const nonEmptyState: SchedulerState = {
+  courses: [{ publish_id: 9, class_id: 11, course_name: "健美操", priority: 0, status: "pending", result: "" }],
+  open_time: "",
+  open_time_known: false,
+  window_opened: false,
+  window_closed: false,
+  token_valid: true,
+}
 deferAssert(
-  "courses 非空 → 推迟",
-  shouldDeferSave({
-    courses: [{ publish_id: 9, class_id: 11, course_name: "健美操", priority: 0, status: "pending", result: "" }],
-    open_time: "",
-    open_time_known: false,
-    window_opened: false,
-    window_closed: false,
-    token_valid: true,
-  } satisfies SchedulerState),
+  "courses 非空 + 有选中 → 推迟",
+  shouldDeferSave(nonEmptyState, true),
   true
+)
+deferAssert(
+  "courses 非空 + 全清空 → 放行",
+  shouldDeferSave(nonEmptyState, false),
+  false
 )
 
 // 场景 A（缺陷触发）：旧发布 P1 仍有课 + 新发布 P9 新课 → 必须判"有过期条目"置脏，

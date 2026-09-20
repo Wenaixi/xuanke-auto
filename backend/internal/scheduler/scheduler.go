@@ -1642,9 +1642,20 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", err.Error())
+			// R59 MINOR-59-02：read 类错误（服务端已完整消费请求体但响应读取中断）说明
+			// 平台可能已成功处理这次报名（已抢到课但客户端没收到响应）——状态/日志不能
+			// 标"报名失败"误导用户排查（黄金期下个 tick 重复报名被拒"已选过"时 failed 永久
+			// 残留）。区分文案为"请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）"，
+			// 其余非归类错误维持原文。
+			failMsg := err.Error()
+			logMsg := "账号 " + acct + ": " + err.Error()
+			if zhidao.IsReadErr(err) {
+				failMsg = "报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）"
+				logMsg = "账号 " + acct + ": " + failMsg
+			}
+			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", failMsg)
 			if s.store != nil {
-				if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": "+err.Error(), false); err != nil {
+				if err := s.store.AppendLog(acct, t.ClassID, "select", logMsg, false); err != nil {
 					log.Printf("[scheduler] 账号 %s 课程 %d 报名失败日志落库失败: %v", acct, t.ClassID, err)
 				}
 			}

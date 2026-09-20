@@ -1657,6 +1657,10 @@ func TestClientIPTrustedProxy(t *testing.T) {
 // TestApiUnknownPath404 B7-C4：未注册的 /api/xxx 必须 404 JSON，绝不可能回退 SPA
 // index.html（此前落入 main.go "/" SPA 兜底 → 200 text/html：前端 fetch 解析 JSON
 // 报错掩盖真实 404；安全扫描误判任意 /api/ 路径可 200）。已注册的固定路由不受影响。
+// R59 MINOR-59-01：真实 net/http Server 上 404 的 Content-Type 必须在 writeJSONStatus
+// 的"先设头再 WriteHeader"路径下发 application/json——httptest.ResponseRecorder 允许
+// WriteHeader 后设头、恒绿假绿掩盖真实 Server 行为分叉，故除 Recorder 断言外补真实
+// Server 端到端断言（httptest.NewServer + http.Get 真发请求抓 HTTP 层 CT）。
 func TestApiUnknownPath404(t *testing.T) {
 	d := newTestDeps(t)
 	// 未注册的 /api/xxx：404 JSON，而非 200 text/html（精确 method+pattern 未命中 → 落到
@@ -1675,6 +1679,23 @@ func TestApiUnknownPath404(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil || j["code"].(float64) != 404 {
 		t.Fatalf("未知 /api/ 应 JSON code=404，实际 %s", rec.Body.String())
 	}
+	// 真实 Server 端到端断言：Recorder 允许 WriteHeader 后设 Header 是假绿——
+	// 真实 net/http Server 丢弃已提交响应后的 Header 设置（R59 实证 404 错标
+	// text/plain），此断言确保未来改动在真实 HTTP 层不回归。
+	realSrv := httptest.NewServer(d.api)
+	defer realSrv.Close()
+	resp, err := http.Get(realSrv.URL + "/api/not-registered-path")
+	if err != nil {
+		t.Fatalf("真实 Server 请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 404 {
+		t.Fatalf("真实 Server 未知 /api/ 路径应 HTTP 404，实际 %d", resp.StatusCode)
+	}
+	if realCT := resp.Header.Get("Content-Type"); !strings.HasPrefix(realCT, "application/json") {
+		t.Fatalf("真实 Server 404 的 Content-Type 应 application/json，实际 %q", realCT)
+	}
+	io.Copy(io.Discard, resp.Body)
 	// 已注册的固定路由不受影响（health 可达）
 	req2 := httptest.NewRequest("GET", "/api/health", nil)
 	rec2 := httptest.NewRecorder()

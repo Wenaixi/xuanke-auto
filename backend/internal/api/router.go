@@ -192,8 +192,11 @@ func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
 	// 显式注册 "/api/" 前缀后，所有已注册的精确 method+pattern 优先命中，未匹配的 /api/xxx
 	// 一律 HTTP 404 + JSON body，绝不再回退 SPA。
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound) // 业务代码恒 200 约定不适用于"端点不存在"——真实 404 语义才对
-		writeJSON(w, 404, nil, "接口不存在")
+		// B39-02 家族（writeJSONStatus）：真实 HTTP 404 + JSON body——必须先设头再
+		// WriteHeader（writeJSON 在 WriteHeader 后设 CT 会被 net/http 丢弃，真实
+		// Server 上 404 错标 text/plain，httptest.ResponseRecorder 测试路径假绿掩盖，
+		// R59 MINOR-59-01 实证）；与 401/403/429/500 同族对齐。
+		writeJSONStatus(w, http.StatusNotFound, 404, nil, "接口不存在")
 	})
 
 	return recoverMiddleware(securityHeaders(mux))

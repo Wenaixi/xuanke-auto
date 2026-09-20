@@ -491,6 +491,21 @@ func isConnErrRetryable(err error) bool {
 	return nerr.Op == "dial" || nerr.Op == "write"
 }
 
+// IsReadErr 判断是否为 read 类连接错误（服务端已完整消费请求体但响应读取中断）。
+// 语义：请求已发出且平台可能已处理（报名成功但未响应），上抛方应给"可能已处理"
+// 的提示而非"失败"——scheduler 记日志/状态时区分文案（R59 MINOR-59-02）。
+// 与 isConnErrRetryable 对称（互斥：retryable 只含 dial/write，read 恒 false）。
+func IsReadErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nerr *net.OpError
+	if !errors.As(err, &nerr) {
+		return false
+	}
+	return nerr.Op == "read"
+}
+
 // cloneReq 深拷贝请求（httpDo 重试复用不共享体）。
 // httpDo 只对 dial/write 错误重试——该形态下请求体未被消费、重发完整；
 // GetBody 由标准库对 bytes.Reader/strings.Reader 自动设置（request.go:932-945），

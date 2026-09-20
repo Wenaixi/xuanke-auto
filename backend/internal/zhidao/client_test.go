@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-		"log"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -34,9 +34,9 @@ func socketPreheat() {
 // loginMockServer 的裸 httptest.NewServer 入口（TestNoAutoRelogin 等），
 // 是全量轮前序包 TIME_WAIT 残留下所有 mock 首请求 connectex 的兜底
 // （R56 全量 12 轮 R1 zhidao FAIL 根因；socketPreheat 逐测试调用仍保留，
-// 双保险）。log 置 Discard 静默 test 期间任何意外日志。
+// 双保险）。不做 log.SetOutput 静默——TestLoginLogs* 依赖日志捕获断言，
+// 包级静默会与测试缓冲切换产生竞态（R57 MINOR-57-01）。
 func TestMain(m *testing.M) {
-	log.SetOutput(io.Discard)
 	socketPreheat()
 	os.Exit(m.Run())
 }

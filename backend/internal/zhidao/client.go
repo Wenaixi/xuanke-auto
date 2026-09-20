@@ -1,4 +1,4 @@
-﻿package zhidao
+package zhidao
 
 import (
 	"bytes"
@@ -457,18 +457,18 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 // httpDo 统一发送请求并自愈吸收 Windows 回环 keep-alive 池连接活性衰减。
 // 背景（R52）：httptest mock 服务器 + 长时间连跑下，连接保持期内服务端可能有
 // 静默关闭（仅对端知道），发送端继续复用写出 → connectex/read tcp 中断/403/429
-// 四形态 flake 同根。机制：首次 c.Do 返回连接层错误（dial/read/write，见
-// isConnErr）后 cloneReq 整体重发一次（新连接新 dial）——并非注释所述"发送前
-// WaitForState 预检 + MarkBroken 单连接淘汰"，重试即等效达成"换新连接"。绝不含
-// 业务重试：连接层错误意味着请求未到达/未完成，服务端不可能已成功处理，重发不
-// 构成双报（SelectClass 幂等防线不受影响）。业务/取消错误原样上抛。
+// 四形态 flake 同根。机制：首次 c.Do 返回连接层错误后整体重发一次（新连接新
+// dial）——重试即等效达成"换新连接"。**只重试 dial/write 错误**（请求未到达
+// 服务端，重发安全）；read 错误（服务端已完整消费 body、可能已处理）**不重试**
+// ——重发 POST 会双报（SelectClass/ExitClass 幂等防线被凿穿）或空 body 畸形
+// 请求（ContentLength 与 Body 不同步）。业务/取消错误原样上抛。
 func httpDo(c *http.Client, req *http.Request) (*http.Response, error) {
 	resp, err := c.Do(req)
 	if err == nil {
 		return resp, nil
 	}
-	// 仅连接错误进入自愈；业务/取消等错误原样上抛
-	if !isConnErr(err) {
+	// 仅 dial/write 连接错误进入自愈；read 错误（可能已处理）与业务/取消原样上抛
+	if !isConnErrRetryable(err) {
 		return nil, err
 	}
 	resp2, err := c.Do(cloneReq(req))
@@ -478,8 +478,9 @@ func httpDo(c *http.Client, req *http.Request) (*http.Response, error) {
 	return resp2, nil
 }
 
-// isConnErr 判断是否为网络连接层错误（DNS/连接/读中断），不含业务与超时取消。
-func isConnErr(err error) bool {
+// isConnErrRetryable 判断错误是否可安全重试：仅 dial/write（请求未到达），
+// read 错误不重试（服务端已消费 body，可能已成功处理，重发 POST 双报）。
+func isConnErrRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -487,28 +488,18 @@ func isConnErr(err error) bool {
 	if !errors.As(err, &nerr) {
 		return false
 	}
-	return nerr.Op == "dial" || nerr.Op == "read" || nerr.Op == "write"
+	return nerr.Op == "dial" || nerr.Op == "write"
 }
 
 // cloneReq 深拷贝请求（httpDo 重试复用不共享体，防 Body 已消费）。
-// read 类连接错误重试时首个 RoundTrip 已把 body 完整读出（服务端已消费）——
-// req.Clone 只浅拷贝 Body（同一读取器，已读空），GetBody 未设时重试请求体
-// 为空（独立程序实证 RoundTrip#1 body=classId=61115 → #2 body=""）。这里
-// 为 POST 表单体补 GetBody 重生成（bytes.NewReader 还原），重试请求带完整
-// body；Request.GetBody 本身已设置时原样保留（deepcopy 语义）。
+// 透明：http.NewRequest 对 bytes.Reader/strings.Reader 已自动设 GetBody
+// （std request.go:932-945），cloneReq 浅拷贝 Body + 原样保留 GetBody——
+// 重试请求的 Body 由首个 RoundTrip 消费后为空、ContentLength 未同步
+// （真实路径实测 "ContentLength=13 with Body length 0"）。read 类错误
+// （服务端已消费 body，可能已处理）httpDo 不再重试（见 httpDo 注释）；
+// dial/write 错误下 Body 未被消费、重发完整。
 func cloneReq(req *http.Request) *http.Request {
-	cl := req.Clone(req.Context())
-	if req.Body != nil && req.GetBody == nil {
-		if body, err := io.ReadAll(req.Body); err == nil {
-			req.Body.Close()
-			req.Body = io.NopCloser(bytes.NewReader(body))
-			cl.Body = io.NopCloser(bytes.NewReader(body))
-			cl.GetBody = func() (io.ReadCloser, error) {
-				return io.NopCloser(bytes.NewReader(body)), nil
-			}
-		}
-	}
-	return cl
+	return req.Clone(req.Context())
 }
 
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。
@@ -546,8 +537,8 @@ func (c *Client) YearTerms() ([]YearTerm, error) {
 		return nil, err
 	}
 	var j struct {
-		Code              int        `json:"code"`
-		Msg               string     `json:"msg"`
+		Code                int        `json:"code"`
+		Msg                 string     `json:"msg"`
 		CurrentYearTermList []YearTerm `json:"currentYearTermList"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
@@ -640,18 +631,18 @@ func (c *Client) FindElectives() (*ElectivesData, error) {
 // parseElectives 解析 findElectivesData 原始响应。
 func parseElectives(body []byte) (*ElectivesData, error) {
 	var raw struct {
-		Code                int    `json:"code"`
-		Msg                 string `json:"msg"`
+		Code                int     `json:"code"`
+		Msg                 string  `json:"msg"`
 		BeginTimes          []int64 `json:"beginTimes"`
 		SelectElectivesData []struct {
-			PublishID   int    `json:"publishId"`
-			PublishName string `json:"publishName"`
-			BeginDate   string `json:"beginDate"`
-			InDateRange bool   `json:"inDateRange"`
-			CanSelect   int    `json:"canSelect"`
-			HasSelected int    `json:"hasSelected"`
-			GroupCount  int    `json:"groupCount"`
-			TotalCount  int    `json:"totalCount"`
+			PublishID   int     `json:"publishId"`
+			PublishName string  `json:"publishName"`
+			BeginDate   string  `json:"beginDate"`
+			InDateRange bool    `json:"inDateRange"`
+			CanSelect   int     `json:"canSelect"`
+			HasSelected int     `json:"hasSelected"`
+			GroupCount  int     `json:"groupCount"`
+			TotalCount  int     `json:"totalCount"`
 			Classes     []Class `json:"electivesClassList"`
 		} `json:"selectElectivesData"`
 	}
@@ -680,6 +671,7 @@ func parseElectives(body []byte) (*ElectivesData, error) {
 	}
 	return out, nil
 }
+
 // SelectClass 报名。返回平台消息（isOk 时含成功信息）。
 func (c *Client) SelectClass(classID int) (string, error) {
 	form := url.Values{}
@@ -736,10 +728,10 @@ func (c *Client) ExitClass(classID int) (string, error) {
 // 保留字段仅为"若平台未来下发"的防御性解（零成本受益），绝不可当作满员判据——
 // 真满员判定以快照字段 max_count（findElectivesData 课程级，实证）为准（classFullInSnapshot）。
 type CountEntry struct {
-	ID             int `json:"id"`
-	SelectedCount  int `json:"selectedCount"`
-	AuditedCount   int `json:"auditedCount"`
-	MaxCount       int `json:"maxCount"` // 平台未实证下发（select.js 0 消费），恒 0，仅防御性保留
+	ID            int `json:"id"`
+	SelectedCount int `json:"selectedCount"`
+	AuditedCount  int `json:"auditedCount"`
+	MaxCount      int `json:"maxCount"` // 平台未实证下发（select.js 0 消费），恒 0，仅防御性保留
 }
 
 // StudentCounts 查询课程实时人数。
@@ -759,8 +751,8 @@ func (c *Client) StudentCounts(ids []int) ([]CountEntry, error) {
 		return nil, err
 	}
 	var j struct {
-		Code      int           `json:"code"`
-		CountList []CountEntry  `json:"countList"`
+		Code      int          `json:"code"`
+		CountList []CountEntry `json:"countList"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
 		return nil, err

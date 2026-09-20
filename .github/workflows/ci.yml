@@ -53,10 +53,10 @@ jobs:
         run: |
           cd backend
           # Windows 宿主下 api/zhidao 登录链路测试偶发 httptest 连接 flake（127.0.0.1
-          # 回环 TIME_WAIT 队列争抢，R46 MAJOR-46-01 起持续多轮，-p 2/-p 1 均无法根除
-          # 单包内部 test 级连接 churn）。CI 失败自动重跑一次吸收瞬时 flake——
-          # 失败必为连接超时/connectex（单跑必绿），重跑即绕过，绝不因偶发假红阻断合并。
-          go test -p 1 -v ./... || go test -p 1 -v -count=1 ./...
+          # 回环 TIME_WAIT 队列争抢，R46 MAJOR-46-01 起持续多轮）。失败自动重跑一次
+          # 吸收瞬时 flake——两条命令都强制 -count=1（缓存键一致，重跑侧真实执行，
+          # 不被 (cached) 羽化；R50 MAJOR-50-01 修正 F49-M1 首条无 count=1 的漏洞）。
+          go test -p 1 -count=1 -v ./... || go test -p 1 -count=1 -v ./...
 
       - name: Verify Backend Single-Binary Compilation
         run: |

@@ -299,6 +299,11 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 		if decrypt != nil {
 			if p, err := decrypt(cd.PasswordEnc); err == nil {
 				pwd = p
+			} else {
+				// 解密失败（主密钥变更后旧密文不可解）：自动重登将"无保存账密"，与
+				// LoginByPassword 加密失败留痕（B44-01）对称——运行期主密钥不可变，
+				// 此处触达意味着存储被外部改写/降级，日志是唯一排查线索。
+				log.Printf("[accounts] 账号 %s 凭据解密失败，自动重登将无保存账密: %v", cd.Account, err)
 			}
 		}
 		c.SetCredentials(cd.Account, pwd, cd.IDToken)

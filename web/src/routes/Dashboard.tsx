@@ -133,7 +133,16 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     queryFn: () => api<SchedulerState>("/state", { session: sessionToken }),
     // n12：函数式间隔从 query.state.data 读取已取回的窗口状态（不引用本闭包的 state，
     // 避免循环初始化推断）；窗口已关闭降频 30s，开放中保持 3s 紧贴实时状态
-    refetchInterval: (query) => (query.state.data?.window_closed ? 30000 : 3000),
+    // F46-O2：失败态降频 30s（与 Select 侧 F40-M3/F42-M3 全站轮询契约对称）——
+    // 网络挂断/后端重启期间 react-query 失败后 data 保留最后一次成功值（window_closed
+    // 若 false 则回调恒取 3000ms），双查询按 3s 固定轰炸不可达后端刷屏日志；error 态
+    // 降 30s 后失败不再轰炸，恢复成功即回到正常间隔。
+    refetchInterval: (query) =>
+      query.state.error || query.state.status === "error"
+        ? 30000
+        : query.state.data?.window_closed
+          ? 30000
+          : 3000,
   })
 
   const { data: logs } = useQuery({
@@ -143,7 +152,13 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     // /state 每 3s 刷新（或窗口关闭降频 30s 后低频刷新），数据一变组件重渲染，
     // react-query 用最新闭包重调度本查询的轮询间隔，不存在"闭包停旧值永不降频"。
     // 窗口关闭瞬间 /state 先返回 window_closed=true，下一次日志轮询即按 30s 走。
-    refetchInterval: () => (state?.window_closed ? 30000 : 3000),
+    // F46-O2：与 /state 同款失败态降频 30s。
+    refetchInterval: (query) =>
+      query.state.error || query.state.status === "error"
+        ? 30000
+        : state?.window_closed
+          ? 30000
+          : 3000,
   })
 
   // /electives 查询：Dashboard 新增数据源——多开放时间列表（begin_times 数组）
@@ -323,8 +338,11 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   选课时间窗口
                 </CardTitle>
               </div>
-              <Badge variant={state?.window_opened ? "primary" : "outline"}>
-                {state?.window_opened ? "窗口已开放" : "待命中"}
+              <Badge
+                variant={state?.window_closed ? "outline" : state?.window_opened ? "primary" : "outline"}
+                className={state?.window_closed ? "text-neutral-500" : ""}
+              >
+                {state?.window_closed ? "窗口已关闭" : state?.window_opened ? "窗口已开放" : "待命中"}
               </Badge>
             </CardHeader>
 
@@ -707,7 +725,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           <span className="inline-block w-2 h-2 rounded-full bg-white" />
           <div className="flex flex-col">
             <span className="text-xs font-medium text-white">
-              {state?.window_opened ? "窗口开放中" : "系统待命中"}
+              {state?.window_closed ? "窗口已关闭" : state?.window_opened ? "窗口开放中" : "系统待命中"}
             </span>
             <span className="text-[10px] text-neutral-500 font-mono">
               {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}

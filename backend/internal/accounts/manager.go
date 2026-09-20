@@ -279,6 +279,11 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 			if err := m.st.SaveCredential(acct, enc, token); err != nil {
 				log.Printf("[accounts] 持久化凭据失败: %v", err)
 			}
+		} else {
+			// 加密失败：内存登录已成功但凭据不落库——重启 Restore 无账密、自动重登
+			// 永久"无保存账密"，与决策锚 17 零吞错对称，必须留痕（主密钥损坏启动即拒，
+			// 此处触达意味着运行期加密器异常，日志是唯一审计线索）。
+			log.Printf("[accounts] 账号 %s 密码加密失败，凭据未落库（自动重登将无保存账密）: %v", acct, err)
 		}
 	}
 	return token, nil

@@ -267,7 +267,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                       // 令牌登出自己，语义完全不对）。
                       if (pendingDelete) onDeleted?.(pendingDelete)
                       setPendingDelete(null)
-                      toast({ title: "已删除", description: `账号 ${pendingDelete} 已移除` })
+                      toast({ title: "已删除", description: `账号 ${pendingDelete} 已移除`, variant: "success" })
                     } catch (e: any) {
                       toast({ title: "删除失败", description: e.message || "通信异常", variant: "destructive" })
                     } finally {
@@ -334,7 +334,7 @@ function CodesTab({
       })
       setGenerated(codes)
       codesQuery.refetch()
-      toast({ title: "激活码已生成", description: `本次生成 ${codes.length} 个，每个可用 ${uses} 次` })
+      toast({ title: "激活码已生成", description: `本次生成 ${codes.length} 个，每个可用 ${uses} 次`, variant: "success" })
     } catch (e: any) {
       toast({ title: "生成失败", description: e.message || "通信异常", variant: "destructive" })
     } finally {
@@ -538,7 +538,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       if (!refreshed.error && refreshed.data) {
         setConfigEpoch((e) => e + 1) // F7-02：用后端生效真值经 effect 回填到表单（与生效配置对齐）
       }
-      toast({ title: "配置已保存", description: "已生效，无需重启服务" })
+      toast({ title: "配置已保存", description: "已生效，无需重启服务", variant: "success" })
       // "PUT 完成 → 用户此刻点进密钥框打字"的亚秒窄窗；且保存后才清空仍保证
       // "留空 = 不改动 key"的回显语义不被上次保存的旧输入污染。
       setApiKey("")

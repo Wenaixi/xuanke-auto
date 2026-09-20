@@ -744,9 +744,14 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     stateData?.open_time_known && stateData.open_time
       ? stateData.open_time
       : null
-  // F9-07：统一用 lib 共享 useTickingCountdown——与 Dashboard 同一实现、
-  // 秒级自 tick 只重建倒计时一处，删除 Select 旧的 parseCountdown + 每秒 setTick 双份。
-  const cd = useTickingCountdown(openTimeStr)
+  // M-1：识别缺席时用 begin_times[0] 兜底（与 Dashboard N1 同构）——同一浏览器
+  // 主看板有确切倒计时、选课大厅全 00 的跨页矛盾收口；识别槽建立后仍以识别真值为准。
+  const cd = useTickingCountdown(
+    openTimeStr ??
+      (data?.begin_times?.[0] != null
+        ? new Date(data.begin_times[0]).toISOString()
+        : null)
+  )
 
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">

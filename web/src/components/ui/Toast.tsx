@@ -10,6 +10,7 @@ export interface ToastMessage {
   title?: React.ReactNode
   description?: React.ReactNode
   variant?: ToastVariant
+  duration?: number
 }
 
 interface ToastContextValue {
@@ -33,8 +34,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     // F5-02：唯一 id 用自增计数器而非 Math.random 7 位短串——
     // 同一页 20 分钟内高频提示（满员退避/轮询失败）Math.random 碰撞会让 React key 重复、
     // 状态异常（一条 toast 被误删），自增 id 从根上消除碰撞概率。
+    // M-2：同 title 去重合并——目标保存失败退避重试链 46s 内最多 6 个同文红 toast
+    // 轰炸即此根源；已存在同 title toast 时只更新其 description（文案取最新错误），
+    // 不新增堆叠。title 为 ReactNode 时按文本比较，非同 title 照常追加。
+    const key = typeof msg.title === "string" ? msg.title : null
     idRef.current += 1
-    setToasts((prev) => [...prev, { ...msg, id: `t-${idRef.current}` }])
+    setToasts((prev) => {
+      if (key) {
+        const idx = prev.findIndex((t) => t.title === key)
+        if (idx >= 0) {
+          const merged = [...prev]
+          merged[idx] = { ...prev[idx], description: msg.description, variant: msg.variant ?? prev[idx].variant, duration: msg.duration ?? prev[idx].duration }
+          return merged
+        }
+      }
+      return [...prev, { ...msg, id: `t-${idRef.current}` }]
+    })
   }, [])
 
   const removeToast = React.useCallback((id: string) => {
@@ -49,13 +64,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             createPortal 进 viewport（wrapper 渲染完是空壳 div），且 viewport 无任何
             inset 类时 toast 落点交给浏览器「无 inset fixed 元素」的 static-position
             行为（当前视觉正常属碰巧稳定）。布局并入 viewport className，删空壳 wrapper。 */}
-        {toasts.map(({ id, title, description, variant = "default" }) => (
+        {toasts.map(({ id, title, description, variant = "default", duration }) => (
           <ToastPrimitive.Root
             key={id}
             onOpenChange={(open) => {
               if (!open) removeToast(id)
             }}
-            duration={3500}
+            duration={duration ?? 3500}
             className={cn(
               "pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-[var(--radius-lg)] border p-4 shadow-xl transition-all duration-200",
               "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-bottom-full",

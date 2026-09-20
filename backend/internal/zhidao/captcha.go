@@ -1,4 +1,4 @@
-﻿package zhidao
+package zhidao
 
 import (
 	"bytes"

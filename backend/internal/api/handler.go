@@ -936,9 +936,9 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		tokValid[a] = d.Sched.TokenValidFor(a)
 	}
 	writeJSON(w, 0, map[string]any{
-		"open_time":           openTimeStr,
-		"activation_on":       cfg.ActivationEnabled,
-		"window_opened":       windowOpened,
+		"open_time":     openTimeStr,
+		"activation_on": cfg.ActivationEnabled,
+		"window_opened": windowOpened,
 		// window_closed 与学生端 /state 同源（WindowClosed 三判据单源 windowClosedLocked）：
 		// 前端管理后台三态展示（待命中/已开放/已关闭）靠此字段区分，缺失时窗口关闭后
 		// 后台仍显"待命中"误导管理员。
@@ -952,7 +952,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"captcha_engine":      eng,
 		"captcha_concurrency": cfg.CaptchaConcurrency,
 		"token_valid":         tokValid,
-		"open_time_set": !open.IsZero(),
+		"open_time_set":       !open.IsZero(),
 	}, "")
 }
 

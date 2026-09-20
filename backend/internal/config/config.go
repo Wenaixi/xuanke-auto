@@ -1,4 +1,4 @@
-﻿package config
+package config
 
 import (
 	"crypto/rand"
@@ -24,13 +24,14 @@ func envOr(key, def string) string {
 	}
 	return def
 }
+
 // Config 应用配置：环境变量 + data/.env 配置文件，其余为编译期常量。
 // 安全策略：SF_API_KEY / XUANKE_ADMIN_TOKEN / XUANKE_MASTER_KEY 等敏感项来自
 // 真实环境变量或 data/.env 文件，代码内不含任何硬编码密钥。
 type Config struct {
-	Port     string // HTTP 监听端口
-	DBPath   string // SQLite 数据库路径
-	BaseURL  string // 至道平台根地址
+	Port    string // HTTP 监听端口
+	DBPath  string // SQLite 数据库路径
+	BaseURL string // 至道平台根地址
 	// 硅基流动 Vision 验证码识别配置（登录必需）
 	SFBaseURL string
 	SFAPIKey  string
@@ -55,14 +56,14 @@ func Load() Config {
 	// 避免"识别槽为空时把过期日期当开窗点"的误导。
 	dbPath := envOr("XUANKE_DB", filepath.Join(dataDir(), "xuanke.db"))
 	return Config{
-		Port:    envOr("XUANKE_PORT", "3091"),
-		DBPath:  dbPath,
-		BaseURL: "https://www.zhidao.fj.cn",
-		SFBaseURL: envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
-		SFAPIKey:  os.Getenv("SF_API_KEY"),
-		SFModel:   envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
-		AdminToken: os.Getenv("XUANKE_ADMIN_TOKEN"),
-		AdminName:  os.Getenv("XUANKE_ADMIN_NAME"),
+		Port:                   envOr("XUANKE_PORT", "3091"),
+		DBPath:                 dbPath,
+		BaseURL:                "https://www.zhidao.fj.cn",
+		SFBaseURL:              envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
+		SFAPIKey:               os.Getenv("SF_API_KEY"),
+		SFModel:                envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
+		AdminToken:             os.Getenv("XUANKE_ADMIN_TOKEN"),
+		AdminName:              os.Getenv("XUANKE_ADMIN_NAME"),
 		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") != "off",
 	}
 }

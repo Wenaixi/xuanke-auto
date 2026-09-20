@@ -181,12 +181,12 @@ func (r *recordingStore) LoadTargetsForAccount(acct string) ([]Target, error) {
 	out := make([]Target, 0, len(r.targets))
 	for i, row := range r.targets {
 		out = append(out, Target{
-			PublishID:  i + 1,
-			ClassID:    61115 + i,
-			CourseName: "课程",
-			Priority:   i,
+			PublishID:   i + 1,
+			ClassID:     61115 + i,
+			CourseName:  "课程",
+			Priority:    i,
 			PublishName: row.publishName,
-			BeginDate:  row.beginDate,
+			BeginDate:   row.beginDate,
 		})
 	}
 	return out, nil

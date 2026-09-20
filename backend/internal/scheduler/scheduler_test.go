@@ -1,4 +1,4 @@
-﻿package scheduler
+package scheduler
 
 import (
 	"bytes"
@@ -16,10 +16,10 @@ import (
 
 // fakeStore 内存日志存储。
 type fakeStore struct {
-	mu            sync.Mutex
-	log           []string
-	successRows   map[string]int // [acct\x00classID] 已落库的 success 行（B18-M2 测试用）
-	refusedRows   map[string]int // [acct\x00classID] 已落库的 refused 行（B18-M2 测试用）
+	mu          sync.Mutex
+	log         []string
+	successRows map[string]int // [acct\x00classID] 已落库的 success 行（B18-M2 测试用）
+	refusedRows map[string]int // [acct\x00classID] 已落库的 refused 行（B18-M2 测试用）
 }
 
 func (f *fakeStore) AppendLog(acct string, classID int, action, result string, isOK bool) error {
@@ -47,10 +47,10 @@ func (f *fakeStore) SaveRefused(acct string, classID int) error {
 	f.refusedRows[acct+"\x00"+strconv.Itoa(classID)]++
 	return nil
 }
-func (f *fakeStore) UpdateIDToken(acct, idToken string) error     { return nil }
-func (f *fakeStore) DeleteSuccess(acct string, classID int) error { return nil }
-func (f *fakeStore) DeleteRefused(acct string) error              { return nil }
-func (f *fakeStore) DeleteRefusedClass(acct string, classID int) error { return nil }
+func (f *fakeStore) UpdateIDToken(acct, idToken string) error                 { return nil }
+func (f *fakeStore) DeleteSuccess(acct string, classID int) error             { return nil }
+func (f *fakeStore) DeleteRefused(acct string) error                          { return nil }
+func (f *fakeStore) DeleteRefusedClass(acct string, classID int) error        { return nil }
 func (f *fakeStore) SetTargetsForAccount(acct string, targets []Target) error { return nil }
 
 // failStore：带失败开关的 Store——SQLite 落库失败时调度器必须把错误上报/记日志，
@@ -175,7 +175,7 @@ type fakeClient struct {
 	err         error
 	selectErr   map[int]error
 	selectCalls map[int]int
-	relogCalls  int          // 重登回调调用次数（测试用）
+	relogCalls  int // 重登回调调用次数（测试用）
 	syncOffset  time.Duration
 	syncErr     error  // 时钟对齐失败时注入的错误
 	syncCalls   int    // 时钟对齐发起次数（B9-03 退避测试断言"失败期不反复发起"）
@@ -254,7 +254,7 @@ func (f *fakeClient) Token() string { return "new-token-999" }
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 	f.mu.Lock()
 	if f.fullErr != nil {
-		f.mu.Unlock() // 显式解锁：早退分支必须释放锁（B19-03 夹具死锁根因——漏了这行导致 Relogin 永久卡死）
+		f.mu.Unlock()           // 显式解锁：早退分支必须释放锁（B19-03 夹具死锁根因——漏了这行导致 Relogin 永久卡死）
 		return false, f.fullErr // B19-03：命中 token 失效等错误
 	}
 	if f.fullBlock != nil {
@@ -302,9 +302,9 @@ func newFakeClient(open bool) *fakeClient {
 type fakeAccts struct {
 	c             *fakeClient
 	perAccount    map[string]*fakeClient // 可选：账号 -> 专属客户端（nil 时回退 c）
-	relogErr      error  // 重登错误（可编程）
-	relog         func() // 重登钩子（可编程，记录是否被调用）
-	relogBlocking bool   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
+	relogErr      error                  // 重登错误（可编程）
+	relog         func()                 // 重登钩子（可编程，记录是否被调用）
+	relogBlocking bool                   // 重登失败时钩子先阻塞一次（让测试断言"重登中"状态）
 
 	mu      sync.Mutex      // 保护 removed/perAccount（测试并发读写）
 	removed map[string]bool // 已删除账号（ClientFor 返回不存在）
@@ -1183,6 +1183,7 @@ func TestRealtimeRecheckDeletedAccountDropsLog(t *testing.T) {
 		t.Fatalf("已删账号实时复核不得追加审计日志，实际 %d 行", n)
 	}
 }
+
 // SelectClass 网络往返（最长 15s）期间管理员删除账号，返回 ErrUnauthorized 后分支必须
 // 在状态写回与审计日志落库前再次核实 ClientFor，已删则静默放弃——旧实现直接在分支内
 // setState+AppendLog：删号后状态行被覆写为"教务令牌失效"并多写一行 DB 日志
@@ -2818,7 +2819,7 @@ func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(true) // 窗口已开
 	fc.mu.Lock()
 	fc.selectErr[61115] = errors.New("该课程已满员") // 报名失败 → 走实时复核路径
-	fc.fullErr = zhidao.ErrUnauthorized             // 复核命中 token 失效（学生数接口同样鉴权）
+	fc.fullErr = zhidao.ErrUnauthorized        // 复核命中 token 失效（学生数接口同样鉴权）
 	fc.mu.Unlock()
 	relogStart := make(chan bool)
 	relogDone := make(chan bool)

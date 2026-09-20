@@ -491,13 +491,11 @@ func isConnErrRetryable(err error) bool {
 	return nerr.Op == "dial" || nerr.Op == "write"
 }
 
-// cloneReq 深拷贝请求（httpDo 重试复用不共享体，防 Body 已消费）。
-// 透明：http.NewRequest 对 bytes.Reader/strings.Reader 已自动设 GetBody
-// （std request.go:932-945），cloneReq 浅拷贝 Body + 原样保留 GetBody——
-// 重试请求的 Body 由首个 RoundTrip 消费后为空、ContentLength 未同步
-// （真实路径实测 "ContentLength=13 with Body length 0"）。read 类错误
-// （服务端已消费 body，可能已处理）httpDo 不再重试（见 httpDo 注释）；
-// dial/write 错误下 Body 未被消费、重发完整。
+// cloneReq 深拷贝请求（httpDo 重试复用不共享体）。
+// httpDo 只对 dial/write 错误重试——该形态下请求体未被消费、重发完整；
+// GetBody 由标准库对 bytes.Reader/strings.Reader 自动设置（request.go:932-945），
+// keep-alive 复用连接静默关闭时的 nothingWritten 场景由 transport 内部用
+// GetBody 重放完整 body（不双报）。read 错误不重试（见 httpDo），此路径不可达。
 func cloneReq(req *http.Request) *http.Request {
 	return req.Clone(req.Context())
 }

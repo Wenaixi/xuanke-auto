@@ -1,4 +1,4 @@
-﻿package scheduler
+package scheduler
 
 import (
 	"context"
@@ -46,12 +46,12 @@ type SchedulerState struct {
 	// OpenTime 当前账号的"预计开放时间"——优先取管理员配置，未配置时取该账号
 	// 自己探测识别的 beginTimes（全校共享同一开窗时刻）；识别不到且无配置 = 未知
 	// （零值 + OpenTimeKnown=false），前端展示"未识别到开放时间"，绝不显示编造时间。
-	OpenTime     time.Time `json:"open_time"`
-	OpenTimeKnown bool      `json:"open_time_known"` // 是否已识别到开放时间（管理员配置或平台 beginTimes）
-	WindowOpened bool      `json:"window_opened"`
-	WindowClosed bool      `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
-	TokenValid   bool      `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
-	Courses      []CourseStatus `json:"courses"`
+	OpenTime      time.Time      `json:"open_time"`
+	OpenTimeKnown bool           `json:"open_time_known"` // 是否已识别到开放时间（管理员配置或平台 beginTimes）
+	WindowOpened  bool           `json:"window_opened"`
+	WindowClosed  bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
+	TokenValid    bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
+	Courses       []CourseStatus `json:"courses"`
 	// EmptyProbeRuns B20-02："空快照且从未开窗"的连续探测轮数——WindowClosed
 	// 视同关闭判据之一（探测量变），由 probe() 入账推进、开窗/非空快照归零；零值=尚未连续
 	// 探测到 3 轮（首探 1 次、二探 2 次都不算）。json 省略：前端/外部无需感知内部量变。
@@ -143,11 +143,11 @@ type AccountClients interface {
 type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
-	UpdateIDToken(acct, idToken string) error     // 自动重登后落库新 token
-	DeleteSuccess(acct string, classID int) error // B8-M2：手动退选后删除 success 行
-	SaveRefused(acct string, classID int) error   // B9-02：手动退选记库，重启后自动引擎仍不抢回
-	DeleteRefused(acct string) error              // B9-02：重设目标清空该账号全部退选标记
-	DeleteRefusedClass(acct string, classID int) error // 手动重报成功清单条退选行（与内存侧解除对称）
+	UpdateIDToken(acct, idToken string) error                 // 自动重登后落库新 token
+	DeleteSuccess(acct string, classID int) error             // B8-M2：手动退选后删除 success 行
+	SaveRefused(acct string, classID int) error               // B9-02：手动退选记库，重启后自动引擎仍不抢回
+	DeleteRefused(acct string) error                          // B9-02：重设目标清空该账号全部退选标记
+	DeleteRefusedClass(acct string, classID int) error        // 手动重报成功清单条退选行（与内存侧解除对称）
 	SetTargetsForAccount(acct string, targets []Target) error // 保存目标（含发布元数据持久化）
 }
 
@@ -180,16 +180,16 @@ type Scheduler struct {
 	reloginResults   chan reloginResult               // 重登结果回传（异步结果在 tick 主循环统一处理）
 	warnedNoTargets  bool                             // M-3：无目标空转警告只打一次
 
-	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
-	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
-	lastSyncStart  time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
-	lastSyncFailAt time.Time                    // 上次同步失败时刻（B9-03 失败退避计时基准）
-	syncFailedWindow time.Time                  // B19-01：时钟失败/恢复时刻留档（写而不读，判据用 syncFailStreak，见 maybeSyncClock）
-	syncing        bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
-	probing        bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑，F12-B2）
-	syncFailStreak int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
-	lastPrewarm    time.Time                    // 上次连接池预热时间
-	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
+	clockOffset      time.Duration                // 服务端时钟对齐偏差 (server - local)
+	lastSyncTime     time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
+	lastSyncStart    time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
+	lastSyncFailAt   time.Time                    // 上次同步失败时刻（B9-03 失败退避计时基准）
+	syncFailedWindow time.Time                    // B19-01：时钟失败/恢复时刻留档（写而不读，判据用 syncFailStreak，见 maybeSyncClock）
+	syncing          bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
+	probing          bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑，F12-B2）
+	syncFailStreak   int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
+	lastPrewarm      time.Time                    // 上次连接池预热时间
+	rateLimited      map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -239,27 +239,27 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
-		clients:     clients,
-		store:       store,
-		openTime:    openTime,
-		interval:    interval,
-		acctTargets: make(map[string][]Target),
-		inflight:    make(map[string]map[int]bool),
-		done:        make(map[string]map[int]bool),
-		full:        make(map[string]map[int]bool),
-		refused:     make(map[string]map[int]bool),
-		tokenValid:  make(map[string]bool),
-		reloginAt:   make(map[string]time.Time),
-		reloginFail: make(map[string]int),
-		relogging:   make(map[string]bool),
-		rateLimited: make(map[string]map[int]time.Time),
-		chains:      make(map[string]bool),
-		probeSem:     make(chan struct{}, 4), // F17-01：per-account 探测并发上限
-		acctData:     make(map[string]*zhidao.ElectivesData),
-		acctDataAt:   make(map[string]time.Time),
+		clients:          clients,
+		store:            store,
+		openTime:         openTime,
+		interval:         interval,
+		acctTargets:      make(map[string][]Target),
+		inflight:         make(map[string]map[int]bool),
+		done:             make(map[string]map[int]bool),
+		full:             make(map[string]map[int]bool),
+		refused:          make(map[string]map[int]bool),
+		tokenValid:       make(map[string]bool),
+		reloginAt:        make(map[string]time.Time),
+		reloginFail:      make(map[string]int),
+		relogging:        make(map[string]bool),
+		rateLimited:      make(map[string]map[int]time.Time),
+		chains:           make(map[string]bool),
+		probeSem:         make(chan struct{}, 4), // F17-01：per-account 探测并发上限
+		acctData:         make(map[string]*zhidao.ElectivesData),
+		acctDataAt:       make(map[string]time.Time),
 		openTimeDetected: make(map[string]int64),
-		ctx:         ctx,
-		cancel:      cancel,
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 	s.reloginResults = make(chan reloginResult, 8)
 	s.state.OpenTime = openTime
@@ -394,9 +394,9 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				}
 				s.clockOffset = offset
 				s.syncFailStreak = 0
-				s.lastSyncFailAt = time.Time{}                        // B9-03：成功即清失败退避（瞬断不拖延后续校准）
-				s.lastSyncTime = s.lastSyncStart                      // 只有成功才推进成功采样闸门
-				s.syncFailedWindow = time.Time{}                      // B19-01：与失败写点对称（写而不读，留档自愈语义）
+				s.lastSyncFailAt = time.Time{}   // B9-03：成功即清失败退避（瞬断不拖延后续校准）
+				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
+				s.syncFailedWindow = time.Time{} // B19-01：与失败写点对称（写而不读，留档自愈语义）
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
 			return

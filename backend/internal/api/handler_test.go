@@ -176,14 +176,18 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 }
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求（期望非连接错误响应），
-// 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms 间隔 × 5 次，
-// 总窗口 ~1s，实测覆盖冷启动 TIME_WAIT 队列排空——R53 的单次重试在更宽窗口下仍
-// connectex，api 隔离 2/5 轮 FAIL 实证），全部失败才上抛由调用方 Fatal。
-// 探测请求恰好也排空首个连接的 TIME_WAIT 队列，之后测试请求全部落在已就绪 server 上。
+// 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms 间隔 ×
+// 10 次，总窗口 ~2s，实测覆盖冷启动 TIME_WAIT 队列排空——R53 单次重试/5×200ms
+// 已有前序包结束后最恶劣时刻 connectex 样本（R58 全量 R3 readyProbe 自身 5 次
+// 全败直接 Fatal 实证），加宽到 10 次 + 显式 2s 超时兜底），全部失败才上抛。
+// 探测请求恰好也排空首个连接的 TIME_WAIT 队列，之后测试请求落在已就绪 server 上。
 func readyProbe(baseURL string) error {
-	// 轮询重试：连接层失败后短暂休眠重试，把探测成功前的冷启动窗口彻底前移
+	// 轮询重试：连接层失败后短暂休眠重试，把探测成功前的冷启动窗口彻底前移。
+	// 显式 2s 超时——http.DefaultClient 超时为 0=无限，mock 极端挂起时可阻塞分钟级
+	//（OBSERVE-56-04/57-03 延续）；探测请求只关心"accept 是否就绪"，2s 足够。
+	client := &http.Client{Timeout: 2 * time.Second}
 	const (
-		probeRetries = 5
+		probeRetries = 10
 		probeDelay   = 200 * time.Millisecond
 	)
 	var lastErr error
@@ -192,7 +196,7 @@ func readyProbe(baseURL string) error {
 		if err != nil {
 			return err
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err == nil {
 			defer resp.Body.Close()
 			_, err = io.Copy(io.Discard, resp.Body)

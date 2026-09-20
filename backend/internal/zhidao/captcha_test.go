@@ -135,4 +135,3 @@ func TestSetCaptchaConcurrencyConcurrent(t *testing.T) {
 		t.Fatal("SetCaptchaConcurrency 在高并发热调时发生死锁！")
 	}
 }
-

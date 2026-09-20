@@ -218,7 +218,7 @@ func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
 // gateTryAcquire 非阻塞申请一次 doLogin 预算（tokenBucket 语义借用 gateWait 同款计数）：
 // 窗口内 quota 充足则消耗并返回 true，已满则返回 false——绝不阻塞等待下个窗口。
 // 学生手动登录（LoginByPassword）用它收口全局 doLogin 频率闸门：窗口已满时立即拒绝
-//（提示稍后再试），不挂起用户登录响应（排队重登可能数分钟）；与 gateWait 共享同一
+// （提示稍后再试），不挂起用户登录响应（排队重登可能数分钟）；与 gateWait 共享同一
 // gateMu 与 gateUsed 计数，排队重登与手动登录严格共享全账号每分钟 doLogin 预算。
 func (m *Manager) gateTryAcquire() bool {
 	m.gateMu.Lock()

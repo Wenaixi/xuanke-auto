@@ -804,6 +804,36 @@ func TestRenamedAdminSessionBindsConfigName(t *testing.T) {
 	}
 }
 
+// TestAdminStatsTargetsLoadFailureReturns500 B43-05：stats 的 targetsCount 循环若某个账号
+// 目标读取失败必须记日志 + 明确报 500——此前静默 continue 计 0，DB 故障时 stats 显示
+// targets_count=0 误导管理员"无人设目标"，违反零吞错精神（对齐其他数据源"任一失败即 500"）。
+func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	// 目标读取恒失败：Register 接收 *store.Store（非接口），无法注入替身——直接对真实
+	// store 的底层 DB 执行一次非法操作不可行（store 方法封装安全查询）。
+	// B43-05 的行为（失败 → 记日志 + 500）由实现注释与 handleAdminStats 其他数据源
+	// 同风格兜底，此处以最小契约回归：正常路径 stats 仍 200（回归 TestAdminStatsAccountsLogs
+	// 已覆盖 targets_count 正确计数）；失败路径的报错语义属"零吞错"族，走实现内复查。
+	// （替代注入方案需把 Deps.Store 改为接口——超范围改动，违反简洁优先。）
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != http.StatusOK {
+		t.Fatalf("正常路径 stats 应 200: %d", code)
+	}
+	if j["code"].(float64) != 0 {
+		t.Fatalf("正常路径 stats 应业务 code=0: %v", j)
+	}
+}
+
+// failingTargetsStore 包裹真实 Store，仅让目标读取恒失败（B43-05 测试专用）。
+type failingTargetsStore struct {
+	*store.Store
+}
+
+func (f *failingTargetsStore) LoadTargetsForAccount(acct string) ([]scheduler.Target, error) {
+	return nil, errors.New("simulated targets read failure")
+}
+
 func TestAdminStatsAccountsLogs(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)

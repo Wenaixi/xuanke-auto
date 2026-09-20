@@ -886,11 +886,24 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		openTimeStr = open.Format("2006-01-02 15:04:05")
 	}
 	targetsCount := 0
+	var targetErr error
 	for _, a := range accounts {
 		ts, err := d.Store.LoadTargetsForAccount(a)
-		if err == nil {
-			targetsCount += len(ts)
+		if err != nil {
+			// B43-05：读目标数失败绝不静默计 0——DB 故障时 stats 若显示 targets_count=0
+			// 会误导管理员"无人设目标"（误判部署异常）。记日志 + 累计错误，循环后明确报 500，
+			// 对齐 handleAdminStats 其他数据源"任一失败即报错"的风格。
+			log.Printf("[api] 统计账号 %s 目标数失败: %v", a, err)
+			if targetErr == nil {
+				targetErr = err
+			}
+			continue
 		}
+		targetsCount += len(ts)
+	}
+	if targetErr != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, 1, nil, "统计目标数失败: "+targetErr.Error())
+		return
 	}
 	// window_opened 与调度器实际探测状态保持一致（学生端 /state 同源），
 	// 不用本地时钟直判——平台开放时间与本地配置若有偏差，管理员不会误判。

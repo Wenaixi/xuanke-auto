@@ -818,7 +818,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 选课窗口已开放
               </span>
-            ) : !openTimeStr ? (
+            ) : !openTimeStr && data?.begin_times?.[0] == null ? (
               <span className="truncate">
                 未识别到开放时间
                 <span className="text-neutral-500">（平台尚未下发或识别已过期）</span>
@@ -837,7 +837,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           <span className="text-neutral-500 font-mono hidden sm:block shrink-0">
             {stateData?.open_time_known && openTimeStr
               ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-              : "未知"}
+              : data?.begin_times?.[0] != null
+                ? new Date(data.begin_times[0]).toLocaleString("zh-CN", { hour12: false })
+                : "未知"}
           </span>
         </div>
 

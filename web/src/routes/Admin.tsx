@@ -709,8 +709,9 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
   const rows: { label: string; value: string }[] = s
     ? [
         // 识别开放时间：唯一事实源 = 平台 beginTimes 自动识别（不可配置）。
-        // open_time_set=false = 未识别/识别过期 → 显示"未识别"（绝不把过期旧值当开放时间）。
-        { label: "识别开放时间", value: s.open_time_set === false ? "未识别" : s.open_time },
+        // M-E：字段可选声明下 undefined 要保守视为"未识别"——`!== true` 兜底
+        // （后端恒下发，但类型契约不排除未来缺键，绝不把 undefined 当"已识别"空展示）。
+        { label: "识别开放时间", value: s.open_time_set !== true ? "未识别" : s.open_time },
         // N3：窗口关闭信号三态——window_closed 字段依赖后端 /api/admin/stats 补发
         // （统计口径从学生端 /state 对齐），补发前 undefined 走"待命中"，绝不假报关闭。
         {

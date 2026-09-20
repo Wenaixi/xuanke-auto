@@ -44,7 +44,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         const idx = prev.findIndex((t) => t.title === key)
         if (idx >= 0) {
           const merged = [...prev]
-          merged[idx] = { ...prev[idx], description: msg.description, variant: msg.variant ?? prev[idx].variant, duration: msg.duration ?? prev[idx].duration }
+          // M-B：合并是"更新文案"语义——duration 保持首次挂载的配置（用户预期"这条
+          // 消息显示这么久后消失"），不随新调用覆盖（Radix duration 变化会重启计时器，
+          // 覆盖会让高频合并无限延寿）；variant 仍取最新（视觉即时反馈）。
+          merged[idx] = { ...prev[idx], description: msg.description, variant: msg.variant ?? prev[idx].variant }
           return merged
         }
       }
@@ -99,7 +102,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             </ToastPrimitive.Close>
           </ToastPrimitive.Root>
         ))}
-        <ToastPrimitive.Viewport className="fixed bottom-4 right-4 z-50 flex w-full max-w-[380px] flex-col gap-2 p-4 pointer-events-none outline-none" />
+        <ToastPrimitive.Viewport className="fixed bottom-4 right-4 z-50 flex w-full max-w-[380px] max-h-[80vh] overflow-y-auto flex-col gap-2 p-4 pointer-events-none outline-none" />
       </ToastPrimitive.Provider>
     </ToastContext.Provider>
   )

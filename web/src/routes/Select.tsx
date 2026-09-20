@@ -1081,44 +1081,51 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
                             {/* 操作按钮区 */}
                             <div className="pt-2 border-t border-neutral-800/70 mt-0.5 flex flex-col gap-1.5">
-                              {/* 窗口开启后呈现官网同款【报名】或【退选】主操作按钮 */}
+                              {/* 官网按钮以 btn_type 为唯一渲染判据（官网逆向契约：1=退选、2=报名、
+                                  其他值不渲染操作按钮）：platform 窗口未开照样下发 btn_type=2 +
+                                  can_select=false（title="不在选修报名时间范围内，无法选课！"），
+                                  本项目隐藏官网按钮后若开窗瞬间窗口信号缺失（识别槽未建立 /
+                                  in_date_range 刹那 false）手动抢课通道会被锁死——故按钮置灰与否
+                                  由 can_select 决定（disabled + title），不再依赖窗口信号。 */}
+                              {c.btn_type === 1 && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={actionLoading.has(c.id) || !c.can_select}
+                                  onClick={() => setExitModalClass(c)}
+                                  title={c.title || (c.can_select ? "点击退选此课程" : "当前无法退选")}
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 transition-colors"
+                                >
+                                  <LogOut className="h-3.5 w-3.5" />
+                                  <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
+                                </Button>
+                              )}
+                              {c.btn_type === 2 && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  disabled={actionLoading.has(c.id) || !c.can_select}
+                                  onClick={() => handleSelectClass(c)}
+                                  title={c.title || (c.can_select ? "点击立即报名" : "不在选修报名时间范围内，无法选课！")}
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8 disabled:opacity-40"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
+                                </Button>
+                              )}
+                              {/* 本项目特冲刺/预选目标按钮：以窗口信号决定形态（开窗后收敛为
+                                  ghost 小按钮避免淹没了官网报名主操作；闭窗前 primary 预选），
+                                  only affects itself */}
                               {t.in_date_range || stateData?.window_opened ? (
-                                <>
-                                  {c.btn_type === 1 ? (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={actionLoading.has(c.id) || !c.can_select}
-                                      onClick={() => setExitModalClass(c)}
-                                      title={c.title || (c.can_select ? "点击退选此课程" : "当前无法退选")}
-                                      className="w-full flex items-center justify-center gap-1.5 text-xs h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 transition-colors"
-                                    >
-                                      <LogOut className="h-3.5 w-3.5" />
-                                      <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
-                                    </Button>
-                                  ) : c.btn_type === 2 ? (
-                                    <Button
-                                      variant="primary"
-                                      size="sm"
-                                      disabled={actionLoading.has(c.id) || !c.can_select}
-                                      onClick={() => handleSelectClass(c)}
-                                      title={c.title || (c.can_select ? "点击立即报名" : "不在选修报名时间范围内，无法选课！")}
-                                      className="w-full flex items-center justify-center gap-1.5 text-xs h-8 disabled:opacity-40"
-                                    >
-                                      <Check className="h-3.5 w-3.5" />
-                                      <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
-                                    </Button>
-                                  ) : null /* btn_type 非 1/2（异常值）：官网契约不渲染操作按钮，只留后台冲刺目标 */}
-                                  <Button
-                                    variant={isSelected ? "outline" : "ghost"}
-                                    size="sm"
-                                    onClick={() => pick(t.publish_id, c)}
-                                    className="w-full flex items-center justify-center gap-1 text-[11px] h-7 text-neutral-400 hover:text-white"
-                                  >
-                                    <BookMarked className="h-3 w-3" />
-                                    <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>
-                                  </Button>
-                                </>
+                                <Button
+                                  variant={isSelected ? "outline" : "ghost"}
+                                  size="sm"
+                                  onClick={() => pick(t.publish_id, c)}
+                                  className="w-full flex items-center justify-center gap-1 text-[11px] h-7 text-neutral-400 hover:text-white"
+                                >
+                                  <BookMarked className="h-3 w-3" />
+                                  <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>
+                                </Button>
                               ) : (
                                 /* 窗口开启前：标准自动预选设置 */
                                 <Button

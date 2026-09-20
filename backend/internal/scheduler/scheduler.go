@@ -1582,7 +1582,11 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// （inflight 已在 1333 行清掉，无残留），与链顶 B30-01/失效分支/成功分支
 			// B18-M2 同族防线——实时复核结果块是删号竞态最后一块裸露写点
 			// （setStateLocked 的 idx<0 守卫只挡数组越界，挡不住落库与 map 写）。
-			if _, ok := s.clients.ClientFor(acct); !ok {
+			// B43-02：存在性复核升级为指针身份复核——同名重建（注册表现指针已换）后旧链
+			// 经 classFullRealtime 命中新身份的 ErrUnauthorized，返回时 ClientFor 仍 ok（新身份
+			// 存在）却会把 maybeRelogin/failed 状态写进新身份（无辜消耗登录预算）。与同函数
+			// 成功/失效/风控/窗口关闭/确证满员五分支对称，sameClientFor 内含存在性判定。
+			if !s.sameClientFor(acct, chainClient) {
 				s.mu.Unlock()
 				return
 			}

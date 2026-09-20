@@ -3494,3 +3494,57 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 		}
 	}
 }
+
+// TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight B43-03 实测归因：
+// 成功分支 1502 行在任何分支判定前已统一清 inflight（含身份复核失败路径），
+// 与失效分支 1479/1490 行对称——"成功分支身份复核失败时 inflight 位漏删"的
+// 原审查结论不成立。本测试固化为回归：同名重建后旧链成功身份复核失败，
+// 重建账号的 inflight[classID] 必须不存在（PurgeAccount 已清 + 1502 行统一清位）。
+// 修复前同样绿（该行本就存在），故非 TDD 红→绿项，作为契约回归测试落库。
+func TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight(t *testing.T) {
+	oldClient := newFakeClient(true)
+	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
+	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
+
+	// 旧链 SelectClass 阻塞（模拟真实网络往返）
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldClient.mu.Lock()
+	oldClient.selectBlock = func() {
+		close(entered)
+		<-release
+	}
+	oldClient.mu.Unlock()
+
+	s.mu.Lock()
+	s.lastSubmit = time.Time{}
+	s.mu.Unlock()
+	s.tick()
+
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("旧链应已进入 SelectClass")
+	}
+
+	// 链卡在往返期间，"删号 + 同名重建"：注册表里 acct1 换成新客户端指针
+	newClient := newFakeClient(true)
+	fa.mu.Lock()
+	fa.perAccount["acct1"] = newClient
+	fa.mu.Unlock()
+	s.PurgeAccount("acct1") // 清旧账号全量内存态（含 inflight，重建身份从零开始）
+
+	// 放行旧链网络调用 → 旧 client 返回成功 → 走成功分支身份复核失败
+	close(release)
+	waitChainExit(t, s, "acct1\x001")
+
+	// 契约：重建账号的 inflight 位不得残留——旧链身份复核失败清位后，
+	// 手动报名（TryAcquireSubmit）对该课程必须可获取（绝不永久"正在提交中"）。
+	s.mu.Lock()
+	_, inFlight := s.inflight["acct1"][61115]
+	s.mu.Unlock()
+	if inFlight {
+		t.Fatal("同名重建后陈旧旧链成功身份复核失败必须清 inflight 位，实际残留（手动报名被永久阻塞）")
+	}
+}

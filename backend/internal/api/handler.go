@@ -804,7 +804,10 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			// 识别引擎/Vision 仍按新配置同步给账号客户端，杜绝"半生效"误导。
 			log.Printf("[api] 配置落库失败: %v", sErr)
 			d.dispatchRuntimeConfig(cfg)
-			writeJSON(w, 500, nil, "配置已生效但落库失败（重启后将回退）："+sErr.Error())
+			// F48-O3：家族整风——B43-05 的 handleAdminStats 目标数失败已走 writeJSONStatus
+			// 500，此处配置落库失败同属"服务端持久化层错误"，HTTP 层写真实 500 让
+			// 反代/监控可感知（前端契约只读 body code，行为不变）。
+			writeJSONStatus(w, http.StatusInternalServerError, 500, nil, "配置已生效但落库失败（重启后将回退）："+sErr.Error())
 			return
 		}
 		// 热重载下游组件：验证码识别配置推给全部账号客户端；打开时间由调度器运行时读取

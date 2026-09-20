@@ -547,8 +547,9 @@ func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
 	}
 }
 
-// TestAdminConfigSaveFailStillDispatch M-4：落库失败时——配置已内存生效、下游热下发
-// 必须照常执行（识别引擎/Vision 同步新值），且响应如实区分"已生效但落库失败"（code=500）。
+// TestAdminConfigSaveFailStillDispatch M-4 + F48-O3：落库失败时——配置已内存生效、下游热下发
+// 必须照常执行（识别引擎/Vision 同步新值），且响应如实区分"已生效但落库失败"（body code=500 且
+// HTTP 层亦为真实 500——家族整风后 B43-05 的 stats 与 handleAdminConfig 持久化错误统一真状态码）。
 func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
@@ -558,8 +559,8 @@ func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 
 	code, j := doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
 		`{"vision_base_url":"https://fail.example.com/v1"}`, adminTok)
-	if code != 200 {
-		t.Fatalf("落库失败应返回 HTTP 200（业务 code=500），实际 %d", code)
+	if code != 500 {
+		t.Fatalf("落库失败应返回 HTTP 500（家族整风：反代/监控可感知），实际 %d", code)
 	}
 	if j["code"].(float64) != 500 {
 		t.Fatalf("落库失败应业务 code=500 如实区分，实际 %v", j)

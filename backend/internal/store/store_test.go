@@ -19,6 +19,54 @@ func openTestStore(t *testing.T) *Store {
 	return New(d)
 }
 
+func TestLoadLogsWindowKeepsRecent(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	s := New(d)
+
+	// 插入 30050 行（窗口 20000 之外的旧行 + 窗口内的新行）
+	for i := 0; i < 30050; i++ {
+		if err := s.AppendLog("acct1", 61115, "select", "批量填充", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 窗口内的最新行（id 最大，必返回）
+	if err := s.AppendLog("acct1", 61205, "select", "窗口内最新", true); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.LoadAllLogs(2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2000 {
+		t.Fatalf("取最近 2000 条，实际 %d", len(all))
+	}
+	if all[0].Result != "窗口内最新" {
+		t.Fatalf("最新行应排首，实际 %v", all[0].Result)
+	}
+	minID := all[1999].ID
+	for _, e := range all {
+		if e.ID < minID {
+			t.Fatalf("窗口内混入更旧行: %d", e.ID)
+		}
+	}
+
+	logs, err := s.LoadLogs("acct1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 100 {
+		t.Fatalf("账号日志取最近 100 条，实际 %d", len(logs))
+	}
+	if logs[0].Result != "窗口内最新" {
+		t.Fatalf("账号日志最新行应排首，实际 %v", logs[0].Result)
+	}
+}
+
 // openStoreMultiConn 打开一个多连接的 Store（不设单连接上限）。
 // 用途：复现激活码并发扣减的"读改写"竞态——生产配置单连接会串行化掩盖竞态，
 // 这里放开连接数以暴露真实的并发语义（future-proof：改连接数/跨进程即会触发）。

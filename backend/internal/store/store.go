@@ -224,8 +224,11 @@ func (s *Store) LoadLogs(acct string, limit int) ([]LogEntry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	// 档①（R54）：保留最近日志窗口的查询前置——task_log 无清理无限增长，
+	// 百万行后全表扫描退化为秒级。自增主键 max(id) 走 O(1) 索引，窗口恒为
+	// 最近 2 万条（日志仅展示用途，审计无合规要求），零删除零 DDL 契约不变。
 	rows, err := s.db.Query(
-		"SELECT id, account, class_id, action, result, is_ok, created_at FROM task_log WHERE account = ? ORDER BY id DESC LIMIT ?",
+		"SELECT id, account, class_id, action, result, is_ok, created_at FROM task_log WHERE account = ? AND id > (SELECT max(id) - 20000 FROM task_log) ORDER BY id DESC LIMIT ?",
 		acct, limit)
 	if err != nil {
 		return nil, err
@@ -416,7 +419,7 @@ func (s *Store) LoadAllLogs(limit int) ([]LogEntry, error) {
 		limit = 500
 	}
 	rows, err := s.db.Query(
-		"SELECT id, account, class_id, action, result, is_ok, created_at FROM task_log ORDER BY id DESC LIMIT ?",
+		"SELECT id, account, class_id, action, result, is_ok, created_at FROM task_log WHERE id > (SELECT max(id) - 20000 FROM task_log) ORDER BY id DESC LIMIT ?",
 		limit)
 	if err != nil {
 		return nil, err

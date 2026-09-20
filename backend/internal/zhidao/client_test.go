@@ -339,6 +339,49 @@ func TestLoginLogsFailureSummary(t *testing.T) {
 	}
 }
 
+// TestLoginRetriesTransientInitError 验证：登录初始化会话（GET /login）遇瞬时连接
+// 错误时重试一次即可成功——不能因低频网络抖动直接判登录失败。
+// 根因背景（R46 起 4 轮 6+ 样本）：Windows 宿主 api 包测试内 httptest mock 服务器
+// 连接瞬时失败（connectex），经 Login→fetchLoginPage 翻译成"初始化登录会话失败"
+// 业务文案落在任意断言行上误红。此处为产品层网络瞬时抖动自愈重试——纯 GET /login
+// 不消耗验证码限额，不违背"识别失败不刷限流"既有契约（网络层自愈，绝不含验证码重试）。
+func TestLoginRetriesTransientInitError(t *testing.T) {
+	var loginPages int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 首个 /login 请求掐断连接模拟瞬时连接失败；其余请求正常响应
+		if strings.HasSuffix(r.URL.Path, "/login") && atomic.AddInt32(&loginPages, 1) == 1 {
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, _ := hj.Hijack()
+				conn.Close()
+				return
+			}
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": " abcd "}}}})
+		case strings.HasSuffix(r.URL.Path, "/login/doLogin"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "tok-ok"})
+		default:
+			w.Write([]byte("ok"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	tok, err := c.Login("acct", "pwd")
+	if err != nil {
+		t.Fatalf("瞬时初始化失败后应重试成功: %v", err)
+	}
+	if tok != "tok-ok" {
+		t.Fatalf("token 错误: %s", tok)
+	}
+	if got := atomic.LoadInt32(&loginPages); got != 2 {
+		t.Fatalf("/login 应请求 2 次（1 失败 + 1 重试），实际 %d", got)
+	}
+}
+
 // TestExitClass 验证退选接口：路径/请求体与真实 HAR 一致（form classId）。
 func TestExitClass(t *testing.T) {
 	var gotPath, gotBody string

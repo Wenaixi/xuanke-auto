@@ -278,20 +278,29 @@ var ErrUnauthorized = fmt.Errorf("未登录，token 已失效")
 const loginUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 
 // fetchLoginPage 初始化登录会话：GET /login 种下会话 Cookie。
+// 网络瞬时抖动自愈：首请求连接失败重试一次（纯 GET /login 不消耗验证码限额，
+// 不违背"失败即返回不刷限流"既有契约——自愈只覆盖网络层，绝不含验证码重试）。
 func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
-	if err != nil {
-		return err
+	for attempt := 1; ; attempt++ {
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		resp, err := sess.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			_, err = io.Copy(io.Discard, resp.Body)
+			if err == nil {
+				return nil
+			}
+		}
+		// 网络层瞬时抖动（connectex/EOF 等）自愈重试一次；重试仍失败原样上抛
+		if attempt == 2 {
+			return err
+		}
 	}
-	req.Header.Set("User-Agent", ua)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	resp, err := sess.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, err = io.Copy(io.Discard, resp.Body)
-	return err
 }
 
 // fetchCaptchaImage 取验证码图片（会话绑定校验码）。

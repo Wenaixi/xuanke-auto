@@ -491,8 +491,24 @@ func isConnErr(err error) bool {
 }
 
 // cloneReq 深拷贝请求（httpDo 重试复用不共享体，防 Body 已消费）。
+// read 类连接错误重试时首个 RoundTrip 已把 body 完整读出（服务端已消费）——
+// req.Clone 只浅拷贝 Body（同一读取器，已读空），GetBody 未设时重试请求体
+// 为空（独立程序实证 RoundTrip#1 body=classId=61115 → #2 body=""）。这里
+// 为 POST 表单体补 GetBody 重生成（bytes.NewReader 还原），重试请求带完整
+// body；Request.GetBody 本身已设置时原样保留（deepcopy 语义）。
 func cloneReq(req *http.Request) *http.Request {
-	return req.Clone(req.Context())
+	cl := req.Clone(req.Context())
+	if req.Body != nil && req.GetBody == nil {
+		if body, err := io.ReadAll(req.Body); err == nil {
+			req.Body.Close()
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			cl.Body = io.NopCloser(bytes.NewReader(body))
+			cl.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(body)), nil
+			}
+		}
+	}
+	return cl
 }
 
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。

@@ -954,7 +954,8 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 
 // TestAdminStatsOpenTimeFromRecognized 开放时间 = 调度器平台 beginTimes 自动识别态
 // （唯一事实源，配置链路已整体移除）——stats 的 open_time 必须输出识别值、open_time_set
-// 反映是否识别到；未识别（零值 / 历史过期值）输出空串而非 "0001-01-01 00:00:00" 年份错位值。
+// 反映识别槽是否有值（未识别 / 历史过期值都非零值槽——识别值是否过期由展示方判定，
+// 决策锚 1 绝不截断过期值，此处照常输出上次识别的开放时间）。
 func TestAdminStatsOpenTimeFromRecognized(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
@@ -984,7 +985,8 @@ func TestAdminStatsOpenTimeFromRecognized(t *testing.T) {
 		t.Fatalf("stats 二次读取异常: %d %v", code, j)
 	}
 	st, _ = j["data"].(map[string]any)
-	// 与调度器识别态必须同源（识别过期 → 空串 + open_time_set=false）。
+	// 与调度器识别态必须同源（识别槽有值 → 输出该值 + open_time_set=true；识别值
+	// 是否过期不影响——决策锚 1 保留识别事实，管理员可见"上次识别的开放时间"）。
 	// stats 对零值输出空串（非 year-1），故期望值 = 识别值非零才格式化。
 	recog := d.sched.RecognizedOpenTime()
 	want := ""
@@ -995,7 +997,7 @@ func TestAdminStatsOpenTimeFromRecognized(t *testing.T) {
 		t.Fatalf("stats open_time 应与调度器识别值同源：应为 %q，实际 %q", want, s)
 	}
 	if st["open_time_set"] != (!recog.IsZero()) {
-		t.Fatalf("stats open_time_set 应与调度器识别态同源（识别∈有效→true 否则 false）: %v", st["open_time_set"])
+		t.Fatalf("stats open_time_set 应与调度器识别态同源（识别槽有值→true 否则 false）: %v", st["open_time_set"])
 	}
 }
 

@@ -880,9 +880,12 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 开放时间 = 调度器平台 beginTimes 自动识别态（唯一事实源，不再读任何配置）。
-	// 未识别 / 识别过期 → 零值。零值输出空串（而非 "0001-01-01 00:00:00" 年份错位值）——
+	// 未识别（识别槽无值）→ 零值，零值输出空串（而非 "0001-01-01 00:00:00" 年份错位值）——
 	// 前端 stats 展示依赖 open_time_set 判定"未识别"，字符串本身必须与其一致
 	// （配置回显 handleConfig 对零值已输出空串，stats 此处对齐，杜绝管理员把 year-1 当开放时间）。
+	// 识别过期（识别槽有值但已过去）：决策锚 1 契约——识别值绝不截断成零值，照常输出该过期日期
+	//（展示层语义：管理员仍可见"上次识别的开放时间"，与学生端 /state 的 open_time_known
+	// 过期降级不冲突——前者看识别事实，后者看当前有效性）。
 	open := d.Sched.RecognizedOpenTime()
 	openTimeStr := ""
 	if !open.IsZero() {

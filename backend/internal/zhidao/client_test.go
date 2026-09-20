@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+		"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // socketPreheat 测试夹具端口预加热：预创建并关闭一个 127.0.0.1 回环套接字，
@@ -27,8 +29,24 @@ func socketPreheat() {
 	}
 }
 
+// TestMain 包级就绪预热：整个包测试开始前预创建-关闭一个回环套接字，把
+// Windows 回环 TIME_WAIT 冷启动队列在跑任何测试之前排空——覆盖不经
+// loginMockServer 的裸 httptest.NewServer 入口（TestNoAutoRelogin 等），
+// 是全量轮前序包 TIME_WAIT 残留下所有 mock 首请求 connectex 的兜底
+// （R56 全量 12 轮 R1 zhidao FAIL 根因；socketPreheat 逐测试调用仍保留，
+// 双保险）。log 置 Discard 静默 test 期间任何意外日志。
+func TestMain(m *testing.M) {
+	log.SetOutput(io.Discard)
+	socketPreheat()
+	os.Exit(m.Run())
+}
+
 // loginMockServer 构造登录链路 mock。
 // failRecognize: 前 N 次识别返回空串（识别失败）；failSubmit: 前 M 次提交被拒。
+// 构造后主动发一条健康探测请求把 Windows 回环冷启动窗口前移到夹具构造期
+// （与 api 包 readyProbe 同款轮询：200ms×5，总窗口 ~1s）——socketPreheat 只预占
+// 单个端口，全量轮前序包 TIME_WAIT 残留下 Login 首请求仍可 connectex（R56
+// 全量 12 轮 R1 zhidao FAIL 实证），探测把 accept 就绪前的最首请求吃掉。
 func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Server, *int32, *int32) {
 	t.Helper()
 	socketPreheat()
@@ -56,7 +74,32 @@ func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Ser
 		}
 	}))
 	t.Cleanup(srv.Close)
+	// 就绪探测：把冷启动窗口前移到夹具构造期（与 api 包 readyProbe 同款轮询）
+	readyProbe(t, srv.URL)
 	return srv, &captchas, &submits
+}
+
+// readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环
+// 冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms×5），全部失败才上抛
+// 由调用方 Fatal——api 包同款，zhidao 包 Login 链路同样根治（R56 全量 R1 实证）。
+func readyProbe(t *testing.T, baseURL string) {
+	t.Helper()
+	const (
+		probeRetries = 5
+		probeDelay   = 200 * time.Millisecond
+	)
+	for i := 0; i <= probeRetries; i++ {
+		resp, err := http.Get(baseURL + "/login")
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return
+		}
+		if i < probeRetries {
+			time.Sleep(probeDelay)
+		}
+	}
+	t.Fatalf("mock 服务器就绪探测失败: %v", baseURL)
 }
 
 // TestLoginRetryWithinLimits 验证：识别失败可刷新重试，提交被拒会刷新验证码，最终成功。

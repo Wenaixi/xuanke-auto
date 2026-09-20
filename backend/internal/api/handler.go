@@ -113,17 +113,12 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adminName := d.AdminNameValue()
-	// 管理员入口：默认账号 admin（可配置改名）+ 管理口令（不触碰教务登录，口令比对恒定时间防爆破）
-	if req.Account == adminName {
-		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) != 1 {
-			// 口令错误：恒定时间比对已抹平字节级差异（时序安全）。
-			// n4 + A5（历轮）：错误分支固定延迟 loginTimingFlat；正确分支同一延迟——
-			// 统一"管理员名（口令对/错）vs 未知学生（教务登录网络往返）"三者的响应时延差，
-			// 管理员账号名不再能靠响应快慢（快=对、慢=错）被侧信道枚举出口令正确性。
-			time.Sleep(loginTimingFlat)
-			writeJSON(w, 1, nil, "管理口令错误")
-			return
-		}
+	// B43-04：管理员入口必须"管理员名 + 管理口令"双条件——此前只判 req.Account == adminName，
+	// 教务学生账号恰好也叫 adminName（平台允许自定义账号名时可能撞名）时必被口令比对拒绝
+	// （口令是管理口令必错），该学生永远无法登录（DoS）。现在仅"管理员名 + 管理口令都匹配"
+	// 才走管理员签发；不匹配的 adminName 撞名学生走教务登录正常登录（LoginByPassword 成功正常
+	// 签发），不再吞。教务登录也失败且账号是管理员名时才报"管理口令错误"（管理员口令输错语义）。
+	if req.Account == adminName && subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) == 1 {
 		// A5：正确口令分支与错误分支等时——延迟后再签发会话，抹平"口令对错"时延差。
 		// 管理员登录低频操作，300ms 无感；撞库者无法再靠"这个账号返回快=口令对"定位管理员口令。
 		time.Sleep(loginTimingFlat)
@@ -135,6 +130,14 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := d.Accounts.LoginByPassword(req.Account, req.Password, d.Encrypt); err != nil {
+		// B43-04：管理员名 + 口令错（含撞名学生教务口令也错）文案统一归因"管理口令错误"——
+		// 错误分支固定延迟 loginTimingFlat，统一"管理员名 vs 未知学生"响应时延差，
+		// 管理员账号名不再能靠响应快慢被侧信道枚举出口令正确性（n4 + A5 语义保留）。
+		if req.Account == adminName {
+			time.Sleep(loginTimingFlat)
+			writeJSON(w, 1, nil, "管理口令错误")
+			return
+		}
 		writeJSON(w, 1, nil, "登录失败: "+err.Error())
 		return
 	}

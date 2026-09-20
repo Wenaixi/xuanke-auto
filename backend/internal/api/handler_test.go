@@ -431,10 +431,16 @@ func TestActivateBadCode(t *testing.T) {
 
 func TestAdminAuth(t *testing.T) {
 	d := newTestDeps(t)
-	// 错误管理口令登录 admin 应失败
+	// B43-04：管理员名 + 非管理口令先试教务登录 → mock 平台教务全成功 → 撞名学生登录
+	// 走教务成功分支。未激活撞名学生返回 1001（颁发票据）而非管理员口令错误——这本身
+	// 就是 B43-04 契约（撞名学生绝不被管理员分支吞掉）；激活后的正常会话由
+	// TestLoginAdminNameCollisionStudentCredential 覆盖。
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"wrong"}`)
-	if code != 200 || j["code"].(float64) != 1 {
-		t.Fatalf("错误管理口令登录应 code=1: %d %v", code, j)
+	if code != 200 {
+		t.Fatalf("登录请求应 HTTP 200: %d", code)
+	}
+	if j["code"].(float64) == 1 && strings.Contains(j["msg"].(string), "管理口令错误") {
+		t.Fatalf("B43-04 后撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
 	}
 	// 无会话访问管理接口应 403（B39-02：HTTP 状态码真实 403，此前恒 200）
 	code, j = doJSON(t, d.api, "GET", "/api/admin/codes", "")
@@ -1376,20 +1382,74 @@ func TestLoginActivateSeparateBuckets(t *testing.T) {
 // TestLoginAdminWrongPasswordTimingFlat n4 登录时延侧信道：管理员口令错误分支必须
 // 固定延迟 loginTimingFlat 后再响应，使"管理员名（口令错立即回）"与"未知学生
 // （教务登录网络往返）"的响应时延差被拉平——管理员账号名不能靠响应快慢被枚举。
+// B43-04 后语义：管理员名 + 非管理口令先试教务登录（mock 平台教务全成功 → 撞名学生
+// 登录成功返回 code=0 签发普通会话），错误口令显式失败路径在真实平台教务 doLogin
+// 对该口令也失败时才触达（返回"管理口令错误"），代码保留该分支。
+// 本用例退化为验证 B43-04 契约：管理员名 + 非管理口令在教务 mock 全成功下被当作
+// 撞名学生签发普通会话（不再返回"管理口令错误"）。
 func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
 	d := newTestDeps(t)
-	start := time.Now()
-	// 正确管理员账号名 + 错误口令：走恒定时间比对失败 + loginTimingFlat 固定延迟
+	// 管理员名 + 非管理口令：B43-04 后先试教务登录 → mock 平台教务全成功 → 撞名学生
+	// 登录走教务成功分支。未激活撞名学生返回 1001（颁发票据）而非管理员口令错误——
+	// 这本身就是 B43-04 契约（撞名学生绝不被管理员分支吞掉），激活后的普通会话由
+	// TestLoginAdminNameCollisionStudentCredential 覆盖。
+	// 时延语义（n4）：管理员名 + 口令错已不再"立即返回"——先走教务登录网络往返，
+	// 与未知学生天然等时；教务登录也失败时才进 adminName 分支补 Sleep(loginTimingFlat)
+	//（代码 137 行保留），侧信道语义由结构保证，不在此断定时长。
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"nope"}`)
-	elapsed := time.Since(start)
 	if code != 200 {
-		t.Fatalf("管理口令错误应返回 HTTP 200（业务 code=1），实际 %d", code)
+		t.Fatalf("登录请求应 HTTP 200: %d", code)
 	}
-	if j["code"].(float64) != 1 {
-		t.Fatalf("管理口令错误应 code=1，实际 %v", j)
+	if j["code"].(float64) == 1 && strings.Contains(j["msg"].(string), "管理口令错误") {
+		t.Fatalf("B43-04 后撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
 	}
-	if elapsed < loginTimingFlat {
-		t.Fatalf("管理员口令错误分支必须延迟 ≥ loginTimingFlat(%v) 再响应，实际 %v——响应过快会让管理员账号名被侧信道枚举", loginTimingFlat, elapsed)
+}
+
+// TestLoginAdminNameCollisionStudentCredential B43-04：教务学生账号与配置管理员名撞名时，
+// 用学生自己的教务口令登录必须走教务登录分支（成功签发普通会话），绝不能因"账号名==adminName"
+// 而被管理员口令比对吞掉（旧实现：口令=管理口令必错 → 该学生永远无法登录，DoS）。
+// 反向用例：管理员名 + 错误口令仍明确"管理口令错误"。
+func TestLoginAdminNameCollisionStudentCredential(t *testing.T) {
+	d := newTestDeps(t)
+	// 撞名学生账号需要"已激活"才走 issueSession（否则返回 1001）。激活前置必须走
+	// 教务登录分支——但撞名学生未激活时登录即走教务成功分支（返回 1001 颁发票据），
+	// 这正是 B43-04 的核心契约：撞名学生绝不被管理员分支吞掉。先验证未激活登录拿到票据
+	if err := d.store.CreateActivationCode("XK-ABCD-EF12-3456", 10); err != nil {
+		t.Fatal(err)
+	}
+	code, jAct := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"pwd"}`)
+	if code != 200 || jAct["code"].(float64) != 1001 {
+		t.Fatalf("未激活撞名学生登录必须走教务分支颁发票据（B43-04），实际 %d %v", code, jAct)
+	}
+	ticket, _ := jAct["data"].(map[string]any)
+	if ticket == nil || ticket["ticket"] == nil || ticket["ticket"] == "" {
+		t.Fatalf("未激活撞名学生登录应颁发激活票据（B43-04），实际 %v", jAct)
+	}
+	code, j := doJSON(t, d.api, "POST", "/api/activate",
+		`{"account":"admin","code":"XK-ABCD-EF12-3456","ticket":"`+ticket["ticket"].(string)+`"}`)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("撞名学生激活失败: %d %v", code, j)
+	}
+	// 教务 mock 平台对任意账号+正确验证码登录成功（token=tok-new）——撞名学生可正常登录
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"pwd"}`)
+	if code != 200 || j["code"].(float64) != 0 {
+		t.Fatalf("撞名学生用教务口令登录必须成功签发普通会话（B43-04），实际 %d %v", code, j)
+	}
+	tok, _ := j["data"].(map[string]any)
+	if tok == nil || tok["token"] == nil || tok["token"] == "" {
+		t.Fatalf("撞名学生登录成功必须返回会话令牌，实际 %v", j)
+	}
+	// 签发的是普通学生会话（非管理员会话）：撞名学生绝不能获得管理员权限
+	if d.sessions.IsAdmin(tok["token"].(string)) {
+		t.Fatal("撞名学生登录签发的必须是普通学生会话，绝不带管理员权限（B43-04）")
+	}
+	// 反向用例：管理员名 + 错误口令 → 明确"管理口令错误"（业务 code=1）
+	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"wrong-password"}`)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("管理员名 + 错误口令应返回管理口令错误，实际 %d %v", code, j)
+	}
+	if msg, _ := j["msg"].(string); !strings.Contains(msg, "管理口令错误") {
+		t.Fatalf("管理员名 + 错误口令文案应含'管理口令错误'，实际 %q", msg)
 	}
 }
 

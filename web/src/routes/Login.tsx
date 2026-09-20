@@ -89,6 +89,10 @@ export default function Login({ onLogin }: Props) {
         setActivateError("激活票据已过期或已使用，请取消后重新登录即可进入（本账号已开通）")
         setActivationCode("")
       } else {
+        // 激活码错误等非「过期/已用」失败：服务端先 ConsumeTicket 再校验激活码，失败
+        // 也销毁票据；滞留旧票重试只会拿到"激活票据无效"的误导文案。与过期/已用分支
+        // 同款清空，下次登录再遇 1001 由服务端下发新票覆盖，UI 永不显示已消费票据。
+        setPendingTicket("")
         setActivateError(e.message || "激活失败，请检查激活码是否正确")
       }
     } finally {

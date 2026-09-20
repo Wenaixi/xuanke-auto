@@ -347,6 +347,10 @@ func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification 
 	form.Set("captcha", captchaText)
 	form.Set("identification", identification)
 	form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
+	// 契约微差（OBSERVE-54-01）：真实网站 `priorityId: localStorage["priorityId"]`
+	// 在学生首次登录（未进 /home/menus）时 undefined，jQuery 表单编码静默丢弃该键；
+	// Go 端恒发 `priorityId=` 空串。平台解析"空串"与"缺键"等价（不触发切换用户），
+	// 学生登录本就无真值，两形态无实质差异——保留空串（行为零变化），载明语义即可。
 	form.Set("priorityId", "")
 	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/login/doLogin",
 		strings.NewReader(form.Encode()))

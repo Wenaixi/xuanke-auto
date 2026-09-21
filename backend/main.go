@@ -124,13 +124,13 @@ func main() {
 			continue
 		}
 		if len(ts) > 0 {
-			// B10-01：重启恢复目标用 RestoreTargets（不清 refused）——
+			// 重启恢复目标用 RestoreTargets（不清 refused）——
 			// 此前用 SetTargetsForAccount 会 delete refused + 删库行，重启后手动退选
-			// 记录全丢、自动引擎重新抢回（B9-02 被恢复顺序抵消）。
+			// 记录全丢、自动引擎重新抢回（恢复顺序抵消）。
 			sched.RestoreTargets(a, ts)
 		}
 	}
-	// B9-02 + B10-01：恢复已手动退选记录——RestoreTargets 不清库行，此处 LoadRefused
+	// 恢复已手动退选记录——RestoreTargets 不清库行，此处 LoadRefused
 	// 仍能读到全部退选；RestoreRefused 注入内存后不被任何后续步骤覆盖。
 	if refused, err := st.LoadRefused(); err != nil {
 		log.Printf("[main] 读取已退选记录失败: %v", err)
@@ -139,7 +139,7 @@ func main() {
 	}
 	sched.Start()
 
-	// R71：系统托盘（Windows 桌面 / Linux 桌面 CGO=1）——常驻托盘，右键菜单
+	// 系统托盘（Windows 桌面 / Linux 桌面 CGO=1）——常驻托盘，右键菜单
 	// 打开浏览器/关于/退出；Docker/服务器（Linux CGO=0）无托盘，服务照常启动。
 	// 托盘就绪后放行 main 继续（避免图标一闪而过）；关闭自动开浏览器，改为
 	// 托盘「打开浏览器」手动打开（托盘应用习惯）。
@@ -156,7 +156,7 @@ func main() {
 		}
 	}()
 
-	// 会话库（12 小时过期；M-7 后台周期清扫过期会话与票据）
+	// 会话库（12 小时过期；后台周期清扫过期会话与票据）
 	sessions := session.New(12 * time.Hour)
 	defer sessions.Close()
 
@@ -168,10 +168,10 @@ func main() {
 	addr := ":" + cfg.Port
 	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
 	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
-	// R71：自动开浏览器改由托盘「打开浏览器」菜单触发（桌面带托盘场景）；
+	// 自动开浏览器改由托盘「打开浏览器」菜单触发（桌面带托盘场景）；
 	// 无托盘场景（Docker/Linux CGO=0）仍自动打开一次（保持原行为）。
 	openBrowser("http://localhost" + addr)
-	// M-5 修复：http.Server 显式超时——公网部署时 slowloris/慢速 POST
+	// http.Server 显式超时——公网部署时 slowloris/慢速 POST
 	// 不再能占用 goroutine 与连接池饿死调度器 tick 与健康检查。
 	srv := &http.Server{
 		Addr:              addr,

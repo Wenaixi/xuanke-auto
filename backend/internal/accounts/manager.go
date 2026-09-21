@@ -184,14 +184,14 @@ func (m *Manager) Registered() []string {
 }
 
 // SetVision 热更新全部账号客户端的验证码识别配置（管理员运行时修改立即生效）。
-// B29-01：赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
+// 赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
 // SetVision 再 applyCaptchaRecognizerFor(SetRecognizer)，若 SetVision 直接覆盖模板，
 // 两条调用之间新 ensure 的客户端会短暂拿到 nil 引擎；保留当前引擎与
 // zhidao.Client.SetVision 的"绝不挥动引擎切换"语义对齐（引擎归属 SetRecognizer）。
 func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cfg = cfg.WithRecognizer(m.vision.Recognizer()) // 保留模板当前引擎（B29-01）
+	cfg = cfg.WithRecognizer(m.vision.Recognizer()) // 保留模板当前引擎
 	m.vision = cfg
 	for _, c := range m.clients {
 		c.SetVision(cfg)
@@ -200,7 +200,7 @@ func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 
 // SetRecognizer 热切换全部账号客户端的验证码识别引擎（ddddocr 本地 / Vision 二选一）。
 // recognizer 为 nil 时表示"无引擎"（登录识别立即报错，直到管理员恢复配置）。
-// B29-01：同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
+// 同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
 // 当前已有客户端，m.vision 模板的 recognizer 恒为 nil：此后 ensure 新建客户端经
 // zhidao.New(m.baseURL, m.vision) 时 recognizer 拿不到引擎，默认兜底仅认 APIKey
 // （SF_API_KEY 留空的 ddddocr 部署下），新账号登录识别直接报"未配置验证码识别引擎"，
@@ -235,7 +235,7 @@ func (m *Manager) gateTryAcquire() bool {
 }
 
 // LoginByPassword 用账密登录该账号独立客户端；成功后加密密码与 token 落库。
-// doLogin 前先经全局频率闸门非阻塞准入（B42-01）：窗口内预算已满立即返回明确错误，
+// doLogin 前先经全局频率闸门非阻塞准入：窗口内预算已满立即返回明确错误，
 // 绝不放行直发平台 doLogin——多账号集中失效自动重登排队时，任一学生手动重登与排队
 // 重登并发触达平台，N+1 并发可刷爆出口 IP（平台"登录失败次数过多"按 IP 计数）。
 // 管理员入口（换绑定新账密）同样收口到此闸门：换绑是低频操作，被拦一次重试即可，
@@ -245,15 +245,15 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 		return "", fmt.Errorf("登录尝试过于频繁，请稍后再试")
 	}
 	c := m.ensure(acct)
-	// B24-01：判别本次是不是"纯新建的空壳"再决定失败清理——
+	// 判别本次是不是"纯新建的空壳"再决定失败清理——
 	// 需在 Login 前快照，因为 Login 成功分支会 SetCredentials 写 token，失败返回时
-	// 无法再区分"本次新建"与"此前已持有效 token 的既有客户端"（B23-02 的清理无判别
+	// 无法再区分"本次新建"与"此前已持有效 token 的既有客户端"（此前清理无判别
 	// 直接摘除，会误删后者：自动抢课静默停摆 + 该账号选课大厅持续报错，直到手动
 	// 重新登录成功——黄金期手滑输错密码即全程失联）。
 	wasShell := c.Token() == ""
 	token, err := c.Login(acct, password)
 	if err != nil {
-		// B23-02：登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
+		// 登录失败残留空 token 客户端抢占核心账号位——ensure 已把该
 		// 账号写入注册表（clients+order 首位），但空 token（无账密）客户端对 FindElectives/
 		// AnyClientWithAccount 恒返回 code=-1 ErrUnauthorized：调度器 probe() 主体每次探测
 		// 都触发 maybeRelogin("order[0]") → ReloginIfNeeded 报"未登录且无保存账密"、reloginFail
@@ -301,7 +301,7 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 				pwd = p
 			} else {
 				// 解密失败（主密钥变更后旧密文不可解）：自动重登将"无保存账密"，与
-				// LoginByPassword 加密失败留痕（B44-01）对称——运行期主密钥不可变，
+				// LoginByPassword 加密失败留痕对称——运行期主密钥不可变，
 				// 此处触达意味着存储被外部改写/降级，日志是唯一排查线索。
 				log.Printf("[accounts] 账号 %s 凭据解密失败，自动重登将无保存账密: %v", cd.Account, err)
 			}

@@ -2,7 +2,7 @@
 
 package main
 
-// Windows 托盘实现（R71 需求：exe 启动常驻系统托盘，右键菜单 打开浏览器/关于/退出）。
+// Windows 托盘实现（exe 启动常驻系统托盘，右键菜单 打开浏览器/关于/退出）。
 // 用 getlantern/systray（成熟跨平台托盘库，Windows 原生 SysTrayIcon）。
 // 关于对话框用 Win32 原生 MessageBox（深色系统主题自动暗色，符合项目纯黑极简风格）。
 

@@ -10,7 +10,7 @@ import (
 )
 
 // 串行延迟测试：200 次连续请求。
-// B11-A4：/api/state 挂 requireAuth（无令牌返回 401），此前无 Authorization 头
+// /api/state 挂 requireAuth（无令牌返回 401），此前无 Authorization 头
 // 测的是 401 拒绝路径而非真实业务延迟——结果虚低且无意义。现支持 -token 注入 Bearer 令牌
 // （从 data/.env 的 XUANKE_ADMIN_TOKEN 或运行日志中取得）；未提供时仍可测 401 路径但输出标注。
 func main() {
@@ -19,7 +19,7 @@ func main() {
 	url := flag.String("url", "http://localhost:3091/api/state", "目标接口")
 	flag.Parse()
 
-	// MINOR-53-02：参数边界防御——-n ≤0 时回退默认（杜绝 0 次平均除零 / 负时长乱象）
+	// 参数边界防御——-n ≤0 时回退默认（杜绝 0 次平均除零 / 负时长乱象）
 	if *times <= 0 {
 		*times = 200
 	}

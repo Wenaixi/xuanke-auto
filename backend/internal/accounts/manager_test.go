@@ -15,13 +15,13 @@ import (
 )
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环冷启动窗口
-// 前移到夹具构造期（与 api/zhidao 包同款根治——R64 OBSERVE-64-02: accounts 是唯一
-// 无就绪前移的包，R12 全量轮两测试 mock /login 首请求 connectex 正是夹具缺口）。
+// 前移到夹具构造期（与 api/zhidao 包同款根治——accounts 是唯一
+// 无就绪前移的包，两测试 mock /login 首请求 connectex 正是夹具缺口）。
 // 连接层失败轮询重试（200ms×10 + 显式 2s 超时，总窗口 ~2s，与 api/zhidao 宽栅栏
-// 一次性配平——R68 OBSERVE-68-01: accounts 曾是收敛后残余面最低收敛点，当前被
+// 一次性配平——accounts 曾是收敛后残余面最低收敛点，当前被
 // 包序天然保护（store 高耗时后接 zhidao 而非 accounts），包序变化即暴露），全部
 // 失败才上抛由调用方 Fatal。
-// OBSERVE-65-03：三处夹具未有 socketPreheat 双保险（zhidao/api 有 socket 预创建），
+// 三处夹具未有 socketPreheat 双保险（zhidao/api 有 socket 预创建），
 // 8 轮全绿实证无残余；若未来 accounts 再出冷启动 flake 第一候选即补 socketPreheat。
 func readyProbe(t *testing.T, baseURL string) {
 	t.Helper()
@@ -77,7 +77,7 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 			// 恒拒绝：构造登录失败
 			json.NewEncoder(w).Encode(map[string]any{"code": 1, "isOk": false, "msg": "账号或密码错误"})
 		default: // /login 与 /login/captcha
-			// OBSERVE-65-02：与真实平台 text/html 差异（识别链路不消费响应体，无害），
+			// 与真实平台 text/html 差异（识别链路不消费响应体，无害），
 			// 补 CT 保持夹具语义对齐
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte("ok"))
@@ -100,8 +100,8 @@ func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string
 	m.mu.Unlock()
 }
 
-// TestLoginFailKeepsExistingValidClient B24-01：已持有效 token 的已注册客户端，
-// 本次账密登录失败时不得被 B23-02 清理摘除——否则自动抢课静默停摆 + 该账号
+// TestLoginFailKeepsExistingValidClient：已持有效 token 的已注册客户端，
+// 本次账密登录失败时不得被清理摘除——否则自动抢课静默停摆 + 该账号
 // 选课大厅持续报错，直到手动重新登录成功（黄金期手滑输错密码即全程失联）。
 // 修复前（无 token 判别直接摘除）：红——已注册客户端被删除，ClientFor 报不存在。
 // 修复后（Token()!="" 保留）：绿——客户端仍存在，下个 tick 自动链继续工作。
@@ -115,14 +115,14 @@ func TestLoginFailKeepsExistingValidClient(t *testing.T) {
 	}
 
 	if _, ok := m.ClientFor("acct1"); !ok {
-		t.Fatal("已持有效 token 的已注册客户端在本次登录失败后必须保留（B24-01：B23-02 清理误删）")
+		t.Fatal("已持有效 token 的已注册客户端在本次登录失败后必须保留（清理误删）")
 	}
 }
 
-// TestLoginFailRemovesFreshShell B23-02 回归守卫：纯新建的空壳客户端（从未有
+// TestLoginFailRemovesFreshShell 回归守卫：纯新建的空壳客户端（从未有
 // token），登录失败必须被摘除——绝不让空 token 客户端抢占 order[0] 成为全校
 // 探测载体（AnyClient 恒返回 ErrUnauthorized，probe 主体每 tick 空转重登、
-// lastData 永不刷新）。B24-01 的"token 判别"绝不放行此路径。
+// lastData 永不刷新）。"token 判别"绝不放行此路径。
 func TestLoginFailRemovesFreshShell(t *testing.T) {
 	srv := loginRejectSrv(t)
 	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
@@ -132,7 +132,7 @@ func TestLoginFailRemovesFreshShell(t *testing.T) {
 	}
 
 	if _, ok := m.ClientFor("newbie"); ok {
-		t.Fatal("登录失败的空壳客户端必须被摘除（B23-02 契约不可侵犯）")
+		t.Fatal("登录失败的空壳客户端必须被摘除（契约不可侵犯）")
 	}
 	if _, ok := m.AnyClient(); ok {
 		t.Fatal("登录失败的空壳客户端不得作为 AnyClient 探测载体")
@@ -155,7 +155,7 @@ func gateSrv(t *testing.T) (*httptest.Server, *int32) {
 			atomic.AddInt32(&calls, 1)
 			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "tok-new"})
 		default: // /login 与 /login/captcha
-			// OBSERVE-65-02：与真实平台 text/html 差异（识别链路不消费响应体，无害）
+			// 与真实平台 text/html 差异（识别链路不消费响应体，无害）
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte("ok"))
 		}
@@ -165,7 +165,7 @@ func gateSrv(t *testing.T) (*httptest.Server, *int32) {
 	return srv, &calls
 }
 
-// TestLoginByPasswordRejectsWhenGateBudgetExhausted B42-01：学生手动登录（LoginByPassword）
+// TestLoginByPasswordRejectsWhenGateBudgetExhausted：学生手动登录（LoginByPassword）
 // 必须先经全局 doLogin 频率闸门做非阻塞准入——窗口内 quota 已满（gateUsed == gateLoginPerMin）
 // 时立即返回明确错误，绝不触达平台 doLogin，杜绝与排队重登并发打爆出口 IP（平台按 IP
 // 计"登录失败次数过多"）。管理员换绑同走此收口（低频操作被拦一次重试即可，统一收敛更安全）。
@@ -187,13 +187,13 @@ func TestLoginByPasswordRejectsWhenGateBudgetExhausted(t *testing.T) {
 	if n := atomic.LoadInt32(calls); n != 0 {
 		t.Fatalf("被闸门拒绝时绝不得触达平台 doLogin，实际 %d 次", n)
 	}
-	// 被拒后不得残留空壳客户端占位（与 B23-02 失败清理同语义）
+	// 被拒后不得残留空壳客户端占位（与失败清理同语义）
 	if _, ok := m.ClientFor("acct1"); ok {
 		t.Fatal("被闸门拒绝不得注册空壳客户端")
 	}
 }
 
-// TestLoginByPasswordAllowedWhenGateBudgetAvailable B42-01 对偶守卫：窗口内 quota 充足时
+// TestLoginByPasswordAllowedWhenGateBudgetAvailable 对偶守卫：窗口内 quota 充足时
 // 手动登录必须正常放行（且消耗一次预算，与排队重登共享同一闸门计数）——绝不误伤正常登录。
 func TestLoginByPasswordAllowedWhenGateBudgetAvailable(t *testing.T) {
 	srv, calls := gateSrv(t)
@@ -230,7 +230,7 @@ type minimalRecognizer struct {
 
 func (r minimalRecognizer) Recognize(img []byte) (string, error) { return "abcd", nil }
 
-// TestNewClientAfterSetRecognizerGetsEngine B29-01：SetRecognizer 必须把引擎同时写进
+// TestNewClientAfterSetRecognizerGetsEngine：SetRecognizer 必须把引擎同时写进
 // m.vision 模板——否则 SetRecognizer 只注入当前已有客户端，此后 ensure 新建客户端经
 // zhidao.New(m.baseURL, m.vision) 时 recognizer 恒为 nil：默认兜底仅认 APIKey（SF_API_KEY
 // 留空的 ddddocr 典型部署），新账号登录识别直接报"未配置验证码识别引擎"（识别 3 次全败、
@@ -260,7 +260,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	}
 	cc, _ := c.(*zhidao.Client)
 	if r := cc.CurrentRecognizer(); r == nil {
-		t.Fatal("SetRecognizer 后新建的客户端必须拿到识别引擎（B29-01：模板 recognizer 恒 nil 致新账号登录全败）")
+		t.Fatal("SetRecognizer 后新建的客户端必须拿到识别引擎（模板 recognizer 恒 nil 致新账号登录全败）")
 	} else if l, ok := r.(minimalRecognizer); !ok || l.name != "ddddocr" {
 		t.Fatalf("新客户端引擎必须是 SetRecognizer 注入的 ddddocr 实例，实际 %T %#v", r, r)
 	}
@@ -278,11 +278,11 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	}
 	cc2, _ := c2.(*zhidao.Client)
 	if r := cc2.CurrentRecognizer(); r == nil {
-		t.Fatal("SetVision 不得清掉模板引擎（B29-01：新客户端必须继续拿到 ddddocr）")
+		t.Fatal("SetVision 不得清掉模板引擎（新客户端必须继续拿到 ddddocr）")
 	}
 }
 
-// TestLoginByPasswordEncryptFailLogs B44-01 回归钉：加密函数失败时登录必须仍成功返回
+// TestLoginByPasswordEncryptFailLogs 回归钉：加密函数失败时登录必须仍成功返回
 // token（加密失败不阻断登录本身），且凭据绝不落库（fakeStore.saved 保持 false）——
 // 自动重登将无保存账密，日志是唯一审计线索（决策锚 17 零吞错对称）。
 // 修复前（无 else log）：退化为静默吞错，无测试覆盖。

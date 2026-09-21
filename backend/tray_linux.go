@@ -2,7 +2,7 @@
 
 package main
 
-// Linux 桌面版托盘（R71 需求：桌面版带托盘 + Docker 无头）。
+// Linux 桌面版托盘（桌面版带托盘 + Docker 无头）。
 // 用 getlantern/systray（Linux 后端需要 CGO + GTK3 桌面库）——CGO=0 时本文件
 // 被 build tag 排除（见 tray_linux_cgo0.go），Docker/服务器版无托盘。
 // 关于对话框用 zenity 命令行对话框（多数桌面发行版自带；无 zenity 时打印到控制台）。

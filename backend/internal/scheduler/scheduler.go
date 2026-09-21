@@ -52,7 +52,7 @@ type SchedulerState struct {
 	WindowClosed  bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
 	TokenValid    bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
 	Courses       []CourseStatus `json:"courses"`
-	// EmptyProbeRuns B20-02："空快照且从未开窗"的连续探测轮数——WindowClosed
+	// EmptyProbeRuns "空快照且从未开窗"的连续探测轮数——WindowClosed
 	// 视同关闭判据之一（探测量变），由 probe() 入账推进、开窗/非空快照归零；零值=尚未连续
 	// 探测到 3 轮（首探 1 次、二探 2 次都不算）。json 省略：前端/外部无需感知内部量变。
 	EmptyProbeRuns int `json:"-"`
@@ -76,13 +76,13 @@ const (
 // 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
 // 窗口已关闭（开放时间已过且快照为空）时降回 30 秒——窗口结束后再高频盯守毫无意义，
 // 只会浪费请求并刷屏日志；若管理员热改开放时间到未来（新一轮），临门判断仍优先生效。
-// B15-M2：open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
+// open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
 // 窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时提前返回远间隔——此前
 // `now.After(open.Add(-nearWindow))` 对零值 open 恒 true 落入临门 2s 分支，且快照非空时
 // WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
-// 提交已被 B11-A1 零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
+// 提交已被零值守卫挂起，探测也必须同步降频，行为不自相矛盾。
 func (s *Scheduler) probeIntervalFor(now time.Time) time.Duration {
-	// B15-M2：零值/无识别 = 远间隔——识别值已过去（识别过期）也落在零值判定，
+	// 零值/无识别 = 远间隔——识别值已过去（识别过期）也落在零值判定，
 	// 绝不在"未知开窗点"下仍 2s 高频轰炸平台（"访问过于频繁"熔断形态）。
 	return s.probeIntervalForOpen(now, s.openTimeFor(""))
 }
@@ -94,7 +94,7 @@ func (s *Scheduler) probeIntervalForOpen(now time.Time, open time.Time) time.Dur
 		return probeIntervalFar
 	}
 	if now.After(open.Add(-nearWindow)) {
-		// B19-01：从未开过窗 + 开放时间已过 + 空快照 = 幽灵窗口（平台窗口从未
+		// 从未开过窗 + 开放时间已过 + 空快照 = 幽灵窗口（平台窗口从未
 		// 开启或已关闭且从未被探测确认）——2s 高频盯守只剩烧平台（"访问过于频繁"熔断
 		// 形态）。以空快照 + 时钟失败裕量判定幽灵窗口，探测降回 30s 常态（窗口若真开、
 		// 管理员热改开放时间，临门判断自然重新收紧）。黄金期不受影响：开窗瞬间探测
@@ -144,9 +144,9 @@ type Store interface {
 	AppendLog(acct string, classID int, action, result string, isOK bool) error
 	SaveSuccess(acct string, classID int) error
 	UpdateIDToken(acct, idToken string) error                 // 自动重登后落库新 token
-	DeleteSuccess(acct string, classID int) error             // B8-M2：手动退选后删除 success 行
-	SaveRefused(acct string, classID int) error               // B9-02：手动退选记库，重启后自动引擎仍不抢回
-	DeleteRefused(acct string) error                          // B9-02：重设目标清空该账号全部退选标记
+	DeleteSuccess(acct string, classID int) error             // 手动退选后删除 success 行
+	SaveRefused(acct string, classID int) error               // 手动退选记库，重启后自动引擎仍不抢回
+	DeleteRefused(acct string) error                          // 重设目标清空该账号全部退选标记
 	DeleteRefusedClass(acct string, classID int) error        // 手动重报成功清单条退选行（与内存侧解除对称）
 	SetTargetsForAccount(acct string, targets []Target) error // 保存目标（含发布元数据持久化）
 }
@@ -166,7 +166,7 @@ type Scheduler struct {
 	done             map[string]map[int]bool // [账号][classID] 已成功
 	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
 	refused          map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
-	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入（B6-04）
+	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入
 	lastSubmit       time.Time               // 上次提交时间（submitAll 节流）
 	lastData         *zhidao.ElectivesData   // 内存课程快照（超高性能：/electives 直读）
 	lastDataAt       time.Time
@@ -178,23 +178,23 @@ type Scheduler struct {
 	relogging        map[string]bool                  // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
 	reloginMu        sync.Mutex                       // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
 	reloginResults   chan reloginResult               // 重登结果回传（异步结果在 tick 主循环统一处理）
-	warnedNoTargets  bool                             // M-3：无目标空转警告只打一次
+	warnedNoTargets  bool                             // 无目标空转警告只打一次
 
 	clockOffset      time.Duration                // 服务端时钟对齐偏差 (server - local)
-	lastSyncTime     time.Time                    // 上次时钟对齐成功采样时间（仅成功推进，B7-M1）
+	lastSyncTime     time.Time                    // 上次时钟对齐成功采样时间（仅成功推进）
 	lastSyncStart    time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
-	lastSyncFailAt   time.Time                    // 上次同步失败时刻（B9-03 失败退避计时基准）
-	syncFailedWindow time.Time                    // B19-01：时钟失败/恢复时刻留档（写而不读，判据用 syncFailStreak，见 maybeSyncClock）
-	syncing          bool                         // 同步进行中标记（防 tick 叠加发起并发同步，B7-M1）
-	probing          bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑，F12-B2）
-	syncFailStreak   int                          // 时钟同步连续失败次数（≥3 时回退 offset=0，MAJOR-C）
+	lastSyncFailAt   time.Time                    // 上次同步失败时刻（失败退避计时基准）
+	syncFailedWindow time.Time                    // 时钟失败/恢复时刻留档（写而不读，判据用 syncFailStreak，见 maybeSyncClock）
+	syncing          bool                         // 同步进行中标记（防 tick 叠加发起并发同步）
+	probing          bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑）
+	syncFailStreak   int                          // 时钟同步连续失败次数（≥3 时回退 offset=0）
 	lastPrewarm      time.Time                    // 上次连接池预热时间
 	rateLimited      map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
 
-	probeSem chan struct{} // F17-01：per-account 探测并发信号量（cap 4）
+	probeSem chan struct{} // per-account 探测并发信号量（cap 4）
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -202,7 +202,7 @@ type Scheduler struct {
 }
 
 // sameClientFor 复核账号在注册表中的客户端是否仍是发起提交时的同一身份（需持 s.mu）。
-// B39-01：仅判"账号名存在"挡不住同名重建——删号后同名重建会用新 *zhidao.Client 顶替，
+// 仅判"账号名存在"挡不住同名重建——删号后同名重建会用新 *zhidao.Client 顶替，
 // 旧链返回后 ClientFor(acct) 仍 ok 却指向新身份。接口值比对用反射的指针身份（unpack
 // 具体类型指针取 Pointer 值），nil 视为非同一身份；账号已删（ClientFor 不存在）也非同一。
 // 调用点：spawnChain 成功/失效分支写状态与落库前。
@@ -230,7 +230,7 @@ func clientIdentity(c Client) uintptr {
 
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
 func New(clients AccountClients, store Store, openTime time.Time, interval time.Duration) *Scheduler {
-	// F46-O1：interval 非正数兜底——time.NewTicker(非正) 直接 panic（实测 NewTicker(0)
+	// interval 非正数兜底——time.NewTicker(非正) 直接 panic（实测 NewTicker(0)
 	// 抛 non-positive interval），生产 main 恒传 300ms、测试全部传正，此处防御未来
 	// 配置化/时间操控传入 0|负值导致 Start() 协程整崩且无 recover 兜底（与 tick 无
 	// recover 同族防御缺口）。
@@ -254,7 +254,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		relogging:        make(map[string]bool),
 		rateLimited:      make(map[string]map[int]time.Time),
 		chains:           make(map[string]bool),
-		probeSem:         make(chan struct{}, 4), // F17-01：per-account 探测并发上限
+		probeSem:         make(chan struct{}, 4), // per-account 探测并发上限
 		acctData:         make(map[string]*zhidao.ElectivesData),
 		acctDataAt:       make(map[string]time.Time),
 		openTimeDetected: make(map[string]int64),
@@ -315,9 +315,9 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 }
 
 // maybeSyncClock 定期异步采样教务服务端时间，校准本地时钟偏差。
-// MAJOR-C 回退：同步连续失败 3 次即复位 clockOffset=0（窗口判定回到本地时钟），
+// 同步连续失败 3 次即复位 clockOffset=0（窗口判定回到本地时钟），
 // 绝不带着一个过期偏差长期误判开窗点；单次成功立即清零失败计数，瞬断不累计。
-// B7-M1：同步闸门推进改为"同步成功才推进 lastSyncTime"——此前在锁内、
+// 同步闸门推进改为"同步成功才推进 lastSyncTime"——此前在锁内、
 // 发起异步 goroutine 前就把 lastSyncTime=now：网络抖动导致 SyncServerTime 挂起 >300ms
 // 时（等于上一个 tick 间隔），并发 goroutine 回写会跳过一个完整的 60s 窗口，且
 // 连续失败 3 次复位 clockOffset 后该分钟整段不再校准。现在的推进语义：启动同步
@@ -327,7 +327,7 @@ func (s *Scheduler) maybePrewarm(now, open time.Time) {
 func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.mu.Lock()
 	// 无账号注册表（空库/账号全删）：直接放弃——AnyClient 拿不到客户端，同步无从发起。
-	// 防御 F12-B1：clients 为 nil 时若继续走 `s.clients.AnyClient()` 会空指针 panic。
+	// 防御 clients 为 nil 时若继续走 `s.clients.AnyClient()` 会空指针 panic。
 	if s.clients == nil {
 		s.mu.Unlock()
 		return
@@ -337,7 +337,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 		s.mu.Unlock()
 		return
 	}
-	// B9-03：失败退避——上次同步失败后 30s 内不得再发起。
+	// 失败退避——上次同步失败后 30s 内不得再发起。
 	// 此前无失败退避：lastSyncTime 只在成功时推进，一旦同步失败（网络故障/平台拒绝）
 	// 该闸门永久"从未成功"，每个 tick（300ms）都试图发起、每次都被 syncing 挡下后
 	// 立即重新置位，SyncServerTime goroutine 以 300ms 节奏轰炸，绕开登录频率闸门、
@@ -349,7 +349,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 		return
 	}
 	// 防重入：上一轮同步仍在进行（未落地），本 tick 不叠加。
-	// B8-M1：此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
+	// 此前 `if !s.syncing{...}; inflight:=s.syncing; if !inflight{return}`
 	// 中 syncing 恒被置 true、inflight 恒 true——死代码，每个 tick（300ms）在同步失败期
 	// 都会再 spawn 一个 SyncServerTime goroutine（绕开登录频率闸门、堆积在途、streak 并发
 	// 累加诱发瞬断复位风暴）。现在在途即直接返回，真正的单飞语义。
@@ -361,8 +361,8 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	s.lastSyncStart = now
 	s.mu.Unlock()
 
-	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime（见 B7-M1）。
-	// F12-B1：先确认有可同步客户端再置位——此前无账号（空库/账号全删）或
+	// 发起异步时钟校准；goroutine 完成回调复位 syncing / 推进 lastSyncTime。
+	// 先确认有可同步客户端再置位——此前无账号（空库/账号全删）或
 	// 客户端不支持同步时，syncing 被置 true 后无人复位，后续每个 tick 在 `if s.syncing`
 	// 处直接返回，时钟校准从启动起永久休眠、clockOffset 恒 0 且无任何错误日志。
 	if client, ok := s.clients.AnyClient(); ok {
@@ -374,16 +374,16 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				s.syncing = false
 				if err != nil {
 					s.syncFailStreak++
-					s.lastSyncFailAt = time.Now() // B9-03：失败落地即记录，退避 30s
+					s.lastSyncFailAt = time.Now() // 失败落地即记录，退避 30s
 					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
-					// B19-01：时钟失败时刻留档——幽灵窗口判定只读
+					// 时钟失败时刻留档——幽灵窗口判定只读
 					// syncFailStreak（≥3 且开放时间已过），本字段写而不读，与成功路径的
 					// 清零对称保留（失败/恢复时刻留档，便于未来按时间差精细调参）。
 					s.syncFailedWindow = time.Now()
-					// B21-01：到达 3 次后只把校准偏差复位（回退到本地时钟），
+					// 到达 3 次后只把校准偏差复位（回退到本地时钟），
 					// 绝不在此清零 streak——旧实现同一临界区先 ++ 再清零，外部读取方
-					// （WindowClosed 持同一把锁）永远读不到 3（值域恒 {0,1,2}），B19-01
-					// 的时钟兜底判据实为不可达死代码（对应测试手动注入 3 恒假绿）。
+					// （WindowClosed 持同一把锁）永远读不到 3（值域恒 {0,1,2}），时钟兜底
+					// 判据实为不可达死代码（对应测试手动注入 3 恒假绿）。
 					// 保留 streak 持续增长，幽灵窗口判据成为真实可达状态；同步成功时
 					// 统一清零自愈（见下），瞬断 1 次只记 1 次、绝不误触发。
 					if s.syncFailStreak >= 3 {
@@ -394,9 +394,9 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				}
 				s.clockOffset = offset
 				s.syncFailStreak = 0
-				s.lastSyncFailAt = time.Time{}   // B9-03：成功即清失败退避（瞬断不拖延后续校准）
+				s.lastSyncFailAt = time.Time{}   // 成功即清失败退避（瞬断不拖延后续校准）
 				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
-				s.syncFailedWindow = time.Time{} // B19-01：与失败写点对称（写而不读，留档自愈语义）
+				s.syncFailedWindow = time.Time{} // 与失败写点对称（写而不读，留档自愈语义）
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
 			return
@@ -404,7 +404,7 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 	}
 	// 无客户端或不支持时钟同步：本次不发起，复位在途标记，等账号就绪后再同步。
 	// 此前此处直接 return，syncing 被置 true 后无人复位——空库部署的首个 300ms tick
-	// 就让时钟校准链路永久休眠（F12-B1 根因）。
+	// 就让时钟校准链路永久休眠（根因）。
 	s.mu.Lock()
 	s.syncing = false
 	s.lastSyncStart = time.Time{}
@@ -451,8 +451,8 @@ func (s *Scheduler) RecognizedOpenTime() time.Time {
 
 // SetTargetsForAccount 为指定账号替换目标并重建状态（账号必填，非空）。
 // 用户重新设定目标即"主动重新选它"：清空该账号 refused 标记（含库内持久化行）——
-// 被手动退选的课程只有在用户重新设为目标时才被自动引擎重新接管（A2：绝不静默抢回）。
-// B19-02：定案：**绝不**清 done/full/rateLimited/inflight——done 是跨目标的
+// 被手动退选的课程只有在用户重新设为目标时才被自动引擎重新接管（绝不静默抢回）。
+// 定案：**绝不**清 done/full/rateLimited/inflight——done 是跨目标的
 // 持久历史事实（重启恢复 RestoreDone 注入），重设目标清掉会把已成功课程重新提交；
 // full/rateLimited/inflight 是本次窗口内的真实防轰炸/防双包状态，清了让自动链立刻重打
 // 刚被平台拒绝的课。删账号路径的**全量清理**走专用 PurgeAccount（见下）。
@@ -461,7 +461,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	defer s.mu.Unlock()
 	s.acctTargets[acct] = targets
 	delete(s.refused, acct)
-	// B19-02：定案：不清 done/full/rateLimited/inflight——done 是跨目标的
+	// 定案：不清 done/full/rateLimited/inflight——done 是跨目标的
 	// 持久历史事实（RestoreDone 注入/手动报名 MarkDone 写入/落库 SaveSuccess），清掉会
 	// 把已成功课程重新提交（TestRestoreDoneSkipsResubmit 固化契约）；full/rateLimited
 	// 是真实满员/风控退避状态（自愈由快照解封/退避过期提供），清了让自动链立刻重打刚被
@@ -481,9 +481,9 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 		if err := s.store.SetTargetsForAccount(acct, targets); err != nil {
 			log.Printf("[scheduler] 账号 %s 保存目标落库失败: %v", acct, err)
 		}
-		// B9-02：重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
-		// B36-01：绝不静默吞错——库内 refused 行残留时，重启恢复序 LoadRefused +
-		// RestoreRefused（RestoreTargets 不清 refused，B10-01 契约）会把已重新接管的课程
+		// 重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
+		// 绝不静默吞错——库内 refused 行残留时，重启恢复序 LoadRefused +
+		// RestoreRefused（RestoreTargets 不清 refused 契约）会把已重新接管的课程
 		// 恢复成"已手动退选（自动引擎不再接管）"，用户意图与持久化分叉。内存侧 delete
 		// 代表"当前运行期用户意图"正确保留，仅留日志供运维在重启错位时排查。
 		if err := s.store.DeleteRefused(acct); err != nil {
@@ -493,7 +493,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 	s.rebuildCoursesForAccountLocked(acct, targets)
 }
 
-// PurgeAccount 全量清空指定账号在调度器中的一切状态（B19-02）：
+// PurgeAccount 全量清空指定账号在调度器中的一切状态：
 // 管理员删除账号后调用，保证重建的账号（同学生换绑/重登）绝不残留旧状态——
 // done 残留会显示"重启恢复：已报名成功"、full/rateLimited 残留会让自动链静默跳过、
 // inflight 残留会阻塞手动报名。与 DeleteAccount 事务（清库行）配成"内存+库"双清。
@@ -523,9 +523,9 @@ func (s *Scheduler) PurgeAccount(acct string) {
 	s.state.Courses = keep
 }
 
-// RestoreTargets 重启恢复目标（B10-01）：与 SetTargetsForAccount 唯一区别是不清
+// RestoreTargets 重启恢复目标：与 SetTargetsForAccount 唯一区别是不清
 // refused（内存 + 库行）——重启恢复的目标不是"用户主动重选"，若清库行会把已持久化的
-// 手动退选记录删掉（B9-02 被恢复顺序抵消）。恢复顺序：RestoreDone → 循环 RestoreTargets
+// 手动退选记录删掉（被恢复顺序抵消）。恢复顺序：RestoreDone → 循环 RestoreTargets
 // → LoadRefused + RestoreRefused（main.go）。
 func (s *Scheduler) RestoreTargets(acct string, targets []Target) {
 	s.mu.Lock()
@@ -588,7 +588,7 @@ func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target
 			status = "success"
 			result = "重启恢复：已报名成功"
 		}
-		// B10-03：重设目标且该课仍被拒绝（用户退选）时，done 恢复成功文案会掩盖
+		// 重设目标且该课仍被拒绝（用户退选）时，done 恢复成功文案会掩盖
 		// 退选意图——refused 优先，强制 pending。
 		if s.refusedHas(acct, t.ClassID) {
 			status = "pending"
@@ -623,10 +623,10 @@ func (s *Scheduler) RestoreDone(done map[string][]int) {
 	s.rebuildCoursesLocked()
 }
 
-// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（B9-02 + B10-01 顺序修正）：
+// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（顺序修正）：
 // 必须**先于** SetTargetsForAccount 循环调用——后者（用户重设目标恢复路径）会
 // `delete(s.refused, acct)` + `DeleteRefused(acct)` 清空该账号退选，若先循环再注入，
-// 注入的标记被恢复路径覆盖、持久化行也被删（B10-01：B9-02 被重启顺序抵消）。
+// 注入的标记被恢复路径覆盖、持久化行也被删（退选被重启顺序抵消）。
 // main.go 已改为"先 LoadRefused+RestoreRefused，再逐账号 SetTargetsForAccount"。
 func (s *Scheduler) RestoreRefused(refused map[string][]int) {
 	s.mu.Lock()
@@ -696,16 +696,16 @@ func (s *Scheduler) Stop() {
 }
 
 // StateForAccount 返回指定账号的状态快照（Courses 仅含该账号目标；WindowOpened 全校共享）。
-// B29-02：WindowClosed 字段用 windowClosedLocked() 实时计算——此前只写
-// s.state.WindowClosed（probe 主判据），WindowClosed() 方法的两条兜底判据（B19-01 时钟
-// 连续失败、B20-02 幽灵窗口 EmptyProbeRuns）返回 true 时不回写字段：幽灵窗口/时钟失败
+// WindowClosed 字段用 windowClosedLocked() 实时计算——此前只写
+// s.state.WindowClosed（probe 主判据），WindowClosed() 方法的两条兜底判据（时钟
+// 连续失败、幽灵窗口 EmptyProbeRuns）返回 true 时不回写字段：幽灵窗口/时钟失败
 // 场景下 /api/state 下发 window_closed=false，前端横幅仍显示倒计时/"已开放"、日志与课程
-// 轮询维持 10s/2s 高频（F9-07 降频机制失效）——展示与实际挂起状态分叉。
+// 轮询维持 10s/2s 高频（降频机制失效）——展示与实际挂起状态分叉。
 func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	st.WindowClosed = s.windowClosedLocked() // B29-02：三条判据单源（含兜底），与 WindowClosed() 同真相
+	st.WindowClosed = s.windowClosedLocked() // 三条判据单源（含兜底），与 WindowClosed() 同真相
 	// 开放时间解析（唯一事实源 = 平台 beginTimes 自动识别）：
 	// 优先级 = 该账号自识别 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"]。
 	// 识别值必须"仍在未来"才算有效（识别过期 = 上一批次/窗口结束，平台未再下发新
@@ -746,7 +746,7 @@ func (s *Scheduler) tokenValidForLocked(acct string) bool {
 }
 
 // AccountsWithTargets 返回当前所有已配置有效目标的账号列表（排序）。
-// B10-04：列表必须排序——api 层管理员不带 ?account= 时取 targetAccts[0] 对齐
+// 列表必须排序——api 层管理员不带 ?account= 时取 targetAccts[0] 对齐
 // "核心账号"，map 迭代无序会让每次刷新看到不同学生的课程（多账号部署下）。
 func (s *Scheduler) AccountsWithTargets() []string {
 	s.mu.Lock()
@@ -766,7 +766,7 @@ func (s *Scheduler) AccountsWithTargets() []string {
 func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// B22-01：目标账号（已配置目标）必须用该账号专属年级快照渲染，
+	// 目标账号（已配置目标）必须用该账号专属年级快照渲染，
 	// 绝不无条件回退全局 lastData——probe() 只对 AccountsWithTargets() 遍历刷新
 	// per-account 帧，有目标的账号 30s 内必有其专属帧；专属帧缺失 = 账号刚登录/
 	// 探测尚未完成，此时回退返回的全局帧可能是首个注册账号（m.order[0]）的年级帧，
@@ -793,10 +793,10 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 			// 有专属帧：新鲜即返回；已过期则返回 (nil,false) 让读取方走 ProbeForAccount
 			// 真取该账号最新年级帧——否则此刻全局 lastData 恰被其他账号（如首个注册账号
 			// m.order[0]）刷新为新鲜帧时，下面会回退这份**错年级**数据且 ok=true，读取方
-			// 不会触发本账号刷新，浏览者持续看到别的年级课程（B22-01 标称
+			// 不会触发本账号刷新，浏览者持续看到别的年级课程（标称
 			// "无目标账号回退全局帧"的"快、无网络开销"只对**从未有过专属帧**的纯浏览成立；
 			// 对曾有过专属帧但已过期的中间态，回退并不比刷新快，且数据是错年级）。
-			// 修复（B28-01）：过期专属帧 → 必须返回 false 触发刷新，绝不回退全局帧。
+			// 修复：过期专属帧 → 必须返回 false 触发刷新，绝不回退全局帧。
 			if time.Since(s.acctDataAt[acct]) <= snapshotTTL {
 				return data, true
 			}
@@ -812,7 +812,7 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 // ProbeForAccount 使用指定账号的专属客户端执行课程探测并刷新该账号快照。
 // 命中 token 失效（ErrUnauthorized）时触发该账号自动重登。
 //
-// MAJOR-D：账号不存在时返回明确错误，绝不回退 ProbeNow 直打教务上游——
+// 账号不存在时返回明确错误，绝不回退 ProbeNow 直打教务上游——
 // 否则 ?account= 对任意不存在账号可绕过调度器 30s 探测节流 + 账号枚举。
 func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) {
 	if s.clients == nil {
@@ -832,10 +832,10 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	if data != nil && len(data.Publishes) == 0 {
 		log.Printf("[scheduler] 账号 %s 探测返回空课程快照（选课窗口关闭或学期无发布），按空数据处理", acct)
 	}
-	// B20-03：时间基准统一——探测时间戳写入侧改用对齐钟（与 tick 判读
+	// 时间基准统一——探测时间戳写入侧改用对齐钟（与 tick 判读
 	// `now.Sub(lastProbe)` / `ElectivesSnapshotFor` 的 `time.Since(acctDataAt)` / 提交节流
 	// `submitIntervalFor` 同一时间基）。此前写入用本地 `time.Now()`、读用对齐钟，
-	// 与 B16-M1 已消灭的"写入本地/读对齐"混用模式同族（偏差 ~640ms 对 2s/30s 节流与
+	// 与已消灭的"写入本地/读对齐"混用模式同族（偏差 ~640ms 对 2s/30s 节流与
 	// `now.After(open)` 窗口判点无实质错误，但契约不自洽）。
 	now := s.nowAligned()
 	// 开放时间识别入账：平台顶层 beginTimes 毫秒数组（HAR 实证全校共享单值，
@@ -858,10 +858,10 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	}
 	s.acctData[acct] = data
 	s.acctDataAt[acct] = now
-	// B5-10：ProbeForAccount 只写该账号专属快照，不动全局 lastData/lastDataAt。
+	// ProbeForAccount 只写该账号专属快照，不动全局 lastData/lastDataAt。
 	// 管理员 ?account=A 穿透探测若写全局帧会污染全局快照（年级不同的帧），
 	// 页面 ElectivesSnapshot 读全局帧时看到错年级课程——年级串线根因之一。
-	// B6-04：这里不再写 lastProbe——lastProbe 是全局探测节流闸门（tick 用），
+	// 这里不再写 lastProbe——lastProbe 是全局探测节流闸门（tick 用），
 	// 管理员穿透探测 / 账号探测若写它，会让"全校正规探测"节流被旁路：开窗前管理员
 	// 手动点一次课程页，就按下一次正规探测（30s→2s 临门盯守被吞掉），窗口开启后
 	// tick 探测被节流闸门挡到 30s，黄金期提交失去即时确认。lastProbe 只归 probe()
@@ -896,7 +896,7 @@ func (s *Scheduler) WindowOpened() bool {
 }
 
 // WindowClosed 返回窗口是否已关闭（探测到空快照且从未开过窗）。
-// B19-01：除 B18-M1 的"至少开过窗 + 空快照 + 开放时间已过"主判据外，
+// 除"至少开过窗 + 空快照 + 开放时间已过"主判据外，
 // 追加"时钟连续失败 ≥3 且开放时间已过"兜底——从未开过窗的幽灵窗口（平台空快照）
 // 无法靠主判据判定关闭，长期 2s 高频探测烧平台；时钟失败是"网络/平台异常"的可靠
 // 信号，连续失败即视同关闭，挂起提交 + 探测降频（自愈由 syncFailStreak 归零提供）。
@@ -907,10 +907,10 @@ func (s *Scheduler) WindowClosed() bool {
 }
 
 // windowClosedLocked 计算窗口关闭判定（需持 s.mu）——三条判据单源：
-// 1) 主判据 s.state.WindowClosed（B18-M1：至少开过窗 + 空快照 + 已过开窗点 10s，probe 写入）；
-// 2) B19-01：时钟连续失败 ≥3（平台不可达信号）且开放时间非零；
-// 3) B20-02：从未开过窗 + EmptyProbeRuns≥3（幽灵窗口量变）且开放时间非零。
-// StateForAccount 与 WindowClosed() 共用同一实现，杜绝两套真相分叉（B29-02）。
+// 1) 主判据 s.state.WindowClosed（至少开过窗 + 空快照 + 已过开窗点 10s，probe 写入）；
+// 2) 时钟连续失败 ≥3（平台不可达信号）且开放时间非零；
+// 3) 从未开过窗 + EmptyProbeRuns≥3（幽灵窗口量变）且开放时间非零。
+// StateForAccount 与 WindowClosed() 共用同一实现，杜绝两套真相分叉。
 func (s *Scheduler) windowClosedLocked() bool {
 	if s.state.WindowClosed {
 		return true
@@ -921,9 +921,9 @@ func (s *Scheduler) windowClosedLocked() bool {
 	if s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
 		return true
 	}
-	// B20-02：视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
-	// 恒 false，B19-01 时钟兜底覆盖不到）+ 探测返回空快照 ≥3 次：平台窗口从未开启/已关闭且
-	// 从未被确认开过（B18-M1 主判据 requirement 不满足 + B19-01 时钟正常时兜底不触发），
+	// 视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
+	// 恒 false，时钟兜底覆盖不到）+ 探测返回空快照 ≥3 次：平台窗口从未开启/已关闭且
+	// 从未被确认开过（主判据 requirement 不满足 + 时钟正常时兜底不触发），
 	// 2s 探测/1s 提交恒高频轰炸 findElectivesData + 报名接口（防轰炸契约闭环缺口）。
 	// 首次探测（acctDataAt 全空）不计数、不误伤；runs≥3 即连续三轮空快照确证"从未开过"，
 	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、管理员热改开放时间，success 探测
@@ -954,7 +954,7 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 		}
 		return nil, err
 	}
-	// B20-03：时间基准统一——与 ProbeForAccount 同款，写入侧用对齐钟
+	// 时间基准统一——与 ProbeForAccount 同款，写入侧用对齐钟
 	now := s.nowAligned()
 	s.mu.Lock()
 	s.lastProbe = now
@@ -978,7 +978,7 @@ func (s *Scheduler) tick() {
 
 	// 探测闸门：距上次成功探测不足当前阶段间隔且非首次则跳过
 	// open 已在本函数开头取过单次快照（973 行）——probeIntervalFor 内部不再重取，
-	// 与 B33-02"探测间隔判定取单次 open 快照"同策略：热改亚毫秒窗口内立即探测判定与
+	// 与"探测间隔判定取单次 open 快照"同策略：热改亚毫秒窗口内立即探测判定与
 	// 节流间隔若各自取 open，可能读到新旧两个不同值（一次放行、一次被节流或反之）。
 	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalForOpen(now, open)
 	// 超高性能：窗口到点后的首次 tick 立即探测（不等待节流闸门放过）
@@ -998,7 +998,7 @@ func (s *Scheduler) tick() {
 	//      （熔断/学期异常）或探测恰好失败时，不依赖探测确认也放行提交，黄金期不容浪费。
 	// 注意 WindowOpened 只在"探测成功且列表非空"时更新；探测失败或 Publishes 被平台熔断拉空时
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
-	// B11-A1：open 为零值（未识别 / 识别过期）且窗口未被探测确证开启时恒满足
+	// open 为零值（未识别 / 识别过期）且窗口未被探测确证开启时恒满足
 	// !now.After(open) → 提交循环永续放行。此时无有效开窗点——挂起提交，绝不放行。
 	// 例外：WindowOpened=true（probe 已用发布级 inDateRange 确证平台开窗）但识别槽为空
 	// （平台批次未下发非空 beginTimes）时，零值守卫不得挂起提交——否则前端显示
@@ -1010,13 +1010,13 @@ func (s *Scheduler) tick() {
 	if !opened && !now.After(open) {
 		return
 	}
-	// B18-M1：窗口已确认关闭（探测到空快照且开放时间已过，state.WindowClosed）
+	// 窗口已确认关闭（探测到空快照且开放时间已过，state.WindowClosed）
 	// 时挂起提交——平台对关闭后的报名返回 code=1"无效的课程ID"（真实关闭文案），不在
 	// isWindowClosedError 的"关闭/未开启/报名时间/已结束"匹配集合内 → 不记 full → 走实时
 	// 复核 → 窗口关闭后 countList 空 → IsClassFull 报"课程无人数数据" → 下个 tick 重打
-	// SelectClass，对未成功目标形成每 1s（黄金期 250ms）永续轰炸（防轰炸 C-3 契约缺口）。
-	// 以探测状态而非脆弱错误文案作为关闭判定：WindowClosed 已确认即挂起提交，与 B11-A1
-	// open 零值守卫并列，黄金期（开窗瞬间 WindowClosed=false）绝不影响。
+	// SelectClass，对未成功目标形成每 1s（黄金期 250ms）永续轰炸（防轰炸契约缺口）。
+	// 以探测状态而非脆弱错误文案作为关闭判定：WindowClosed 已确认即挂起提交，与零值
+	// 守卫并列，黄金期（开窗瞬间 WindowClosed=false）绝不影响。
 	if s.WindowClosed() {
 		return
 	}
@@ -1033,14 +1033,14 @@ func (s *Scheduler) tick() {
 
 // probe 执行一次课程探测并刷新快照与窗口状态。
 // 窗口状态判定与提交状态解耦：即使快照 Publishes 为空（平台熔断/学期数据异常被拉空），
-// 也只视为"尚未确认窗口开启"，绝不把已开启的窗口误判为关闭（安全审计 MAJOR#4）——
+// 也只视为"尚未确认窗口开启"，绝不把已开启的窗口误判为关闭（安全审计）——
 // prevWindowOpened 在探测失败/空数据路径保持原值，窗口一旦开过就维持已开状态，
 // 提交循环（spawnChain）仍会继续尝试目标课程，黄金期不因数据异常而停摆。
 func (s *Scheduler) probe() {
-	// F12-B2：探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
+	// 探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
 	// （15s 超时），HTTP 侧 /api/electives 在快照过期时并发的 ProbeForAccount/ProbeNow
 	// 会与 tick 探测同时打上游，N 账号部署下开窗全期形成 N+1 并发 findElectivesData。
-	// probing 在持 s.mu 时置位，保证"置位-检查"原子（B11-A1 零值守卫同款窗口）。
+	// probing 在持 s.mu 时置位，保证"置位-检查"原子（零值守卫同款窗口）。
 	// 命中单飞直接放弃本次探测：最长推迟一个 tick（300ms），临门/黄金期无实质损失。
 	s.mu.Lock()
 	if s.probing {
@@ -1050,21 +1050,21 @@ func (s *Scheduler) probe() {
 	s.probing = true
 	s.mu.Unlock()
 
-	// B20-03：时间基准统一——与 ProbeForAccount/ProbeNow 同款，写入侧用
+	// 时间基准统一——与 ProbeForAccount/ProbeNow 同款，写入侧用
 	// 对齐钟（判读侧 tick `now.Sub(lastProbe)` 已在对齐钟下，避免两套时间基混用）
 	now := s.nowAligned()
 	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照。
-	// F12-B2 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
+	// 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
 	// 每账号各起 goroutine 调 ProbeForAccount 不受保护——临门/开窗期 probeIntervalNear
 	// 2s 周期触发时，N 账号部署每 2s 变 N+1 并发 findElectivesData 直打上游，与
-	// "访问过于频繁 1 分钟熔断"实证契约冲突（F17-01 MAJOR）。
+	// "访问过于频繁 1 分钟熔断"实证契约冲突。
 	// 修复：probeSem 结构化信号量（cap 4）封顶 per-account 并发——峰值从 N 降到 4，
 	// 跨批（2s 周期短于一批耗时）受同一信号量约束绝不叠加；全局 FindElectives 主体
 	// 不受影响（probe() 在 per-account 全部入场后执行）。
 	// ponytail: cap=4 常驻，若平台放宽熔断或账号数 >50 再调。
 	for _, a := range s.AccountsWithTargets() {
 		go func(acct string) {
-			// F17-01：结构化信号量封顶 per-account 探测并发——峰值从 N
+			// 结构化信号量封顶 per-account 探测并发——峰值从 N
 			// 降到 4；跨批（2s 周期短于一批耗时）由同一信号量约束，绝不叠加。
 			s.probeSem <- struct{}{}
 			defer func() { <-s.probeSem }()
@@ -1117,35 +1117,35 @@ func (s *Scheduler) probe() {
 			break
 		}
 	}
-	// B18-M1：先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
+	// 先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
 	// "至少开过窗"作为前提（见下），若在覆写后读取 prevOpened 拿到的恒是本次 opened 值。
 	prevOpened := s.state.WindowOpened
 	s.state.WindowOpened = opened
 	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
 	// 且开放时间已过 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
-	// C-3：去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
+	// 去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
 	// 若只认"从未开过窗"则开过再关后 WindowClosed 恒 false，probeIntervalFor 的
 	// "开放时间已过 + WindowClosed → 降回 30s"分支永不命中，窗口关闭后仍 2s 高频探测。
-	// B18-M1：只在"至少开过窗"（opened 曾经为 true）后才标记关闭——
+	// 只在"至少开过窗"（opened 曾经为 true）后才标记关闭——
 	// 否则未开窗即空快照（学期无发布/平台异常）会误标已关闭，tick 提交守卫按
 	// WindowClosed 挂起提交，把"还没开窗待开"误停成"永不提交"（开窗瞬间探测推进、
 	// 黄金期全停摆）。已开过窗再关 = 窗口关闭的实质语义，未开过不算关闭。
-	// B26-03：判定侧补"已过开窗点 10s 裕量"，与 B21-02 给 EmptyProbeRuns
+	// 判定侧补"已过开窗点 10s 裕量"，与 EmptyProbeRuns 入账侧
 	// 入账的 10s 裕量对称——开窗确证（探测非空 + InDateRange）后平台若短暂返回空快照
-	// （数据刷新/切学期过渡态，F7-01 记录的预清空现象，非永久关闭），旧判据下一拍探测
+	// （数据刷新/切学期过渡态记录的预清空现象，非永久关闭），旧判据下一拍探测
 	// （临门 2s）即置关闭：tick 守卫挂起提交 + 探测降回 30s，若平台在 30s 内恢复，黄金期
 	// 提交已停摆。10s 裕量覆盖过渡态；真关仅推迟 10s 判定（超裕量仍按原判据关闭，
 	// TestWindowClosedState 的 -time.Hour 场景不受影响）。
 	// 裕量基准 open 取一次快照复用——同一探测内两处 10s 裕量判定若各自取 open，热改
-	// 亚毫秒窗口内主判据与 EmptyProbeRuns 入账可能基于新旧两个不同 open（B33-02 同族）。
+	// 亚毫秒窗口内主判据与 EmptyProbeRuns 入账可能基于新旧两个不同 open（同族）。
 	open := s.openTimeForLocked("")
 	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second))
-	// B20-02：探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
+	// 探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
-	// 注意绝不触碰 state.WindowClosed（由 B18-M1/B19-01 判据独占）：这里只维护量变计数，
+	// 注意绝不触碰 state.WindowClosed（由主判据/时钟判据独占）：这里只维护量变计数，
 	// WindowClosed() 读取它做"视同关闭"兜底——不写 state.WindowClosed 避免误标真实关闭。
-	// B21-02：入账另加"已过开窗点 10s 裕量"——平台在开窗前会预清空 publishes
-	// （F7-01 记录的真实现象，切学期/数据迁移），若开窗瞬间清空过渡态持续 ≥6 秒（3 次探测
+	// 入账另加"已过开窗点 10s 裕量"——平台在开窗前会预清空 publishes
+	// （记录的真实现象，切学期/数据迁移），若开窗瞬间清空过渡态持续 ≥6 秒（3 次探测
 	// × 2s 临门间隔），旧判据会在真实窗口已开时误挂起黄金期提交+降频探测；以"开窗点后
 	// 10s 内不计空快照轮数"错开过渡态，窗口真开（10s 黄金期结束）后连续空才确证幽灵窗口。
 	if !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second)) {
@@ -1153,7 +1153,7 @@ func (s *Scheduler) probe() {
 	} else {
 		s.state.EmptyProbeRuns = 0
 	}
-	// B10-05：prevWindowOpened 是写而不读的死字段（C-3 已去掉 !prevWindowOpened 条件），
+	// prevWindowOpened 是写而不读的死字段（已去掉 !prevWindowOpened 条件），
 	// 删除避免误导后续维护者以为还有清提交闸门的路径。
 	log.Printf("[scheduler] 探测成功：%d 个发布，窗口状态 %v（已关闭 %v）", len(data.Publishes), opened, s.state.WindowClosed)
 	s.mu.Unlock()
@@ -1190,17 +1190,17 @@ func (s *Scheduler) reloginBackoff(n int) time.Duration {
 // 成功后落库新 token 并补一次探测。失败/未重登会复位失效标记，退避窗口过后仍可再试。
 // 锁纪律：reloginMu 只串行化"决策是否发起"这一段（纯 map 读写，微秒级），
 // 实际重登（Login）在锁外 goroutine 执行——一个账号重登慢（Vision 最坏 2 分钟）
-// 不会拖延其他账号的重登与提交（安全审计 MINOR 8：全局锁跨长 Login 的修复）。
+// 不会拖延其他账号的重登与提交（安全审计：全局锁跨长 Login 的修复）。
 func (s *Scheduler) maybeRelogin(acct string) {
 	s.reloginMu.Lock()
 	defer s.reloginMu.Unlock()
 	s.mu.Lock()
-	// B43-01：入口先做账号存在性复核——B21-03 只护重登 goroutine 的"写回侧"，
+	// 入口先做账号存在性复核——重登 goroutine 的"写回侧"有复核，
 	// 决策侧裸露：探测定时三处（ProbeForAccount/ProbeNow/probe）对 ErrUnauthorized 直调本入口，
 	// 若删号与在飞探测返回 ErrUnauthorized 同帧（窗口约 15s），下方会重新把
 	// tokenValid/reloginFail/reloginAt/relogging 写进已删账号的 map key（PurgeAccount 已清）——
 	// 同名重建后新账号 tokenValid 残留 true（前端"已失效"）+ spawnChain 整链挂起 + 首登无辜退避 30s。
-	// 账号已删不发起重登、不写任何 map；与 spawnChain 失效分支 B42-02 的先身份复核同族防线。
+	// 账号已删不发起重登、不写任何 map；与 spawnChain 失效分支的先身份复核同族防线。
 	if _, ok := s.clients.ClientFor(acct); !ok {
 		s.mu.Unlock()
 		return
@@ -1230,7 +1230,7 @@ func (s *Scheduler) maybeRelogin(acct string) {
 	}
 	log.Printf("[scheduler] 账号 %s 触发自动重登（原因：教务 token 失效，连续失败 %d 次）", acct, s.reloginFail[acct])
 	s.relogging[acct] = true // 标记重登中
-	// F12-B3：tokenValid 失效标记在此处置位、且与决策同持两把锁——发起重登即"token
+	// tokenValid 失效标记在此处置位、且与决策同持两把锁——发起重登即"token
 	// 已知失效"，本就不该等 goroutine 开头再补写。此前 goroutine 开头才置位：用户手动
 	// 登录成功（MarkTokenValid 清 tokenValid/relogging/reloginFail）与在途重登并发时，
 	// 置位会覆写已被清理的标记，前端 /state 短暂回"已失效·自动恢复中"后 jitter。
@@ -1241,8 +1241,8 @@ func (s *Scheduler) maybeRelogin(acct string) {
 		relogged, err := s.clients.Relogin(acct)
 		s.mu.Lock()
 		delete(s.relogging, acct) // 清重登中标记（失败也清，才能再试）
-		// B21-03：账号已删竞态防线——B18-M2/B20-01 只护自动链/手动路径，
-		// 重登成功分支仍缺同款复核：管理员 DeleteAccount（清凭据表+Accounts.Remove）与
+		// 账号已删竞态防线——自动链/手动路径已有同款复核，
+		// 重登成功分支仍缺：管理员 DeleteAccount（清凭据表+Accounts.Remove）与
 		// 在途 Login（Vision 最坏 2 分钟）竞态，成功分支会无条件写回 tokenValid/reloginAt
 		// 内存态 + UpdateIDToken 落库把已删账号新 token 写回 credentials 表（重启后 Restore
 		// 重建客户端、凭据幽灵复活）。先复核客户端仍存在：已删则整个成功分支（含内存写与
@@ -1280,8 +1280,8 @@ func (s *Scheduler) maybeRelogin(acct string) {
 			return
 		}
 		// 失败/未重登：保持失效标记（tokenValid 仍 true），前端显示"已失效·自动恢复中"，
-		// 不再误报"有效"（安全审计 MINOR 7）。
-		// C1 修复：失败后 reloginFail 保留本次发起时递增到的次数，杜绝无条件复位 1——
+		// 不再误报"有效"（安全审计）。
+		// 修复：失败后 reloginFail 保留本次发起时递增到的次数，杜绝无条件复位 1——
 		// 否则计数恒 1→2→1→2 振荡，指数退避表永不增长，Vision 持续故障时退避恒为 30s，
 		// 平台锁号防线被击穿。失败次数只会随成功清零（上面成功分支 delete），
 		// 由 maybeRelogin 的退避窗口自然隔开下一次失败尝试。
@@ -1294,13 +1294,13 @@ func (s *Scheduler) maybeRelogin(acct string) {
 	}()
 }
 
-// MarkTokenValid 手动登录成功时恢复该账号的 token 有效性标记（B5-01）：
+// MarkTokenValid 手动登录成功时恢复该账号的 token 有效性标记：
 // tokenValid 唯一的自动清零路径是 maybeRelogin 自动重登成功分支；若自动重登
 // 长期失败（Vision 故障 / 无保存账密"请手动重新登录"），用户手动登录成功后仍显示
 // "已失效·自动恢复中"无恢复路径。手动登录成功路径（issueSession）调用本方法，
 // 清 tokenValid 失效标记与重登失败计数，前端 /state 立即恢复"有效"。
 func (s *Scheduler) MarkTokenValid(acct string) {
-	// F12-B3：MarkTokenValid 与 TokenValidFor/maybeRelogin 对齐锁序（reloginMu→s.mu）——
+	// MarkTokenValid 与 TokenValidFor/maybeRelogin 对齐锁序（reloginMu→s.mu）——
 	// 此前只持 s.mu：手动登录成功（issueSession 恢复路径）会清 tokenValid/reloginFail/
 	// relogging，但"发起决策"那段仍在 reloginMu 下、且 goroutine 开头曾把 tokenValid
 	// 覆写回 true，两条路径无法串行化 → 手动登录与在途自动重登并发时状态闪动。
@@ -1315,7 +1315,7 @@ func (s *Scheduler) MarkTokenValid(acct string) {
 }
 
 // MaybeRelogin 导出别名：供 api 层在手动报名/退选命中 ErrUnauthorized 时触发重登
-// （B8-M7，与自动链路径对称），命名上明确它是幂等门控的。
+// （与自动链路径对称），命名上明确它是幂等门控的。
 func (s *Scheduler) MaybeRelogin(acct string) { s.maybeRelogin(acct) }
 
 // reloginResult 重登结果（异步回传到 tick 主循环统一处理）。
@@ -1326,7 +1326,7 @@ type reloginResult struct {
 }
 
 // maskedToken 脱敏打印教务 token：只显示前 8 位，绝不输出完整值。
-// m10 修复：长度 ≤8 的短 token 不足以掩盖身份，一律输出 "***"。
+// 长度 ≤8 的短 token 不足以掩盖身份，一律输出 "***"。
 func maskedToken(tok string) string {
 	if len(tok) > 8 {
 		return tok[:8]
@@ -1336,7 +1336,7 @@ func maskedToken(tok string) string {
 
 // submitAll 并发提交所有账号所有发布的目标链（每链独立 goroutine，链内按人数确认满员依次退避）。
 func (s *Scheduler) submitAll() {
-	// MAJOR-F 修复：本地时钟写 lastSubmit 会与对齐时钟判定（tick 内 submitIntervalFor）
+	// 本地时钟写 lastSubmit 会与对齐时钟判定（tick 内 submitIntervalFor）
 	// 产生基准混用——统一以对齐时钟记录提交时刻，黄金期 250ms 冲刺间隔判定不再失真。
 	s.mu.Lock()
 	s.lastSubmit = s.nowAlignedLocked()
@@ -1362,7 +1362,7 @@ func (s *Scheduler) submitAll() {
 	}
 	s.mu.Unlock()
 	if len(chains) == 0 {
-		// M-3 修复：冷启动（尚无目标）时每 tick 静默空转，运维无法区分
+		// 冷启动（尚无目标）时每 tick 静默空转，运维无法区分
 		// 「没目标所以没提交」与「配置丢失/加载失败」。一次性警告日志点破真相。
 		if !s.warnedNoTargets {
 			s.warnedNoTargets = true
@@ -1377,7 +1377,7 @@ func (s *Scheduler) submitAll() {
 
 // spawnChain 逐备选提交：确认满员（快照或实时人数）才切下一备选；成功即终止。
 func (s *Scheduler) spawnChain(acct string, ts []Target) {
-	// B30-01：链顶先判客户端存在——submitAll 已过滤 ClientFor 不存在的账号，
+	// 链顶先判客户端存在——submitAll 已过滤 ClientFor 不存在的账号，
 	// 但账号可在 submitAll 过滤后、本链启动前被删（Accounts.Remove memory-first），
 	// 此前 !ok 只在每门课锁内兜底且会建 inflight+AppendLog 落库（删账号后继续堆积）。
 	// 前置到链顶：已删账号静默放弃整链，绝不为幽灵账号建任何内存态/写任何日志。
@@ -1399,13 +1399,13 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.chainMu.Unlock()
 		}()
 		client, ok := s.clients.ClientFor(acct)
-		// B30-01：删除可发生在 spawnChain 入口判据之后、本 goroutine 取 client
+		// 删除可发生在 spawnChain 入口判据之后、本 goroutine 取 client
 		// 之前（毫秒窗口）——此处必须再判一次，nil client 绝不能进循环调 SelectClass
 		// （nil 指针 panic）。已删账号静默放弃整链，不建 inflight、不写日志。
 		if !ok || client == nil {
 			return
 		}
-		// B39-01：链顶捕获发起提交的客户端指针——同名校验只保证"账号名当前在注册表"，
+		// 链顶捕获发起提交的客户端指针——同名校验只保证"账号名当前在注册表"，
 		// 不保证"仍是发起时的同一身份"。删号后同名重建（换绑/误删加回）会用新客户端顶替，
 		// 旧链在 SelectClass 网络往返期间被顶替，返回后 ClientFor 仍 ok（新身份）却把成功
 		// 状态与 success 行写进重建身份（重启假成功/已删账号状态复活）。后续成功分支与
@@ -1418,11 +1418,11 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			// B23-03：token 已知失效且重登进入退避期（relogging 已被失败路径清掉、
+			// token 已知失效且重登进入退避期（relogging 已被失败路径清掉、
 			// reloginAt 未过退避窗口）时，链顶只有 relogging 短路挡不住——每 tick 仍对每门目标
 			// 真实发起 SelectClass（必然 code=-1"教务令牌失效"）并每题 AppendLog，烧平台请求
 			// 额度 + 日志表堆积。tokenValidForLocked（tokenValid=true || relogging=true）即
-			// "已知失效"，重登成功/手动登录后清 false（B21-01 语义）才恢复提交。前端 /state
+			// "已知失效"，重登成功/手动登录后清 false 才恢复提交。前端 /state
 			// 只读 token_valid 显示"已失效·自动恢复中"，本链不发请求、状态保持原样。
 			if !s.tokenValidForLocked(acct) {
 				s.mu.Unlock()
@@ -1439,7 +1439,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				continue
 			}
-			// 手动退选后被用户拒绝的课程：自动引擎绝不抢回（A2），直到用户重新设为目标
+			// 手动退选后被用户拒绝的课程：自动引擎绝不抢回，直到用户重新设为目标
 			if s.refusedHas(acct, t.ClassID) {
 				s.mu.Unlock()
 				continue
@@ -1456,7 +1456,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				continue
 			}
 			// 手动提交在飞（TryAcquireSubmit 占用 inflight 位）：自动链必须跳过，
-			// 绝不并发双发包（评审 CRITICAL：inflight 去重落地）。
+			// 绝不并发双发包（评审项：inflight 去重落地）。
 			if s.inflightHas(acct, t.ClassID) {
 				s.mu.Unlock()
 				continue
@@ -1477,17 +1477,17 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复
 			if errors.Is(err, zhidao.ErrUnauthorized) {
 				s.mu.Lock()
-				// B39-01：指针身份复核——失效分支此前只判账号名存在（ClientFor ok），
+				// 指针身份复核——失效分支此前只判账号名存在（ClientFor ok），
 				// 同名重建后旧链命中 ErrUnauthorized 也会把"教务令牌失效"状态写进新身份。
 				// 发起时捕获的 chainClient 与注册表现指针比对：非同一身份即静默放弃整链
-				//（不写状态、不落日志），与成功分支同族防线（B18-M2 的账号名存在复核保留
+				//（不写状态、不落日志），与成功分支同族防线（账号名存在复核保留
 				// 在 sameClientFor 内部——已删账号首先就不通过）。
 				if !s.sameClientFor(acct, chainClient) {
 					delete(s.inflight[acct], t.ClassID)
 					s.mu.Unlock()
 					return
 				}
-				// B42-02：重登必须落在身份复核之后——旧链命中 ErrUnauthorized 但身份已变
+				// 重登必须落在身份复核之后——旧链命中 ErrUnauthorized 但身份已变
 				//（删号/同名重建）时不得触发 maybeRelogin：Manager.Relogin 对已删账号虽然
 				// 报"未注册"，但失败计数仍写进已删账号 map，污染同名重建账号的首次自动重登
 				//（无辜退避）。身份已验证为同一发起链，重登才真正作用于该账号。
@@ -1508,7 +1508,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			s.mu.Lock()
 			delete(s.inflight[acct], t.ClassID)
 			if err == nil {
-				// B18-M2 + B39-01：写成功/落库前复核"账号仍存在且仍是发起时的同一身份"——
+				// 写成功/落库前复核"账号仍存在且仍是发起时的同一身份"——
 				// 管理员 DeleteAccount（清凭据表 + Accounts.Remove）与在飞 spawnChain 网络往返
 				// （SelectClass 最长 15s）竞态时，本链在删除完成后才返回成功；同名重建（换绑/
 				// 误删加回）后注册表现指针已换成新客户端，若只判账号名存在（ClientFor ok）
@@ -1574,22 +1574,22 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			}
 			// 非满员失败：改为实时人数复核确认是否真满员
 			// （用户要求：不解析平台"满"字错误文案，直接对比总数与已报数）
-			// 注意：!ok（账号会话未建立）分支已被 B30-01 前置到链顶——go routine 启动时
+			// 注意：!ok（账号会话未建立）分支已被前置到链顶——go routine 启动时
 			// 客户端不存在即静默放弃整链，本处不可能再遇到 !ok，无需再判。
-			// C-4：复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
+			// 复核前主动释放 s.mu——此前整段网络请求（最长 15 秒）都攥着
 			// 全局锁，黄金冲刺期里其它账号的探测/提交/时钟对齐全被锁死；锁外复核完再回锁收尾。
-			// F13-m2：锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1
+			// 锁内 SQLite 写（AppendLog/SaveSuccess 等，SetMaxOpenConns=1
 			// 串行）只发生在持锁段、不跨此网络段——黄金期不因 DB 写停顿网络往返；持锁写
 			// 窗口仅成功分支两行（微秒级），彻底消除需独立 DB goroutine，边际不动（观察项）。
 			s.mu.Unlock()
 			full, cErr := s.classFullRealtime(acct, t.ClassID)
 			s.mu.Lock()
-			// M-38-01：实时复核网络段（最长 15s）期间管理员可能删除账号——回锁后先复核
+			// 实时复核网络段（最长 15s）期间管理员可能删除账号——回锁后先复核
 			// 账号仍存在再进三路分支写状态/落日志/重建 full 族 map。已删账号静默放弃整块
-			// （inflight 已在 1333 行清掉，无残留），与链顶 B30-01/失效分支/成功分支
-			// B18-M2 同族防线——实时复核结果块是删号竞态最后一块裸露写点
+			// （inflight 已在 1333 行清掉，无残留），与链顶 /失效分支/成功分支
+			// 同族防线——实时复核结果块是删号竞态最后一块裸露写点
 			// （setStateLocked 的 idx<0 守卫只挡数组越界，挡不住落库与 map 写）。
-			// B43-02：存在性复核升级为指针身份复核——同名重建（注册表现指针已换）后旧链
+			// 存在性复核升级为指针身份复核——同名重建（注册表现指针已换）后旧链
 			// 经 classFullRealtime 命中新身份的 ErrUnauthorized，返回时 ClientFor 仍 ok（新身份
 			// 存在）却会把 maybeRelogin/failed 状态写进新身份（无辜消耗登录预算）。与同函数
 			// 成功/失效/风控/窗口关闭/确证满员五分支对称，sameClientFor 内含存在性判定。
@@ -1597,7 +1597,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			// B19-03：实时复核命中 token 失效（学生数接口同样鉴权）——
+			// 实时复核命中 token 失效（学生数接口同样鉴权）——
 			// 与 SelectClass 分支对称触发自动重登（ErrUnauthorized 才是"重登中"语义），
 			// 否则本次失败被当普通失败处理、下个 tick 又重打报名接口（token 已失效的
 			// 报名必然再失败），失效恢复路径被延迟到探测/手动路径才发现。
@@ -1615,7 +1615,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				return
 			}
 			if cErr == nil && full {
-				// B23-01：锁外复核窗口（最长 15s）内手动路径可能已抢到 inflight 位
+				// 锁外复核窗口（最长 15s）内手动路径可能已抢到 inflight 位
 				// 并 MarkDone 置 done+success（用户真实报名成功）——此时"确证满员"分支若直接
 				// markFullLocked 会把 success 覆盖成"failed/已满员"并追加一条假"已满员"日志，
 				// 与紧邻的"未现满员"分支（下方 doneHas 复核"绝不覆盖胜利状态"）不对称。
@@ -1642,7 +1642,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Unlock()
 				return
 			}
-			// R59 MINOR-59-02：read 类错误（服务端已完整消费请求体但响应读取中断）说明
+			// read 类错误（服务端已完整消费请求体但响应读取中断）说明
 			// 平台可能已成功处理这次报名（已抢到课但客户端没收到响应）——状态/日志不能
 			// 标"报名失败"误导用户排查（黄金期下个 tick 重复报名被拒"已选过"时 failed 永久
 			// 残留）。区分文案为"请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）"，
@@ -1700,7 +1700,7 @@ func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time)
 	return false
 }
 
-// B16-M1：退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
+// 退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
 // spawnChain 用 nowAlignedLocked() 判期，两套时间基（实测相差 ~640ms）边界同一语义。
 // 读侧 isRateLimitedLocked 已用 nowAlignedLocked()（1021 行），写入必须同源，语义自洽。
 func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Duration) {
@@ -1770,8 +1770,8 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 }
 
 // releaseFullIfFreedLocked 快照显示不满时解除 full 标记并回 pending（需持锁）。
-// 只要快照显示有名额空余（如其他同学退选），立即解除 full 标记，黄金期 250ms 冲刺立即捡漏 (CRITICAL C1)。
-// C-3 守卫：只有快照**明确**显示该课程名额空余才解封——
+// 只要快照显示有名额空余（如其他同学退选），立即解除 full 标记，黄金期 250ms 冲刺立即捡漏。
+// 守卫：只有快照**明确**显示该课程名额空余才解封——
 // 空快照（窗口关闭后平台清空课程列表）或快照中查不到该课程（无法判断）一律保持 full 不解封，
 // 否则窗口关闭后 spawnChain 每个 tick 都因 full 被解封重新打报名接口（窗口关闭防轰炸残留）。
 func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
@@ -1847,11 +1847,11 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 	s.state.Courses[idx].Result = result
 }
 
-// CheckClassSelectable 手动报名前的服务端复核（评审 M7）：
+// CheckClassSelectable 手动报名前的服务端复核：
 // 基于该账号最近快照判定课程是否可报名——课程所在发布窗口未开放或课程已满员时
 // 提前拒绝并返回友好原因，避免无谓打教务平台拿生硬错误码。
 // 快照缺失（从未探测）或课程不在快照中（无法判定）时放行，由平台最终把关。
-// B18-m1：过期快照（超过 snapshotTTL 未刷新）一律按"无快照"放行——
+// 过期快照（超过 snapshotTTL 未刷新）一律按"无快照"放行——
 // 快照过期的判定依据是 acctDataAt 时间戳（与 ElectivesSnapshotFor 同源），
 // 不使用 acct 外的全局 lastData 兜底（跨年级帧可为任意账号，无参考价值）。
 // 过期快照放行语义：不拿旧数据拦用户真实操作（名额/窗口可能已变化），交给平台把关，
@@ -1911,14 +1911,14 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 
 // MarkDone 手动或外部操作成功后同步调度器状态：记入 done、清 full 与退避、置 success 状态并持久化。
 // 同步清理 inflight 位：手动报名成功前占用的提交锁位必须释放，否则下个自动链/手动操作永久 409。
-// B20-01：与 spawnChain 成功分支同款防线——管理员 DeleteAccount（先清凭据/库行 +
+// 与 spawnChain 成功分支同款防线——管理员 DeleteAccount（先清凭据/库行 +
 // Accounts.Remove）与在飞手动报名（SelectClass 最长 15s）竞态时，删除完成后本请求才返回成功，
 // 若不复核会把已删账号的 success 行写回，重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态
-// （B18-M2 在自动链已根治，手动路径同样竞态整链开放）。账号已删则静默放弃落库，绝不写回。
+// （自动链已根治，手动路径同样竞态整链开放）。账号已删则静默放弃落库，绝不写回。
 func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// B20-01：删除账号与在飞手动报名竞态防线——账号不再存在于客户端注册表即视为已删，
+	// 删除账号与在飞手动报名竞态防线——账号不再存在于客户端注册表即视为已删，
 	// 放弃全部状态写入（真实平台报名已发生，但账号已删，写回只会制造幽灵 success 行）。
 	if _, ok := s.clients.ClientFor(acct); !ok {
 		log.Printf("[scheduler] 账号 %s 已被删除，放弃手动报名落库", acct)
@@ -1928,7 +1928,7 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 		s.done[acct] = make(map[int]bool)
 	}
 	s.done[acct][classID] = true
-	// B5-07：手动报名成功同样解除 refused——用户手动重选（成功）即表达
+	// 手动报名成功同样解除 refused——用户手动重选（成功）即表达
 	// "我要这门课"，自动引擎应恢复接管（此前 refused 只在 SetTargetsForAccount 清空，
 	// 手动重选成功但未重设目标时 refused 卡死，窗口重开后自动引擎永久跳过该课）。
 	if s.refused[acct] != nil {
@@ -1936,7 +1936,7 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 		// 库内 refused 行同步清除：删除只清内存标记是半套——手动退选落库的 refused
 		// 行残留时，重启恢复序 RestoreTargets（不清 refused）+ LoadRefused + RestoreRefused
 		// 会把这门已报名成功的课恢复成"已手动退选（自动引擎不再接管）"假象（状态文案误导
-		// + spawnChain 永久跳过）。落库失败记录在案供运维排查（B33-01 家族零吞错规范）。
+		// + spawnChain 永久跳过）。落库失败记录在案供运维排查（零吞错规范）。
 		if s.store != nil {
 			if err := s.store.DeleteRefusedClass(acct, classID); err != nil {
 				log.Printf("[scheduler] 账号 %s 课程 %d 手动重报清退选记录落库失败（重启后该课会被恢复成'已手动退选'）: %v", acct, classID, err)
@@ -1978,14 +1978,14 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 }
 
 // RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
-// 同步清理 inflight 位：退选进行中占用的提交锁位必须释放（M5）。
+// 同步清理 inflight 位：退选进行中占用的提交锁位必须释放。
 // 同时记入 refused 集合并置"已用户退选"文案：后台 spawnChain 从此对该课程绝不再自动
 // 接管——用户手动退出的课，自动引擎下一 tick（≤1s）就抢回是错误行为，
 // 只有用户重新把它设为目标（SetTargetsForAccount 清空 refused）才恢复自动接管。
 func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// B20-01：与 MarkDone 同款防线——账号已删时手动退选成功同样不能写回
+	// 与 MarkDone 同款防线——账号已删时手动退选成功同样不能写回
 	// refused 行（DeleteAccount 全量清理 + PurgeAccount 移除后的幽灵 refused 行会让
 	// 重新登录的账号被 RestoreRefused 恢复成"已退选"，自动引擎永久跳过该课）。
 	if _, ok := s.clients.ClientFor(acct); !ok {
@@ -2011,12 +2011,12 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 		s.state.Courses[idx].Result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 	}
 	if s.store != nil {
-		// B8-M2：删除 success 行——否则重启后该课被 RestoreDone 恢复成
+		// 删除 success 行——否则重启后该课被 RestoreDone 恢复成
 		// "已报名成功"，用户当日的退选决定被静默撤销（与 CLAUDE.md 契约文档对齐）
 		if err := s.store.DeleteSuccess(acct, classID); err != nil {
 			log.Printf("[scheduler] 账号 %s 课程 %d 退选清除成功记录落库失败: %v", acct, classID, err)
 		}
-		// B9-02：持久化 refused——此前只写内存，重启后 refused 全丢，
+		// 持久化 refused——此前只写内存，重启后 refused 全丢，
 		// SetTargetsForAccount（重启恢复路径）会 delete(s.refused, acct)，
 		// 自动引擎把用户手动退选掉的课当新目标重新抢回，退选意图丢失。
 		if err := s.store.SaveRefused(acct, classID); err != nil {

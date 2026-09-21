@@ -976,8 +976,8 @@ func TestAdminStatsOpenTimeFromRecognized(t *testing.T) {
 		t.Fatalf("未识别时 open_time_set 应为 false，实际 %v", st["open_time_set"])
 	}
 	// 探测识别：先登录真实账号（建立客户端），再探测。mock 的顶层 beginTimes 是过去值
-	// （1789261200000 = 2026-09-13 09:00:00，今天 2026-09-18）——识别过期语义下自动
-	// 降级为"未识别"（绝不把过期旧值当开放时间），向后兼容 mock 的固定时间戳。
+	// （1789261200000 = 2026-09-13 09:00:00）——识别槽有值即照常输出该值（决策锚 1：
+	// 识别保持，过期只影响展示层 known 判定，绝不删除/截断识别槽）。
 	if _, err := d.accts.LoginByPassword("acct1", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
 		t.Fatalf("登录失败: %v", err)
 	}
@@ -1886,6 +1886,77 @@ func TestHandleElectivesSelectUnauthorizedRelogin(t *testing.T) {
 			t.Fatal("手动报名触发 ErrUnauthorized 后调度器应推进自动重登状态")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestHandleElectivesSelectReadErrMessage MINOR-61-03：手动报名/退选路径在 read 类错误
+// （请求已发出、平台可能已处理）下必须区分"可能已处理"文案，与 scheduler 自动链对称。
+// 此前 R60 MINOR-60-03 只补了代码分支、零测试覆盖——未来 IsReadErr 语义变化或分支被
+// 误删时此测试会红。mock 用 FLUSH+Hijack 直断连接触发真实 read 错误（url.Error 包装
+// io.EOF/OpError，不依赖超时），断言响应 msg 含"平台可能已处理"。
+func TestHandleElectivesSelectReadErrMessage(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	// mock 教务报名/退选接口：FLUSH 后 Hijack 直断——真实"服务端读完 body 后断开"
+	// 形态，客户端读响应头/体时命中 read 错误（IsReadErr 判定分支）。
+	d.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/electives/select"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "currentYearTermList": []any{
+				map[string]any{"schoolYear": 2026, "schoolTerm": 1, "selected": true},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/findElectivesData"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "selectElectivesData": []any{
+				map[string]any{
+					"publishId": 3225, "publishName": "高二年体育", "inDateRange": true,
+					"canSelect": 1, "hasSelected": 0, "electivesClassList": []any{
+						map[string]any{
+							"id": 61115, "course_name": "健美操", "selected_count": 0,
+							"max_count": 36, "can_select": true, "btn_type": 2,
+						},
+					},
+				},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/selectElectivesClass"),
+			strings.HasSuffix(r.URL.Path, "/exitElectivesClass"):
+			// FLUSH 后 Hijack 直断：请求体已消费、无响应体返回——read 错误形态
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, _ := hj.Hijack()
+				conn.Close()
+			}
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "unknown " + r.URL.Path})
+		}
+	})
+
+	// 先填充快照（mock 正常路径）
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+
+	// 手动报名：read 错误应返回"平台可能已处理"文案（code=1 业务错误 + 区分文案）
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("read 错误手动报名应返回业务错误: %d %v", code, j)
+	}
+	msg, _ := j["msg"].(string)
+	if !strings.Contains(msg, "平台可能已处理") {
+		t.Fatalf("报名 read 错误文案应含'平台可能已处理'，实际: %v", msg)
+	}
+
+	// 手动退选：同样区分文案（对称分支）
+	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select/exit", `{"class_id":61115}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("read 错误手动退选应返回业务错误: %d %v", code, j)
+	}
+	msg, _ = j["msg"].(string)
+	if !strings.Contains(msg, "平台可能已处理") {
+		t.Fatalf("退选 read 错误文案应含'平台可能已处理'，实际: %v", msg)
 	}
 }
 

@@ -22,7 +22,7 @@ func main() {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-	req.Header.Set("Cookie", "access_limit_cookie=***REMOVED***; zd_edu_cookie="+token)
+	req.Header.Set("Cookie", "access_limit_cookie=1; zd_edu_cookie="+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Println("ERR", err)

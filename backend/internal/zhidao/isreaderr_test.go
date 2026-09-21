@@ -34,6 +34,12 @@ func TestIsReadErrCoversAllForms(t *testing.T) {
 	if !IsReadErr(timeout) {
 		t.Fatalf("超时形态应命中 IsReadErr，实际 false")
 	}
+	// 超时形态二：reading body（响应头已到达、正文传输超时——比 awaiting headers
+	// 更强地"平台已响应"，标准库 client.go:994 wrap 文案，R61 MINOR-61-02）
+	bodyTimeout := errors.New("context deadline exceeded (Client.Timeout or context cancellation while reading body)")
+	if !IsReadErr(bodyTimeout) {
+		t.Fatalf("reading body 超时形态应命中 IsReadErr，实际 false")
+	}
 	// 对照：dial/write 错误不命中（与 isConnErrRetryable 互斥）
 	if IsReadErr(&net.OpError{Op: "dial", Err: errors.New("connectex")}) {
 		t.Fatalf("dial 错误不应命中 IsReadErr")

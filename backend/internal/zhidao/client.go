@@ -394,7 +394,10 @@ func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification 
 		}
 	}
 	if _, ok := c.cookies["access_limit_cookie"]; !ok {
-		c.cookies["access_limit_cookie"] = "***REMOVED***"
+		// 占位补充：真实值由登录响应 Set-Cookie 收集（上方 sess.Jar.Cookies 循环），
+		// 平台未下发时用统一占位防缺失（与 accounts 重启恢复 SetCookies 的 "1" 同语义，
+		// 对齐 manager.go:313——R61 MINOR-61-01：不得用审查脱敏产物当活值）
+		c.cookies["access_limit_cookie"] = "1"
 	}
 	c.mu.Unlock()
 	return j.Token, nil
@@ -499,8 +502,11 @@ func isConnErrRetryable(err error) bool {
 //     url.Error 包装链命中）
 //   - FIN（服务端读完 body 后正常 Close，真实平台"处理完成未响应"的典型形态）：
 //     url.Error{Err: io.EOF}（不带 net.OpError）→ errors.Is(err, io.EOF)
-//   - 超时（平台已处理但响应超过客户端 Timeout）：Client.Timeout exceeded while
-//     awaiting headers → strings.Contains 判定
+//   - 短读（服务端已发响应头但 Content-Length 未传完就断连——响应已开始=比
+//     awaiting headers 更强地"已处理"，标准库 transfer.go 短读包装）：
+//     io.ErrUnexpectedEOF（不带 OpError）→ errors.Is(err, io.ErrUnexpectedEOF)
+//   - 超时（平台已处理但响应超过客户端 Timeout）：两种 wrap 文案（标准库
+//     client.go:737 等待响应头 / client.go:994 读响应体中途）→ strings.Contains 判定
 //
 // 与 isConnErrRetryable 对称（互斥：retryable 只含 dial/write，read 恒 false）。
 func IsReadErr(err error) bool {
@@ -511,9 +517,18 @@ func IsReadErr(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
+	// 短读形态：响应头已到达、正文 Content-Length 未传完就断连——平台已开始响应、
+	// 必然已处理完请求（标准库 transfer.go 对未读满 body 的 FIN 包装为
+	// ErrUnexpectedEOF；真实 SelectClass 响应体小、Hijack 直断时该形态最常见）
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	// 超时形态：平台可能已处理但响应慢于客户端超时（awaiting headers 是请求头已发送、
-	// 等待响应头超时——请求体已到达服务端）
-	if strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") {
+	// 等待响应头超时——请求体已到达服务端；reading body 是响应头已到达、正文传输超时
+	// ——比 awaiting headers 更强地"平台已响应"。两种文案都是客户端整周期超时在
+	// 不同阶段的 wrap，标准库 client.go:737/994）
+	if strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
+		strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
 		return true
 	}
 	// RST 形态：连接重置（*net.OpError.Op=="read"，穿透 url.Error 包装链）

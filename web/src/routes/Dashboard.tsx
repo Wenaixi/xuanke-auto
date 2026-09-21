@@ -516,7 +516,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           </Card>
         </div>
 
-        {/* 预选目标矩阵（3 门重点看护课程卡片） */}
+        {/* 预选目标矩阵（重点看护课程卡片） */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

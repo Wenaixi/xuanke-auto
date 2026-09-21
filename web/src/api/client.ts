@@ -83,14 +83,14 @@ export async function api<T>(
       // 吊销时事件风暴翻倍）——r.status===401 前置已广播，此处跳过 body 层重复广播；
       // 旧式「HTTP 200 + body 401」形态仍由本分支覆盖，三种形态各单次广播。
       if (r.status !== 401) {
-      let account = ""
-      if (path.includes("account=")) {
-        const match = path.match(/[?&]account=([^&]+)/)
-        if (match) account = decodeURIComponent(match[1])
-      }
-      window.dispatchEvent(
-        new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
-      )
+        let account = ""
+        if (path.includes("account=")) {
+          const match = path.match(/[?&]account=([^&]+)/)
+          if (match) account = decodeURIComponent(match[1])
+        }
+        window.dispatchEvent(
+          new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
+        )
       }
       throw new ApiError(j.code, j.msg || "会话已失效", j.data)
     }

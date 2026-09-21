@@ -837,27 +837,27 @@ function AccountsTab({
                       {success.length > 0 ? success.join(", ") : <span className="text-neutral-600 text-xs">-</span>}
                     </td>
                     <td className="p-3 sm:p-4 align-middle text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onSelectAccount?.(a.account)}
-                        className="text-xs text-white border-neutral-700 hover:border-white flex items-center gap-1.5"
-                      >
-                        <BookMarked className="h-3.5 w-3.5" />
-                        <span>选课大厅</span>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onAskDelete(a.account)}
-                        className="text-xs text-neutral-400 hover:text-white hover:border-white"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        删除
-                      </Button>
-                    </div>
-                  </td>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onSelectAccount?.(a.account)}
+                          className="text-xs text-white border-neutral-700 hover:border-white flex items-center gap-1.5"
+                        >
+                          <BookMarked className="h-3.5 w-3.5" />
+                          <span>选课大厅</span>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onAskDelete(a.account)}
+                          className="text-xs text-neutral-400 hover:text-white hover:border-white"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          删除
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 )
               })}

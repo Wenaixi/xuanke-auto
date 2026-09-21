@@ -859,6 +859,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             <Search className="absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
             <Input
               placeholder="搜索课程名称、教师或教室"
+              aria-label="搜索课程名称、教师或教室"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-10 text-xs sm:text-sm h-10 glass-input border-neutral-800 text-white placeholder:text-neutral-600 focus:border-white transition-colors"

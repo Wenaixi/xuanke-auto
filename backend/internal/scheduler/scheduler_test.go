@@ -1925,7 +1925,7 @@ func TestSubmitAllUsesAlignedClock(t *testing.T) {
 	}
 }
 
-// TestSubmitAllWarnsOnceOnNoTargets 验证无目标空转只警告一次（M-3）：
+// TestSubmitAllWarnsOnceOnNoTargets 验证无目标空转只警告一次：
 // 冷启动没有目标时输出一次性警告日志，第二次 submitAll 不再刷屏；
 // 设置目标后不再警告。
 func TestSubmitAllWarnsOnceOnNoTargets(t *testing.T) {

@@ -29,8 +29,9 @@ func TestLoadLogsWindowKeepsRecent(t *testing.T) {
 
 	// 插入 30050 行（窗口 20000 之外的旧行 + 窗口内的新行）。
 	// 事务批插（每 1000 行一批）：逐条 INSERT 会让每次提交都触发 WAL 同步落盘
-	// （实测 30050 行 ~225s，击穿 go test 默认 10m 超时）；批事务实测 ~0.5s，
-	// 测试只关心"窗口裁剪最近 20000 条"的语义，不关心逐行提交路径。
+	// （实测 30050 行 ~225s，击穿 go test 默认 10m 超时）；批事务实测 ~33s
+	// （-race 下，R68 复测；非 -race 更快），远低于逐条提交，测试只关心
+	// "窗口裁剪最近 20000 条"的语义，不关心逐行提交路径。
 	batchSize := 1000
 	for start := 0; start < 30050; start += batchSize {
 		tx, err := d.Begin()

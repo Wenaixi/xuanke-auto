@@ -17,18 +17,26 @@ import (
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环冷启动窗口
 // 前移到夹具构造期（与 api/zhidao 包同款根治——R64 OBSERVE-64-02: accounts 是唯一
 // 无就绪前移的包，R12 全量轮两测试 mock /login 首请求 connectex 正是夹具缺口）。
-// 连接层失败轮询重试（200ms×5），全部失败才上抛由调用方 Fatal。
+// 连接层失败轮询重试（200ms×10 + 显式 2s 超时，总窗口 ~2s，与 api/zhidao 宽栅栏
+// 一次性配平——R68 OBSERVE-68-01: accounts 曾是收敛后残余面最低收敛点，当前被
+// 包序天然保护（store 高耗时后接 zhidao 而非 accounts），包序变化即暴露），全部
+// 失败才上抛由调用方 Fatal。
 // OBSERVE-65-03：三处夹具未有 socketPreheat 双保险（zhidao/api 有 socket 预创建），
 // 8 轮全绿实证无残余；若未来 accounts 再出冷启动 flake 第一候选即补 socketPreheat。
 func readyProbe(t *testing.T, baseURL string) {
 	t.Helper()
 	const (
-		probeRetries = 5
+		probeRetries = 10
 		probeDelay   = 200 * time.Millisecond
 	)
+	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr error
 	for i := 0; i <= probeRetries; i++ {
-		resp, err := http.Get(baseURL + "/login")
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
+		if err != nil {
+			t.Fatalf("就绪探测请求构造失败: %v", err)
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()

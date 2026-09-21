@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 // loginMockServer 构造登录链路 mock。
 // failRecognize: 前 N 次识别返回空串（识别失败）；failSubmit: 前 M 次提交被拒。
 // 构造后主动发一条健康探测请求把 Windows 回环冷启动窗口前移到夹具构造期
-// （与 api 包 readyProbe 同款轮询：200ms×5，总窗口 ~1s）——socketPreheat 只预占
+// （与 api 包 readyProbe 同款轮询：200ms×10 + 显式 2s 超时，总窗口 ~2s）——socketPreheat 只预占
 // 单个端口，全量轮前序包 TIME_WAIT 残留下 Login 首请求仍可 connectex（R56
 // 全量 12 轮 R1 zhidao FAIL 实证），探测把 accept 就绪前的最首请求吃掉。
 func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Server, *int32, *int32) {

@@ -30,7 +30,7 @@ const pubs = [
   },
 ]
 
-// F42-M1：shouldDeferSave 断言——防抖保存"回显未完成"守卫抽纯函数：
+// shouldDeferSave 断言——防抖保存"回显未完成"守卫抽纯函数：
 // /state 首帧未到（undefined）或首帧携带旧目标（courses 非空）→ 推迟保存（返回 true），
 // 后端旧目标尚未经回显合并进 selected，此刻整包 PUT 会覆盖删除（"加一门"变"替换全部"）。
 // courses 空 = 确证后端无旧目标（回显已完成语义）→ 放行（返回 false）。
@@ -90,7 +90,7 @@ assert("新发布非空 + 旧发布清空 → 放行", selectedHasStalePublish({
 // 场景 E：selected 为空对象 → 无过期条目
 assert("selected 全空 → 放行", selectedHasStalePublish({}, pubs), false)
 
-// F40-M1：cleanStaleSelected 清理断言——发布集合重建时删除"非空且不在当前集合"的 key
+// cleanStaleSelected 清理断言——发布集合重建时删除"非空且不在当前集合"的 key
 const cleanAssert = (name: string, got: Record<number, unknown[]>, want: Record<number, unknown[]>) => {
   const ok = JSON.stringify(got) === JSON.stringify(want)
   console.log(`${ok ? "  ✓" : "  ✗"} ${name}${ok ? "" : `（期望 ${JSON.stringify(want)}，实际 ${JSON.stringify(got)}）`}`)

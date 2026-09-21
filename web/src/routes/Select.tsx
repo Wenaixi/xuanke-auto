@@ -487,7 +487,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       0
     )
     if (latestRev === 0) return
-    // 回显未完成守卫：与防抖回调同款判据（见防抖 effect 内 618 行）——/state 首帧
+    // 回显未完成守卫：与防抖回调同款判据（见防抖回调内"回显未完成守卫"）——/state 首帧
     // 未到达（stateData===undefined）或首帧携带旧目标（courses 非空）时，后端旧目标
     // 尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的 selected
     // 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack 的 5s
@@ -566,8 +566,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 目标，flushTargets 只置脏就返回；飞行 PUT 完成后 finally 发现已卸载（契约）
   // 跳过补发，最后一批改动静默丢失。修复：先 flush，再等飞行中 PUT 结束（其 finally
   // 会在卸载前自动补发最新快照），直到保存链静止才真正卸载。守卫拦下的假清空脏块
-  // （publishes 恒空）不在此列——那是 F15/F16/F17 链的刻意安全方向，等无可等，绝不
-  // 强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
+  // （publishes 恒空）不在此列——那是防抖/flush 消费时刻双闸的刻意安全方向，
+  // 等无可等，绝不强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
   const handleBack = async () => {
     // 消费时刻读 selectedRef 算"当前是否留有选中"（handleBack 无渲染闭包可直接用）：
     // shouldDeferSave 第二参数——首帧携带旧目标但用户已全清空（hasSelected=false）时

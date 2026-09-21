@@ -1,4 +1,4 @@
-// TDD 守护：extractAccountFromPath 纯函数断言——401 广播前置化（F41-N2）后，
+// TDD 守护：extractAccountFromPath 纯函数断言——401 广播前置化后，
 // "?account= 穿透目标"反查逻辑从响应处理分支抽出为纯函数，供 HTTP 状态码 401 分支
 // 在 r.json() 之前复用。缺陷背景：反向代理/网关可能返回 HTML/文本 401（非 JSON 响应
 // 体），原实现 r.json() 先执行会抛错走 -2 文案、UNAUTHORIZED_EVENT 永不广播，失效会话

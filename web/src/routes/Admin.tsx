@@ -204,7 +204,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
           </TabsContent>
         </Tabs>
 
-        {/* N3：删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
+        {/* 删除账号二次确认 Dialog（替代 window.confirm，符合黑白极简设计） */}
         {/* 补对话语义——role=dialog/aria-modal/aria-labelledby，读屏可识别 */}
         {/* 补 Esc 关闭——与 Login 激活弹窗对齐，键盘可达性闭环 */}
         {pendingDelete && (
@@ -749,7 +749,7 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
                 <span className="text-white font-mono tabular-nums">{r.value}</span>
               </div>
             ))}
-            {/* N5：教务令牌有效性可视化——管理员一眼看到各账号 token 是否失效/恢复中 */}
+            {/* 教务令牌有效性可视化——管理员一眼看到各账号 token 是否失效/恢复中 */}
             <div className="py-2.5 flex items-center justify-between text-xs">
               <span className="text-neutral-400">教务令牌</span>
               <span className="flex items-center gap-1.5">

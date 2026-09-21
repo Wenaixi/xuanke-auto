@@ -40,7 +40,8 @@ type Config struct {
 	AdminToken string
 	// AdminName 管理员账号名（默认 admin）
 	AdminName string
-	// ActivationCodesEnabled 激活码机制开关（XUANKE_ACTIVATION，默认 on；off 完全禁用激活码）
+	// ActivationCodesEnabled 激活码机制开关（XUANKE_ACTIVATION，默认 off；on 才启用激活码）
+	// 默认关闭：本地双击 exe 开箱即用（账号登录直接进系统），公网分发才显式开启激活码。
 	ActivationCodesEnabled bool
 }
 
@@ -64,7 +65,7 @@ func Load() Config {
 		SFModel:                envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
 		AdminToken:             os.Getenv("XUANKE_ADMIN_TOKEN"),
 		AdminName:              os.Getenv("XUANKE_ADMIN_NAME"),
-		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") != "off",
+		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") == "on",
 	}
 }
 
@@ -98,14 +99,15 @@ func loadDotEnv(path string) {
 }
 
 // CaptchaEngineDefault 默认验证码识别引擎。
-// 平台验证码为 3~5 位扭曲英数字，硅基流动 Vision 实测一次成功率接近 100%；
-// 本地 ddddocr 模型与平台验证码风格不匹配（识别出 3~6 位不规则字符串），
-// 仅适合作为无外网的兜底。故默认 Vision，内置 ddddocr 仅在内嵌模型可用且显式配置时启用。
+// 默认 ddddocr 本地识别（免 API 密钥、无外网依赖，双击 exe 开箱即用）；需云识别
+// 时显式设 XUANKE_CAPTCHA_ENGINE=vision 并填 SF_API_KEY（R71 需求：默认改 ddddocr）。
+// 说明：ddddocr 引擎可用性依赖本机 Python + ddddocr 包（或内嵌模型），未装时
+// 登录会报识别引擎不可用——管理员可在后台热切换回 vision。
 func CaptchaEngineDefault() string {
 	if v := os.Getenv("XUANKE_CAPTCHA_ENGINE"); v == "vision" || v == "ddddocr" {
 		return v
 	}
-	return "vision"
+	return "ddddocr"
 }
 
 // dataDir 数据目录：可执行文件同目录下的 data/（保证双击 exe 即可用，不依赖 cwd）。
@@ -145,11 +147,11 @@ XUANKE_ADMIN_TOKEN=` + admin + `
 
 # 教务登录验证码识别密钥（可选留空；默认识别引擎 vision 才需要密钥，ddddocr 免密钥）
 SF_API_KEY=
-# 识别引擎（vision=默认，硅基流动云识别需填 SF_API_KEY；ddddocr=本地识别免密钥，作为无外网兜底）
-XUANKE_CAPTCHA_ENGINE=vision
+# 识别引擎（ddddocr=默认，本地免密钥无外网；vision=硅基流动云识别，需填 SF_API_KEY）
+XUANKE_CAPTCHA_ENGINE=ddddocr
 
-# 激活码机制开关：on=启用（默认）；off=完全关闭，登录直接进入系统
-XUANKE_ACTIVATION=on
+# 激活码机制开关：on=启用激活码（分发用）；默认关闭（off），本地双击 exe 账号登录直接进入系统
+XUANKE_ACTIVATION=off
 
 # 服务端口与数据库路径（可选）
 # XUANKE_PORT=3091

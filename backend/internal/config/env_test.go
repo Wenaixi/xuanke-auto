@@ -42,3 +42,43 @@ func TestConfigDoesNotInjectOpenTime(t *testing.T) {
 		}
 	}
 }
+
+// TestActivationCodesDefaultOff 激活码机制默认关闭：未设置 XUANKE_ACTIVATION 时
+// ActivationCodesEnabled 必须为 false（本地双击 exe 开箱即用，账号登录直接进系统）；
+// 仅显式 XUANKE_ACTIVATION=on 才启用（公网分发场景）。R71 需求：默认配置改为不激活。
+func TestActivationCodesDefaultOff(t *testing.T) {
+	// 未设置 → 默认关闭
+	t.Setenv("XUANKE_ACTIVATION", "")
+	cfg := Load()
+	if cfg.ActivationCodesEnabled {
+		t.Fatal("默认（未设置 XUANKE_ACTIVATION）激活码机制必须关闭，账号登录直接进系统")
+	}
+	// 显式 on → 启用
+	t.Setenv("XUANKE_ACTIVATION", "on")
+	if cfg := Load(); !cfg.ActivationCodesEnabled {
+		t.Fatal("XUANKE_ACTIVATION=on 必须启用激活码机制")
+	}
+	// 显式 off → 关闭
+	t.Setenv("XUANKE_ACTIVATION", "off")
+	if cfg := Load(); cfg.ActivationCodesEnabled {
+		t.Fatal("XUANKE_ACTIVATION=off 必须关闭激活码机制")
+	}
+}
+
+// TestCaptchaEngineDefaultDdddocr 识别引擎默认 ddddocr：未设置 XUANKE_CAPTCHA_ENGINE
+// 时 CaptchaEngineDefault 必须返回 ddddocr（本地免密钥、开箱即用，R71 需求）；显式
+// vision/dddddocr 时才按配置返回。
+func TestCaptchaEngineDefaultDdddocr(t *testing.T) {
+	t.Setenv("XUANKE_CAPTCHA_ENGINE", "")
+	if got := CaptchaEngineDefault(); got != "ddddocr" {
+		t.Fatalf("默认识别引擎应为 ddddocr，实际 %q", got)
+	}
+	t.Setenv("XUANKE_CAPTCHA_ENGINE", "vision")
+	if got := CaptchaEngineDefault(); got != "vision" {
+		t.Fatalf("显式 vision 应返回 vision，实际 %q", got)
+	}
+	t.Setenv("XUANKE_CAPTCHA_ENGINE", "ddddocr")
+	if got := CaptchaEngineDefault(); got != "ddddocr" {
+		t.Fatalf("显式 ddddocr 应返回 ddddocr，实际 %q", got)
+	}
+}

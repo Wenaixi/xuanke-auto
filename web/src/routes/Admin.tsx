@@ -51,7 +51,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
   const [copied, setCopied] = useState("")
   // Tabs 受控化——defaultValue 只在首次挂载生效，管理员 Tab 间
   // 切换后状态现场保留；受控 value 只决定激活项，不破坏 Radix Tabs 键盘 roving focus。
-  // 注：进出学生大厅（Admin 卸载重挂）后 useMemo 仍会重置为"codes"——如需跨挂载保留
+  // 注：进出学生大厅（Admin 卸载重挂）后 useState 字面量仍会重置为"codes"——如需跨挂载保留
   // 需提升到 App 层或 localStorage（见工程记忆库契约文档）。
   const [activeTab, setActiveTab] = useState("codes")
   // 复制反馈定时器句柄——连续复制不同码时先 clearTimeout 旧定时器，

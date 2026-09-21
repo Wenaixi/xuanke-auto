@@ -158,7 +158,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   const [selected, setSelected] = useState<Record<number, ClassItem[]>>({})
   // 回显一次性标记——回显 effect 只合并一次，绝不重放。
   // rev>0 守卫保护的"用户清空目标后轮询旧 courses 再次回填撤销清空"语义
-  // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见 166 行 effect）。
+  // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见下方回显 effect）。
   const echoedRef = useRef(false)
   // 回显完成状态（state 而非 ref）：防抖 effect 依赖必须能感知"回显流程完成"以驱动
   // 重跑——ref 变化不触发 effect。仅由回显 effect 置位一次，作为守卫拦下改动的自愈

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/getlantern/systray"
 )
@@ -102,6 +101,3 @@ func showZenityOrPrint(title, body string) {
 	}
 	fmt.Printf("[tray] 关于（无 zenity 降级打印）：%s\n%s\n", title, body)
 }
-
-var _ = strings.Builder{}
-var _ = fmt.Sprintf

@@ -1702,7 +1702,7 @@ func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time)
 
 // 退避截止基准与读侧统一为对齐钟——此前用本地钟 time.Now() 写入、
 // spawnChain 用 nowAlignedLocked() 判期，两套时间基（实测相差 ~640ms）边界同一语义。
-// 读侧 isRateLimitedLocked 已用 nowAlignedLocked()（1021 行），写入必须同源，语义自洽。
+// 读侧 isRateLimitedLocked 已用 nowAlignedLocked()（见下方实现），写入必须同源，语义自洽。
 func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Duration) {
 	if s.rateLimited[acct] == nil {
 		s.rateLimited[acct] = map[int]time.Time{}
@@ -1743,7 +1743,7 @@ func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 // 注意：实时接口未实证 maxCount（CountEntry 注释），IsClassFull 实际恒 false——
 // 本复核保留为"平台未来下发 maxCount 时自动生效"的防御性路径，当前真满员判定
 // 以 classFullInSnapshot（快照 max_count，实证）为主路径，spawnChain 已先于实时复核
-// 用快照判满员跳过（1273 行 classFullInSnapshot），实时复核仅兜底不破坏防轰炸契约。
+// 用快照判满员跳过（见 spawnChain 内 classFullInSnapshot 调用），实时复核仅兜底不破坏防轰炸契约。
 func (s *Scheduler) classFullRealtime(acct string, classID int) (bool, error) {
 	client, ok := s.clients.ClientFor(acct)
 	if !ok {

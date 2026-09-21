@@ -80,26 +80,36 @@ func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Ser
 }
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环
-// 冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms×5），全部失败才上抛
-// 由调用方 Fatal——api 包同款，zhidao 包 Login 链路同样根治（R56 全量 R1 实证）。
+// 冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms×10 + 显式 2s 超时，
+// 总窗口 ~2s）——与 api 包 readyProbe 同款宽栅栏（R67 OBSERVE-67-01：zhidao
+// 原 200ms×5 窄栅栏在 store 包 59s 高耗时后全量 R1 TestLoginLogsFailureSummary
+// readyProbe 5 次全败 connectex，flake 残余流动宿主=包序最末 mock 包+最窄栅栏），
+// 全部失败才上抛由调用方 Fatal；socketPreheat 双保险仍保留。
 func readyProbe(t *testing.T, baseURL string) {
 	t.Helper()
 	const (
-		probeRetries = 5
+		probeRetries = 10
 		probeDelay   = 200 * time.Millisecond
 	)
+	client := &http.Client{Timeout: 2 * time.Second}
+	var lastErr error
 	for i := 0; i <= probeRetries; i++ {
-		resp, err := http.Get(baseURL + "/login")
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
+		if err != nil {
+			t.Fatalf("就绪探测请求构造失败: %v", err)
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			return
 		}
+		lastErr = err
 		if i < probeRetries {
 			time.Sleep(probeDelay)
 		}
 	}
-	t.Fatalf("mock 服务器就绪探测失败: %v", baseURL)
+	t.Fatalf("mock 服务器就绪探测失败: %v", lastErr)
 }
 
 // TestLoginRetryWithinLimits 验证：识别失败可刷新重试，提交被拒会刷新验证码，最终成功。

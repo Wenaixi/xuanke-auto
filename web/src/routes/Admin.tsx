@@ -836,7 +836,7 @@ function AccountsTab({
                     <td className="p-3 sm:p-4 align-middle text-white font-mono tabular-nums">
                       {success.length > 0 ? success.join(", ") : <span className="text-neutral-600 text-xs">-</span>}
                     </td>
-                  <td className="p-3 sm:p-4 align-middle text-right">
+                    <td className="p-3 sm:p-4 align-middle text-right">
                     <div className="flex items-center justify-end gap-2">
                       <Button
                         variant="outline"

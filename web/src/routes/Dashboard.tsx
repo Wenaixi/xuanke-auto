@@ -526,7 +526,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
               </h2>
             </div>
             <span className="text-xs text-neutral-500 font-mono">
-              {/* F10-06：3 门是旧约束残留，现为动态目标集合，展示名改 TARGETS */}
+              {/* F10-06：展示名 TARGETS = 动态目标集合（旧"3 门"约束详见上方注释） */}
               TARGETS
             </span>
           </div>

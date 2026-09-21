@@ -34,7 +34,7 @@ type Manager struct {
 	clients map[string]*zhidao.Client // 账号名 -> 独立客户端
 	order   []string                  // 登录顺序
 
-	// 全局重登频率闸门（安全审计 CRITICAL 2a）：所有账号共享同一出口 IP 打平台 doLogin，
+	// 全局重登频率闸门（安全审计）：所有账号共享同一出口 IP 打平台 doLogin，
 	// 若平台风控含 IP 维度，多个账号同时失效时全速重登会把整个 IP 刷到锁号（全盘陪葬）。
 	// 令牌桶：全账号合计每分钟 doLogin 最多 gateLoginPerMin 次；超出的重登等待下个窗口。
 	gateMu     sync.Mutex
@@ -290,7 +290,7 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 }
 
 // Restore 重启时用持久化凭据恢复各账号客户端（密码解密后在内存中，仅用于自动重登）。
-// MAJOR-B：SetCredentials 已写入 zd_edu_cookie（token）；SetCookies 为合并语义，
+// SetCredentials 已写入 zd_edu_cookie（token）；SetCookies 为合并语义，
 // 只补齐 access_limit_cookie，绝不覆盖登录流程收集的服务端会话 Cookie。
 func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, error)) {
 	for _, cd := range creds {

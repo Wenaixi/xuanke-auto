@@ -420,7 +420,7 @@ func TestAccountOverrideRequiresAdminSession(t *testing.T) {
 
 func TestLoginUnactivatedNeedsCode(t *testing.T) {
 	d := newTestDeps(t)
-	// 未激活账号登录：教务登录成功但应返回 code=1001 并颁发激活票据（C-2）
+	// 未激活账号登录：教务登录成功但应返回 code=1001 并颁发激活票据
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"acct1","password":"pwd"}`)
 	if code != 200 || j["code"].(float64) != 1001 {
 		t.Fatalf("未激活登录应返回 1001: %d %v", code, j)
@@ -431,7 +431,7 @@ func TestLoginUnactivatedNeedsCode(t *testing.T) {
 	}
 }
 
-// TestActivateRequiresTicketAndBinding 激活必须携带有效票据且与激活账号一致（C-2）：
+// TestActivateRequiresTicketAndBinding 激活必须携带有效票据且与激活账号一致：
 // 无票据、票据与账号不匹配、票据已用尽一律拒绝，杜绝持码者对任意账号激活。
 func TestActivateRequiresTicketAndBinding(t *testing.T) {
 	d := newTestDeps(t)
@@ -1614,7 +1614,7 @@ func TestRequireJSONBodyRejectsFormContentType(t *testing.T) {
 	}
 }
 
-// TestClientIPTrustedProxy B6-05：clientIP 可信反代 IP 透传。
+// TestClientIPTrustedProxy clientIP 可信反代 IP 透传。
 // 默认（未设 XUANKE_TRUSTED_PROXY）绝不信 XFF——攻击者可伪造任意 IP 刷爆他人
 // 限流桶或绕过自身限流；仅当开关=on 且 RemoteAddr 确实是回环地址（真正的本机
 // 反代）时，才取 X-Forwarded-For 最右一个非空值作为真实客户端 IP。

@@ -14,17 +14,17 @@ func init() {
 }
 
 func TestRecognizeCaptcha(t *testing.T) {
-	socketPreheat() // R52：端口预加热，防冷启动 connectex（同 client_test）
+	socketPreheat() // 端口预加热，防冷启动 connectex（同 client_test）
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authorization 断言只针对真实识别路径——readyProbe 探活 GET /login 无
-		// 业务头，命中此断言会把探活当业务请求误报（R70 MINOR-70-02 补探活后实证）。
+		// 业务头，命中此断言会把探活当业务请求误报（补探活后实证）。
 		if r.URL.Path == "/chat/completions" && r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("Authorization header 缺失或错误: %q", r.Header.Get("Authorization"))
 		}
 		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\" abcd \"}}]}"))
 	}))
 	defer srv.Close()
-	// R70 MINOR-70-02：包内仅剩的无探活 mock 首请求宿主（R70 全量 R1 该测试
+	// 包内仅剩的无探活 mock 首请求宿主（全量首轮该测试
 	// connectex FAIL 实证）——与 TestCaptchaConcurrency 双保险成族闭环。
 	readyProbe(t, srv.URL)
 
@@ -49,7 +49,7 @@ func TestRecognizeCaptchaNoKey(t *testing.T) {
 // 但同一时刻实际进入识别核心的至多 2 个（并发上限）。
 func TestCaptchaConcurrency(t *testing.T) {
 	NewCaptchaSemaphore(2) // 上限 2
-	socketPreheat()        // R52：端口预加热（同 client_test）
+	socketPreheat()        // 端口预加热（同 client_test）
 
 	var mu sync.Mutex
 	inFlight := 0
@@ -71,11 +71,11 @@ func TestCaptchaConcurrency(t *testing.T) {
 		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\"ok3x\"}}]}"))
 	}))
 	defer srv.Close()
-	// R69 主控收尾回归：-p 1 下该测试偶发 18.95s FAIL（正常 0.16s）——10 个并发
-	// 识别请求的首请求撞上前序包 TIME_WAIT 冷启动窗口（R60/R64 已记录的历史宿主：
+	// 主控收尾回归：-p 1 下该测试偶发 18.95s FAIL（正常 0.16s）——10 个并发
+	// 识别请求的首请求撞上前序包 TIME_WAIT 冷启动窗口（历史宿主：
 	// 并发首请求 connectex 时信号量计数被误判）。socketPreheat 只预占单端口，
 	// 并发首请求形态需 readyProbe 把 accept 就绪前的最首请求吃掉（api/zhidao 同款
-	// 双保险，R69 OBSERVE-69-04「残余面宿主=并发形态」的实证）。
+	// 双保险，「残余面宿主=并发形态」的实证）。
 	readyProbe(t, srv.URL)
 
 	r := NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
@@ -100,7 +100,7 @@ func TestCaptchaConcurrency(t *testing.T) {
 	}
 }
 
-// TestSetCaptchaConcurrencyConcurrent 验证高并发下动态热调整并发度不会导致死锁或竞态 (CRITICAL 验证码 C1)。
+// TestSetCaptchaConcurrencyConcurrent 验证高并发下动态热调整并发度不会导致死锁或竞态（验证码并发度）。
 func TestSetCaptchaConcurrencyConcurrent(t *testing.T) {
 	NewCaptchaSemaphore(2)
 

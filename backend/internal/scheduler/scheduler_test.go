@@ -18,8 +18,8 @@ import (
 type fakeStore struct {
 	mu          sync.Mutex
 	log         []string
-	successRows map[string]int // [acct\x00classID] 已落库的 success 行（B18-M2 测试用）
-	refusedRows map[string]int // [acct\x00classID] 已落库的 refused 行（B18-M2 测试用）
+	successRows map[string]int // [acct\x00classID] 已落库的 success 行（删号竞态测试用）
+	refusedRows map[string]int // [acct\x00classID] 已落库的 refused 行（删号竞态测试用）
 }
 
 func (f *fakeStore) AppendLog(acct string, classID int, action, result string, isOK bool) error {
@@ -55,7 +55,7 @@ func (f *fakeStore) SetTargetsForAccount(acct string, targets []Target) error { 
 
 // failStore：带失败开关的 Store——SQLite 落库失败时调度器必须把错误上报/记日志，
 // 静默吞错会让"内存已写、库行没落上"的半态在重启后破坏恢复契约
-// （B9-02 refused 行丢失 = 手动退选被撤销；SaveSuccess 行丢失 = 已成功课被重抢）。
+// （refused 行丢失 = 手动退选被撤销；SaveSuccess 行丢失 = 已成功课被重抢）。
 type failStore struct {
 	*fakeStore
 	fail bool // 置 true 后全部写操作返回错误，模拟磁盘满/IO 故障
@@ -80,7 +80,7 @@ func (f *failStore) DeleteRefused(acct string) error {
 	return f.fakeStore.DeleteRefused(acct)
 }
 
-// TestStoreFailuresAreLoggedNotSilentlyDropped 验证失败落库必须记日志（B33-01）——
+// TestStoreFailuresAreLoggedNotSilentlyDropped 验证失败落库必须记日志——
 // 静默吞错让"内存过半态"无法在重启前被发现。将 log 捕获器注入标准 logger，
 // 调用 SaveSuccess/SaveRefused 各失败一次，断言均有对应日志输出。
 func TestStoreFailuresLogged(t *testing.T) {
@@ -107,7 +107,7 @@ func TestStoreFailuresLogged(t *testing.T) {
 	}
 }
 
-// TestSetTargetsDeleteRefusedFailureLogged B36-01：重设目标清空库内退选行失败必须记日志——
+// TestSetTargetsDeleteRefusedFailureLogged 重设目标清空库内退选行失败必须记日志——
 // 静默吞掉会让库内 refused 行残留，重启恢复序（RestoreTargets 不清 refused + LoadRefused +
 // RestoreRefused）把已重新接管的课程恢复成"已手动退选"，用户意图与持久化分叉。
 // 本测试可复现：SetTargetsForAccount 前先 MarkDone（落 failed 级别退选历史路径外的 refused
@@ -178,13 +178,13 @@ type fakeClient struct {
 	relogCalls  int // 重登回调调用次数（测试用）
 	syncOffset  time.Duration
 	syncErr     error  // 时钟对齐失败时注入的错误
-	syncCalls   int    // 时钟对齐发起次数（B9-03 退避测试断言"失败期不反复发起"）
-	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，C-4 持锁复核测试用）
-	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，B18-M2 在飞竞态测试用）
-	fullErr     error  // 实时人数复核错误（B19-03：命中 token 失效测试用）
+	syncCalls   int    // 时钟对齐发起次数（失败退避测试断言"失败期不反复发起"）
+	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，持锁复核测试用）
+	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，在飞竞态测试用）
+	fullErr     error  // 实时人数复核错误（命中 token 失效测试用）
 }
 
-// SyncServerTime 可控时钟对齐：返回预置偏差或错误（MAJOR-C 测试用）。
+// SyncServerTime 可控时钟对齐：返回预置偏差或错误（时钟失败回退测试用）。
 func (f *fakeClient) SyncServerTime() (time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -254,8 +254,8 @@ func (f *fakeClient) Token() string { return "new-token-999" }
 func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 	f.mu.Lock()
 	if f.fullErr != nil {
-		f.mu.Unlock()           // 显式解锁：早退分支必须释放锁（B19-03 夹具死锁根因——漏了这行导致 Relogin 永久卡死）
-		return false, f.fullErr // B19-03：命中 token 失效等错误
+		f.mu.Unlock()           // 显式解锁：早退分支必须释放锁（夹具死锁根因——漏了这行导致 Relogin 永久卡死）
+		return false, f.fullErr // 命中 token 失效等错误
 	}
 	if f.fullBlock != nil {
 		fullBlock := f.fullBlock
@@ -297,7 +297,7 @@ func newFakeClient(open bool) *fakeClient {
 }
 
 // fakeAccts 伪账号注册表：所有账号共享一个 fakeClient（测试用）。
-// perAccount 可选：按账号返回独立客户端指针——B39-01 构造"同名重建"（删号后重建的
+// perAccount 可选：按账号返回独立客户端指针——构造"同名重建"（删号后重建的
 // 新客户端指针 ≠ 旧链发起时的旧指针）场景，验证成功分支做指针身份比对而非仅账号名。
 type fakeAccts struct {
 	c             *fakeClient
@@ -582,7 +582,7 @@ func TestRestoreDoneSkipsResubmit(t *testing.T) {
 }
 
 // TestProbeNowConcurrentLocking ProbeNow 三字段（lastProbe/lastData/lastDataAt）在
-// HTTP handler 与 tick goroutine 并发下必须无锁竞态（M2 修复，配合 -race 验证）。
+// HTTP handler 与 tick goroutine 并发下必须无锁竞态（并发修复，配合 -race 验证）。
 func TestProbeNowConcurrentLocking(t *testing.T) {
 	fc := newFakeClient(false)
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
@@ -840,7 +840,7 @@ func TestDeletedAccountStopsSubmitting(t *testing.T) {
 // TestDeletedAccountInFlightDropsSuccess 验证删除账号与在飞 spawnChain 竞态下，
 // 成功分支必须在写 done/落库前复核账号仍存在——否则 SelectClass 网络往返期间
 // DeleteAccount 已清表，本链返回后 SaveSuccess 把已删账号的 success 行写回，
-// 重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态（B18-M2，第 18 轮）。
+// 重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态（删号竞态历史轮次）。
 func TestDeletedAccountInFlightDropsSuccess(t *testing.T) {
 	fc := newFakeClient(true) // 窗口已开
 	store := &fakeStore{}
@@ -906,7 +906,7 @@ func TestDeletedAccountInFlightDropsSuccess(t *testing.T) {
 	}
 	waitDeleted()
 
-	// B18-M2 契约：账号已删除，success 行必须 NOT 落库
+	// 删号竞态契约：账号已删除，success 行必须 NOT 落库
 	store.mu.Lock()
 	rows := store.successRows["acct1\x0061115"]
 	store.mu.Unlock()
@@ -919,8 +919,8 @@ func TestDeletedAccountInFlightDropsSuccess(t *testing.T) {
 // 重登成功分支必须整段放弃——否则 DeleteAccount 清凭据表+Accounts.Remove 后在途
 // Relogin（Vision 最坏 2 分钟）返回成功，会写回 tokenValid/reloginAt 内存态 +
 // UpdateIDToken 落库把已删账号新 token 写回 credentials 表（重启 Restore 重建客户端、
-// 凭据幽灵复活）。与 B18-M2（自动链）/B20-01（手动路径）同族防线，重登路径补齐
-// （B21-03，第 21 轮）。
+// 凭据幽灵复活）。与删号竞态防线同族，重登路径补齐
+// （历史轮次定案）。
 func TestDeletedAccountReloginSuccessDropsState(t *testing.T) {
 	fc := newFakeClient(true)
 	store := &fakeStore{}
@@ -969,7 +969,7 @@ func TestDeletedAccountReloginSuccessDropsState(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// B21-03 契约：账号已删，重登成功分支整段放弃
+	// 重登防线契约：账号已删，重登成功分支整段放弃
 	// 断言 1：tokenValid 不得残留（PurgeAccount 已删、成功分支不得重写回）——
 	// tokenValidForLocked 对缺失 key 返回 true（有效），故直接断言内存 map 无该 key
 	//（map 读缺失 = tokenValid[acct]==false 恒，改用 in-map 判定更严格）
@@ -1071,7 +1071,7 @@ func TestReloginFailureRecoversNextCycle(t *testing.T) {
 	if s.TokenValidFor("acct1") {
 		t.Fatal("重登进行中 token 应显示失效")
 	}
-	// 放行：重登返回失败 → 失效标记保持（安全审计 MINOR 7：不得误报"有效"）
+	// 放行：重登返回失败 → 失效标记保持（安全审计：不得误报"有效"）
 	close(relogDone)
 	time.Sleep(200 * time.Millisecond)
 	if s.TokenValidFor("acct1") {
@@ -1098,7 +1098,7 @@ func TestReloginFailureRecoversNextCycle(t *testing.T) {
 
 // TestSubmitUnauthorizedTriggersRelogin 提交链命中 token 失效（非探测路径）也触发自动重登：
 // 探测只走 order[0] 账号，其他账号的 token 失效靠报名提交命中 ErrUnauthorized 感知——
-// 这是 M1（非探测账号失效无感知）的专项回归测试。
+// 这是非探测账号失效无感知的专项回归测试。
 func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(true)                    // 窗口已开，探测正常
 	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
@@ -1121,7 +1121,7 @@ func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
 // TestRealtimeRecheckDeletedAccountDropsLog 实时人数复核结果块（锁外网络段后回锁写状态）
 // 的删号竞态复核：复核发起的网络往返（IsClassFull，最长 15s）期间管理员删除账号——
 // 返回结果后回锁时若一律照写，会给已删账号落一条幽灵失败审计日志并重建 full/relogin
-// 族幽灵 map 条目（B30-01 链顶/B37-03 失效分支/B18-M2 成功分支同族防线的最后一块拼图；
+// 族幽灵 map 条目（链顶/失效分支/成功分支同族防线的最后一块拼图；
 // setStateLocked 的 idx<0 守卫只挡状态数组越界，挡不住落库与 map 写）。
 func TestRealtimeRecheckDeletedAccountDropsLog(t *testing.T) {
 	fc := newFakeClient(true)
@@ -1187,7 +1187,7 @@ func TestRealtimeRecheckDeletedAccountDropsLog(t *testing.T) {
 // SelectClass 网络往返（最长 15s）期间管理员删除账号，返回 ErrUnauthorized 后分支必须
 // 在状态写回与审计日志落库前再次核实 ClientFor，已删则静默放弃——旧实现直接在分支内
 // setState+AppendLog：删号后状态行被覆写为"教务令牌失效"并多写一行 DB 日志
-// （删号竞态链 B18-M2/B20-01/B21-03 的分支级缺口，B30-01 只护链顶与取 client 处）。
+// （删号竞态链的分支级缺口，链顶防线只护链顶与取 client 处）。
 func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 	fc := newFakeClient(true)
 	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
@@ -1259,7 +1259,7 @@ func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
-// B14-M1：原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
+// 原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
 // 恒 return，提交循环根本无法抵达（首段断言恒等 pending 超时必红，恒绿假象的另一面"恒红"）。
 // 改为过去时刻：守卫放行提交路径，而探测仍被 lastProbe 节流挡住（不 resetProbe），
 // 真正验证"提交不依赖探测节流"。本次为修复失效契约的测试，非业务代码改动（无红灯需先见）。
@@ -1389,7 +1389,7 @@ func TestProbeIntervalZeroOpenTime(t *testing.T) {
 	fcPast.data.BeginTimes = []int64{time.Now().Add(-time.Hour).UnixMilli()}
 	sPast := New(&fakeAccts{c: fcPast}, &fakeStore{}, time.Time{}, time.Hour)
 	sPast.mu.Lock()
-	sPast.state.WindowOpened = true // 曾开过窗（B18-M1 前提）
+	sPast.state.WindowOpened = true // 曾开过窗（关闭判定前提）
 	sPast.mu.Unlock()
 	sPast.probe()
 	if got := sPast.probeIntervalFor(time.Now()); got != probeIntervalFar {
@@ -1421,7 +1421,7 @@ func TestProbeIntervalZeroOpenTime(t *testing.T) {
 // 开放时间热改到未来（新一轮）时不受影响，临门仍 2s 盯守。
 func TestProbeIntervalWindowClosed(t *testing.T) {
 	// 已过开放时间 + 曾开过窗 + 空快照 → WindowClosed=true → 降回 30s
-	// B18-M1：关闭判定加入"至少开过窗"前提——未开过窗即空快照（学期无发布/
+	// 关闭判定加入"至少开过窗"前提——未开过窗即空快照（学期无发布/
 	// 平台异常）不是"窗口已关闭"；测试预置 WindowOpened=true 模拟"开过再关"的真实形态。
 	fc := newFakeClient(false)
 	fc.mu.Lock()
@@ -1429,7 +1429,7 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
 	s.mu.Lock()
-	s.state.WindowOpened = true // 开过窗（B18-M1 前提）
+	s.state.WindowOpened = true // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
@@ -1442,14 +1442,14 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（管理员热改新一轮的防守场景）
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
 	s2.mu.Lock()
-	s2.state.WindowOpened = true // B18-M1：开过窗
+	s2.state.WindowOpened = true // 开过窗（关闭判定前提）
 	s2.mu.Unlock()
 	s2.probe() // 空快照 → WindowClosed=true
 	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
 		t.Fatalf("临门期应 2s 盯守（不受已关闭标记影响），实际 %v", got)
 	}
 
-	// B18-M1 新增反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"窗口已关闭"
+	// 反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"窗口已关闭"
 	s3 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s3.probe()
 	if s3.WindowClosed() {
@@ -1462,7 +1462,7 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 
 // TestOpenTimeForLockedReturnsRecognizedValueEvenWhenPast 识别槽存在时 openTimeForLocked
 // 必须返回识别时刻本身（无论未来/过去）——"识别过期"只影响展示层 open_time_known，
-// 绝不在此截断为零值。审查发现的 CRITICAL：开窗瞬间起平台 beginTimes 恒为该批次
+// 绝不在此截断为零值。审查发现的严重项：开窗瞬间起平台 beginTimes 恒为该批次
 // 开窗时刻（已过去），若这里截断则 tick 提交守卫第一判据 open.IsZero() 永久挂起
 // 提交（黄金期自动抢课整体失效）。用对齐时钟推进过识别值模拟"开窗后"形态。
 func TestOpenTimeForLockedReturnsRecognizedValueEvenWhenPast(t *testing.T) {
@@ -1494,7 +1494,7 @@ func TestServerClockAlignment(t *testing.T) {
 	}
 }
 
-// TestClockSyncNoRetryWithinBackoff B9-03：时钟对齐失败后必须有失败退避——
+// TestClockSyncNoRetryWithinBackoff 时钟对齐失败后必须有失败退避——
 // 失败期间每个 tick 绝不再重复发起 SyncServerTime（此前 lastSyncTime 恒零时
 // 快路径被绕过、每 300ms tick 都裸打同步，网络故障期轰炸）。
 func TestClockSyncNoRetryWithinBackoff(t *testing.T) {
@@ -1541,7 +1541,7 @@ func TestClockSyncNoRetryWithinBackoff(t *testing.T) {
 	}
 }
 
-// TestClockSyncFailureResetsOffset 验证时钟同步连续失败后回退（MAJOR-C）：
+// TestClockSyncFailureResetsOffset 验证时钟同步连续失败后回退：
 // 连续 3 次同步失败复位 clockOffset=0 并输出警告日志，窗口判定回到本地时钟，
 // 绝不带着一个过期偏差长期误判开窗点。
 func TestClockSyncFailureResetsOffset(t *testing.T) {
@@ -1557,7 +1557,7 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
 	s.SetClockOffsetForTest(5 * time.Second) // 先模拟一次成功校准带来的偏差
 
-	// 连续 3 次同步失败。B8-M1：重入防抖——上轮仍在途时后续调用直接返回，
+	// 连续 3 次同步失败。重入防抖——上轮仍在途时后续调用直接返回，
 	// 不再 spawn 爆炸并发；每次发起前需等待上一轮 goroutine 落地（syncing 复位）。
 	// 测试驱动的 waiting 循环：每轮用「等待在该发起时刻之后成功发起的那次」而非盲目叠加。
 	// 第 3 次调用后：本轮可能触发回退（offset=0）或仍停留在失败计数阶段，统一由
@@ -1618,7 +1618,7 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 	}
 }
 
-// TestClockSyncNoClientResetsSyncing F12-B1：无已登录账号（空库/账号全删）或客户端
+// TestClockSyncNoClientResetsSyncing 无已登录账号（空库/账号全删）或客户端
 // 不支持时钟同步时，syncing 必须被复位——此前 syncing 置 true 后无人复位（复位只在
 // goroutine 内），后续每个 tick 在 `if s.syncing` 处直接返回，时钟校准从启动起永久休眠、
 // clockOffset 恒 0 且无任何错误日志。空库部署首个 300ms tick 即触发。
@@ -1653,7 +1653,7 @@ func TestClockSyncNoClientResetsSyncing(t *testing.T) {
 	}
 }
 
-// TestClockSyncSuccessClearsFailStreak 验证同步成功即清零连续失败计数（MAJOR-C）：
+// TestClockSyncSuccessClearsFailStreak 验证同步成功即清零连续失败计数：
 // 网络抖动 1 次后恢复，不允许一次瞬断就累计成回退。
 func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 	fc := newFakeClient(false)
@@ -1709,8 +1709,8 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 // TestWindowClosedState 选课窗口关闭（探测返回空快照）时，状态应暴露 window_closed=true
 // 并同步输出日志；正常未开窗数据时 window_closed 必须为 false（不得误报）。
 func TestWindowClosedState(t *testing.T) {
-	// 第 3 轮 C-3：空快照 + 曾开过窗 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
-	// B18-M1：判定加入"至少开过窗"前提——未开过窗即空快照不算"已关闭"，
+	// 空快照 + 曾开过窗 + 开放时间已过 = 窗口已关闭；快照存在/未到点 = 未关闭。
+	// 判定加入"至少开过窗"前提——未开过窗即空快照不算"已关闭"，
 	// 防止还没开窗就把提交挂起（开窗瞬间黄金期全停摆）；测试预置 WindowOpened=true。
 	fcEmpty := newFakeClient(false)
 	fcEmpty.mu.Lock()
@@ -1719,7 +1719,7 @@ func TestWindowClosedState(t *testing.T) {
 	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.state.WindowOpened = true // B18-M1：开过窗
+	s.state.WindowOpened = true // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
@@ -1735,7 +1735,7 @@ func TestWindowClosedState(t *testing.T) {
 		t.Fatal("正常未开窗探测后 window_closed 应为 false")
 	}
 
-	// B18-M1 反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"已关闭"
+	// 反向断言：从未开过窗 + 空快照 + 开放时间已过 → 不是"已关闭"
 	s3 := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s3.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s3.probe()
@@ -1744,9 +1744,9 @@ func TestWindowClosedState(t *testing.T) {
 	}
 }
 
-// TestWindowClosedTransitionStateGrace B26-03：主判据（B18-M1）补"已过开窗点
-// 10s 裕量"——与 B21-02 给 EmptyProbeRuns 入账的 10s 裕量对称。开窗确证过（prevOpened=true）
-// 后，平台短暂返回空快照（数据刷新/切学期过渡态，F7-01 记录的预清空现象）时，旧判据
+// TestWindowClosedTransitionStateGrace 主判据补"已过开窗点
+// 10s 裕量"——与给 EmptyProbeRuns 入账的 10s 裕量对称。开窗确证过（prevOpened=true）
+// 后，平台短暂返回空快照（数据刷新/切学期过渡态，记录的预清空现象）时，旧判据
 // `now.After(open)` 在开窗点刚过就置 WindowClosed=true → tick 提交守卫挂起提交 + 探测降回
 // 30s，若平台在 30s 内恢复，黄金期提交已停摆。10s 裕量覆盖过渡态；真关仅推迟 10s 判定
 // （超过裕量仍按原判据关闭，TestWindowClosedState 的 -time.Hour 场景已固化））。
@@ -1768,11 +1768,11 @@ func TestWindowClosedTransitionStateGrace(t *testing.T) {
 	}
 }
 
-// TestStateForAccountMirrorsWindowClosed B29-02：StateForAccount 的 window_closed 字段
+// TestStateForAccountMirrorsWindowClosed StateForAccount 的 window_closed 字段
 // 必须与 WindowClosed() 方法同真相——此前只写 s.state.WindowClosed（probe 主判据），
-// 兜底判据（B19-01 时钟连续失败 / B20-02 幽灵窗口 EmptyProbeRuns）返回 true 时不回写
+// 兜底判据（时钟连续失败 / 幽灵窗口 EmptyProbeRuns）返回 true 时不回写
 // 字段：幽灵窗口/时钟失败场景下 /api/state 下发 window_closed=false，前端横幅仍显示
-// 倒计时/"已开放"、日志与课程轮询维持高频（F9-07 降频失效），展示与实际挂起状态分叉。
+// 倒计时/"已开放"、日志与课程轮询维持高频（降频失效），展示与实际挂起状态分叉。
 // 修复前（StateForAccount 直接浅拷贝 state.WindowClosed）：红——时钟失败≥3 时
 // WindowClosed() 返回 true 但状态字段仍 false。
 // 修复后（共用 windowClosedLocked 单源）：绿——三条判据（主判据/时钟兜底/幽灵窗口兜底）
@@ -1836,7 +1836,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 }
 
 // TestReleaseFullIfFreedEvenIfSnapshotOld 验证快照超过 40s 老化期但名额有空余时，
-// 调度器绝不能死守 full 标记，必须立即解除满员状态，以便黄金期捡漏抢课 (CRITICAL C1)。
+// 调度器绝不能死守 full 标记，必须立即解除满员状态，以便黄金期捡漏抢课。
 func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
 	acct := "acct1"
@@ -1878,9 +1878,9 @@ func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
 	}
 }
 
-// TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶（CRITICAL C2, C3）。
-// B14-I1：原后半段手写 `s.reloginFail[acct]=5; delete(...)` 直接测 Go
-// map 的 delete 语义（恒绿，与 F13-i1 同为"手写实现语义当断言"的坏味道）——删除。
+// TestReloginBackoffCappedAndReset 验证重登退避防溢出封顶。
+// 原后半段手写 `s.reloginFail[acct]=5; delete(...)` 直接测 Go
+// map 的 delete 语义（恒绿，同为"手写实现语义当断言"的坏味道）——删除。
 // 真实"失败保留增长 / 成功清零"路径由 TestReloginFailureKeepsBackoff /
 // TestReloginSuccessResetsBackoff 覆盖，此处不再重复。
 func TestReloginBackoffCappedAndReset(t *testing.T) {
@@ -1895,12 +1895,12 @@ func TestReloginBackoffCappedAndReset(t *testing.T) {
 }
 
 // TestReloginFailureKeepsBackoff 已契约化"重登失败后 reloginFail 保留增长、成功才清零"
-// （C1，退避表逐次拉长防线）——真实失败路径从不清零为 1。
-// F13-i1：本测试测试"复位为 1"的语义，但实现任何失败路径都不复位为 1
+// （退避表逐次拉长防线）——真实失败路径从不清零为 1。
+// 本测试测试"复位为 1"的语义，但实现任何失败路径都不复位为 1
 // （开发者当年手写两行"模拟实现"），是恒绿的无效测试——删除，由下方两个真实路径
 // 测试 TestReloginBackoffWindowBlocksManualTriggers / TestReloginFailureKeepsBackoff 覆盖。
 
-// TestSubmitAllUsesAlignedClock 验证提交时刻 lastSubmit 用对齐时钟写入（MAJOR-F）：
+// TestSubmitAllUsesAlignedClock 验证提交时刻 lastSubmit 用对齐时钟写入：
 // 时钟偏差下提交闸门比较两端（tick 的 nowAligned 与 lastSubmit）必须同基准，
 // 否则 250ms 黄金期冲刺间隔判定在 clockOffset 达数百 ms 时失真。
 func TestSubmitAllUsesAlignedClock(t *testing.T) {
@@ -1954,7 +1954,7 @@ func TestSubmitAllWarnsOnceOnNoTargets(t *testing.T) {
 	}
 }
 
-// TestMaskedTokenBoundary 验证 token 脱敏边界（m10）：长度 >8 显示前 8 位，
+// TestMaskedTokenBoundary 验证 token 脱敏边界：长度 >8 显示前 8 位，
 // ≤8 位的短 token 不足以掩盖身份，一律返回 "***"。
 func TestMaskedTokenBoundary(t *testing.T) {
 	if got := maskedToken("abcdefgh12345"); got != "abcdefgh" {
@@ -1996,7 +1996,7 @@ func TestSpawnChainSkipsInflightCourse(t *testing.T) {
 }
 
 // TestManualDoneClearsInflight 验证手动报名成功（MarkDone）与手动退选（RemoveDone）后
-// 必须同步清理 inflight 位——否则下个自动链/手动操作会永久 409 或被状态机反转 (M5)。
+// 必须同步清理 inflight 位——否则下个自动链/手动操作会永久 409 或被状态机反转。
 func TestManualDoneClearsInflight(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
 	acct := "acct1"
@@ -2041,7 +2041,7 @@ func TestManualDoneClearsInflight(t *testing.T) {
 }
 
 // TestSchedulerManualSyncAndSubmitMutex 验证手动报名、退选状态协同与提交排他互斥锁 (Task 3)。
-// TestCheckClassSelectable 手动报名服务端复核（M7）核心判定：
+// TestCheckClassSelectable 手动报名服务端复核核心判定：
 // 基于账号专属快照——窗口关闭的发布、满员课程被拒绝；可报名课程放行；
 // 无快照/课程不在快照中时放行（交给平台最终把关）。
 func TestCheckClassSelectable(t *testing.T) {
@@ -2060,7 +2060,7 @@ func TestCheckClassSelectable(t *testing.T) {
 	if _, err := s.ProbeForAccount("acct1"); err != nil {
 		t.Fatalf("填充快照失败: %v", err)
 	}
-	// B6-04：ProbeForAccount 不得写全局 lastProbe——它只归 probe()/ProbeNow 管理，
+	// ProbeForAccount 不得写全局 lastProbe——它只归 probe()/ProbeNow 管理，
 	// 否则管理员穿透探测会吞掉全校探测节流闸门（开窗前点一次课程页 = 全校探测延后）。
 	if s.HasProbed() {
 		t.Fatal("ProbeForAccount 不应把 HasProbed 置 true（lastProbe 只归全校正规探测）")
@@ -2090,7 +2090,7 @@ func TestCheckClassSelectable(t *testing.T) {
 	if _, ok := s.CheckClassSelectable("acct1", 99999); !ok {
 		t.Fatal("不在快照中的课程应放行（由平台返回具体错误）")
 	}
-	// B18-m1：快照超过 TTL 过期后复核必须放行——
+	// 快照超过 TTL 过期后复核必须放行——
 	// 旧快照可能已失真的名额/窗口数据绝不拦截用户真实操作（放行由平台最终把关，
 	// 与 ElectivesSnapshotFor 的过期回退语义对齐）。
 	s.mu.Lock()
@@ -2104,9 +2104,9 @@ func TestCheckClassSelectable(t *testing.T) {
 // TestDeletedAccountManualInFlightDropsState 验证删除账号与在飞【手动报名/退选】竞态下，
 // MarkDone/RemoveDone 成功分支同样必须在写 done/落库前复核账号仍存在——否则 SelectClass/
 // ExitClass 网络往返（最长 15s）期间管理员 DeleteAccount 已清库表 + Accounts.Remove，
-// 本请求返回后（B20-01，第 20 轮）会把已删账号的 success/refused 行写回：
+// 本请求返回后（删号竞态防线）会把已删账号的 success/refused 行写回：
 // 重启后重新登录分别被 RestoreDone 恢复成"已报名成功"假状态 / RestoreRefused 恢复成
-// "已退选"令自动引擎永久跳过该课。B18-M2 只修了自动链，手动路径同样竞态整链开放。
+// "已退选"令自动引擎永久跳过该课。自动链防线只修了自动链，手动路径同样竞态整链开放。
 func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	fc := newFakeClient(true) // 窗口已开
 	store := &fakeStore{}
@@ -2231,7 +2231,7 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 
 // TestWindowClosedReleasesNoFull 窗口关闭后（空快照）绝不能把 full 标记解封：
 // releaseFullIfFreedLocked 对空快照（无课程可比对）必须保持 full 不解封，
-// 否则 spawnChain 每个 tick 都会重新打报名接口（C-3 窗口关闭防轰炸残留）。
+// 否则 spawnChain 每个 tick 都会重新打报名接口（窗口关闭防轰炸残留）。
 func TestWindowClosedReleasesNoFull(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
 	acct := "acct1"
@@ -2258,7 +2258,7 @@ func TestWindowClosedReleasesNoFull(t *testing.T) {
 }
 
 // TestReleaseFullIfFreedKeepsFullOnUnknown 快照未知（课程不在快照中）时同样不能解封：
-// 只有快照明确显示该课程有余量才解封，未知状态一律保守保持 full（C-3 守卫）。
+// 只有快照明确显示该课程有余量才解封，未知状态一律保守保持 full（防轰炸守卫）。
 func TestReleaseFullIfFreedKeepsFullOnUnknown(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
 	acct := "acct1"
@@ -2285,7 +2285,7 @@ func TestReleaseFullIfFreedKeepsFullOnUnknown(t *testing.T) {
 	}
 }
 
-// TestSetTargetsPurgesStaleState 验证重设目标只清 refused（B19-02，第 19 轮定案）：
+// TestSetTargetsPurgesStaleState 验证重设目标只清 refused（历史定案）：
 // done/full/rateLimited/inflight **全部保留**——done 是跨目标的持久历史事实
 // （RestoreDone 注入/手动报名 MarkDone 写入），重设清掉会把已成功课程重新提交
 // （TestRestoreDoneSkipsResubmit 固化）；full/rateLimited 是真实防轰炸状态，清了
@@ -2338,7 +2338,7 @@ func TestSetTargetsPurgesStaleState(t *testing.T) {
 	}
 }
 
-// TestPurgeAccount 验证管理员删除账号后调度器全量清理（B19-02，第 19 轮）：
+// TestPurgeAccount 验证管理员删除账号后调度器全量清理：
 // done/full/rateLimited/inflight/acctTargets 全部清除——重建账号绝不残留旧状态。
 func TestPurgeAccount(t *testing.T) {
 	s := New(&fakeAccts{}, &fakeStore{}, time.Now(), time.Hour)
@@ -2372,7 +2372,7 @@ func TestPurgeAccount(t *testing.T) {
 }
 
 // TestWindowClosedProbeDropsToFar 窗口开过再关（开放时间已过 + 空快照）后，探测间隔必须
-// 降回 30s（C-3 C2a 残留）：此前 WindowClosed 带 !prevWindowOpened 判定导致"开过再关"恒 false，
+// 降回 30s（历史残留）：此前 WindowClosed 带 !prevWindowOpened 判定导致"开过再关"恒 false，
 // 窗口关闭后仍 2s 高频探测——修复后以"开放时间已过 + 空快照"为关闭判定。
 func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	fc := newFakeClient(false)
@@ -2383,7 +2383,7 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.state.WindowOpened = true // B18-M1：开过窗
+	s.state.WindowOpened = true // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe() // 探测落地 WindowClosed 状态
 
@@ -2397,14 +2397,14 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 }
 
 // TestGhostWindowEmptyProbesSuspend 验证从未开过窗的空快照 + 时钟接口正常时，连续
-// 空快照探测 ≥3 轮后必须判定"幽灵窗口已关闭"（B20-02，第 20 轮）——B19-01 的时钟
+// 空快照探测 ≥3 轮后必须判定"幽灵窗口已关闭"——时钟
 // 兜底覆盖不到该形态（syncFailStreak 恒 0），此前 WindowClosed() 恒 false：
 // tick 提交段 1s 周期 SelectClass（平台回 code=1"无效的课程ID"）+ 实时复核 StudentCounts
 // 空 → 下轮重打，probeIntervalFor 恒 2s 高频探测，防轰炸契约闭环缺口。
 // 量变判据：EmptyProbeRuns≥3 且从未开窗且开放时间已过 → 视同关闭；开窗/非空快照/未到
 // 开放时间即归零自愈（不误伤开窗前正常空快照的临门盯守）。
-// B21-02：入账增量再加"已过开窗点 10s 裕量"——开窗瞬间平台预清空 publishes
-// （F7-01 真实现象）时，旧判据会在黄金期误挂起；补这段过渡期错开，真实窗口开启后连续
+// 入账增量再加"已过开窗点 10s 裕量"——开窗瞬间平台预清空 publishes
+// （真实现象）时，旧判据会在黄金期误挂起；补这段过渡期错开，真实窗口开启后连续
 // 空快照才确证幽灵窗口。
 func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 	fc := newFakeClient(false)
@@ -2454,8 +2454,8 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 		t.Fatal("EmptyProbeRuns 归零（窗口若真开、探测拿到非空快照）后应解除")
 	}
 
-	// B21-02 反向断言 3：开窗点后 10s 裕量内（now ≤ open+10s）probe() 绝不入账空快照轮数——
-	// 开窗瞬间平台预清空 publishes 的过渡态（F7-01）不得被误判幽灵窗口。裕量在入账侧
+	// 反向断言 3：开窗点后 10s 裕量内（now ≤ open+10s）probe() 绝不入账空快照轮数——
+	// 开窗瞬间平台预清空 publishes 的过渡态不得被误判幽灵窗口。裕量在入账侧
 	// （probe() 的 `now.After(open+10s)` 才 ++），故用真实 probe() 验证，而非置 state。
 	// 情况 A：开放时间 5s 前（仍在 10s 裕量窗口内）→ 空快照探测不得入账（EmptyProbeRuns 保持 0）
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-5*time.Second), time.Hour)
@@ -2478,11 +2478,11 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 }
 
 // TestGhostWindowClockFailuresSuspend 验证从未开过窗的空快照 + 时钟连续失败 ≥3 时
-// 判定"幽灵窗口已关闭"（B19-01 时钟兜底 + B21-01 使其真实可达）：packaged 默认
+// 判定"幽灵窗口已关闭"（时钟兜底使其真实可达）：packaged 默认
 // open_time 已过 + 平台空快照 + syncFailStreak 持续累计 ≥3，WindowClosed() 必须为 true
 // （tick 守卫挂起提交 + 探测降回 30s），自愈由时钟成功恢复（streak 归零）提供。
-// B22-02：测试改为用真实 maybeSyncClock 让 streak 真实累计到 3——
-// 此前手动注入 3 是恒假绿形态（B21-01 死代码实证的对应测试），现验证判据真实可达。
+// 测试改为用真实 maybeSyncClock 让 streak 真实累计到 3——
+// 此前手动注入 3 是恒假绿形态（死代码实证的对应测试），现验证判据真实可达。
 // maybeSyncClock 每次失败后落地 lastSyncFailAt（30s 退避）且 syncing 复位在异步
 // goroutine 内，故每次发起前清退避、发起后轮询等 syncing 落地，模拟三次独立失败。
 func TestGhostWindowClockFailuresSuspend(t *testing.T) {
@@ -2549,7 +2549,7 @@ func TestGhostWindowClockFailuresSuspend(t *testing.T) {
 	}
 }
 
-// TestManualSnapshotFallbackOnlyWhenOwnFresh 验证快照回退语义（B22-01，第 22 轮）：
+// TestManualSnapshotFallbackOnlyWhenOwnFresh 验证快照回退语义：
 // ElectivesSnapshotFor 的全局帧回退只许发生在"该账号确实没探测过 / 有全局帧可回退"时——
 // 账号已配置目标后 probe() 每 30s 必刷新其专属快照；若专属快照缺失且全局帧非空，回退
 // 返回的全局帧可能是首个注册账号的年级（混合年级部署下年级串线），绝不可当"自己年级"
@@ -2571,7 +2571,7 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 	s.mu.Unlock()
 
 	// 断言 1：目标账号专属快照缺失时，绝不回退全局帧（fallback 返回 false → handleElectives
-	// 走 ProbeForAccount 真取本账号年级帧）——这是 B22-01 修复后的语义
+	// 走 ProbeForAccount 真取本账号年级帧）——这是修复后的语义
 	if _, ok := s.ElectivesSnapshotFor("acct1"); ok {
 		t.Fatal("目标账号专属快照缺失时不得回退全局帧（跨年级帧可能被错误渲染给该账号）")
 	}
@@ -2593,7 +2593,7 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 		t.Fatal("ElectivesSnapshotFor 返回的不是该账号专属帧（年级串线）")
 	}
 
-	// 断言 3（B28-01）：无目标账号的专属帧"存在但已过期"，而全局帧恰被其他账号刷新为
+	// 断言 3：无目标账号的专属帧"存在但已过期"，而全局帧恰被其他账号刷新为
 	// 新鲜帧时，必须返回 false 触发本账号 ProbeForAccount 刷新——旧实现回退这份**错年级**
 	// 全局帧且 ok=true，读取方（handleElectives）不触发刷新，浏览者持续看到别的年级课程。
 	// 场景：browse 账号"student1"（无目标）专属帧高二（PublishID=1）已过期 41s，全局帧
@@ -2616,12 +2616,12 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 		t.Fatal("无目标账号专属帧已过期时不得回退新鲜全局帧（错年级数据串线 + 不触发本账号刷新）")
 	}
 
-	// 断言 4（B37-02）：清空目标后（SetTargetsForAccount 留下空 slice、map key 仍存在），
+	// 断言 4：清空目标后（SetTargetsForAccount 留下空 slice、map key 仍存在），
 	// 该账号必须走"无目标账号"快路径——全局帧新鲜即返回，绝不走"有目标账号"专属路径：
 	// 旧判据按 key 存在性判定，清空目标的账号被归入目标账号 → 无专属帧返回 (nil,false)
 	// → handleElectives 每次浏览都调 ProbeForAccount 真打平台（前端 10s 轮询 × 每次过期即打），
 	// 与"无目标账号回退全局帧（快、无网络开销）"契约相悖（AccountsWithTargets 只认 len>0）。
-	s.SetTargetsForAccount("acct1", []Target{}) // 模拟用户清空全部目标（F7-01 合法操作）
+	s.SetTargetsForAccount("acct1", []Target{}) // 模拟用户清空全部目标（合法操作）
 	s.mu.Lock()
 	delete(s.acctData, "acct1") // 清空后从未探测过：无专属帧
 	delete(s.acctDataAt, "acct1")
@@ -2632,9 +2632,9 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 	}
 }
 
-// TestReloginBackoffWindowBlocksManualTriggers B9-01：连续失败进入指数退避后，
+// TestReloginBackoffWindowBlocksManualTriggers 连续失败进入指数退避后，
 // 退避窗口内再次触发 maybeRelogin 必须被挡下（不发起新重登、不清退避表）。
-// 修复前的 api 层手动路径（B8-M7）在命中 ErrUnauthorized 时先调 MarkTokenValid
+// 修复前的 api 层手动路径在命中 ErrUnauthorized 时先调 MarkTokenValid
 // 再调 MaybeRelogin——MarkTokenValid 会 delete reloginFail（它只该用于"手动登录成功"
 // 的 issueSession），指数退避恒从 30s 重来，Vision 持续故障时平台锁号防线被击穿。
 func TestReloginBackoffWindowBlocksManualTriggers(t *testing.T) {
@@ -2725,10 +2725,10 @@ func TestReloginFailureKeepsBackoff(t *testing.T) {
 }
 
 // TestWindowClosedSelectStopsBombing 窗口已确认关闭时（state.WindowClosed=true）tick 守卫
-// 直接挂起提交，SelectClass 0 次调用（C-3 防轰炸主路径回归）。
-// B18-M1：真实平台关闭文案"无效的课程ID"不在 isWindowClosedError 匹配集合，
+// 直接挂起提交，SelectClass 0 次调用（防轰炸主路径回归）。
+// 真实平台关闭文案"无效的课程ID"不在 isWindowClosedError 匹配集合，
 // 旧实现只靠文案记 full 挡不住 → 复核路径 countList 空报"课程无人数数据" → 永续轰炸；
-// 根因修复在 tick 守卫（WindowClosed 状态挂起提交，与 B11-A1 零值守卫并列）。
+// 根因修复在 tick 守卫（WindowClosed 状态挂起提交，与零值守卫并列）。
 func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	// 窗口关闭特征：空快照（平台关闭后 findElectivesData 返回空 publishes）+ 曾开过窗
 	fc := newFakeClient(false)
@@ -2741,12 +2741,12 @@ func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	// → state.WindowClosed=true；首个 tick 的 probe() 会按真实判据维持该值（prevOpened 且
 	// 空发布，见 probe 的 WindowClosed 计算）。随后 tick 守卫命中 WindowClosed 挂起提交。
 	s.mu.Lock()
-	s.state.WindowOpened = true // B18-M1 语义自洽：关闭以"至少开过窗"为前提
+	s.state.WindowOpened = true // 语义自洽：关闭以"至少开过窗"为前提
 	s.state.WindowClosed = true
 	s.mu.Unlock()
 	s.Start()
 	defer s.Stop()
-	// B18-M1：窗口已关闭 → tick 守卫直接挂起提交，SelectClass 0 次调用
+	// 窗口已关闭 → tick 守卫直接挂起提交，SelectClass 0 次调用
 	// （比"首轮执行一次再靠 full 挡"更彻底）。
 	time.Sleep(80 * time.Millisecond)
 	fc.mu.Lock()
@@ -2766,7 +2766,7 @@ func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	}
 }
 
-// TestClassFullRealtimeNotHoldingMu 实时人数复核不得持 s.mu 发起网络请求（C-4）：
+// TestClassFullRealtimeNotHoldingMu 实时人数复核不得持 s.mu 发起网络请求：
 // 复核期间其他账号的探测/提交仍须能拿锁推进——此前复核持有 s.mu 最长 15 秒，
 // 黄金冲刺期被白白锁死；修复后锁外请求，复核期间 WindowOpened() 可立即返回。
 func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
@@ -2812,7 +2812,7 @@ func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
 
 // TestRealtimeRecheckUnauthorizedTriggersRelogin 验证实时人数复核命中 token 失效
 // （findElectivesStudentCount 同样鉴权，code=-1）时：与 SelectClass 分支对称、立即触发
-// 自动重登（B19-03，第 19 轮）——此前复核错误被当普通失败处理、下个 tick 又重打失效
+// 自动重登——此前复核错误被当普通失败处理、下个 tick 又重打失效
 // 报名接口，失效恢复路径被延迟到探测/手动路径才发现（token 失效数秒内黄金期空转）。
 // 修复前该路径 maybeRelogin 0 次（红灯），修复后 1 次（绿灯）。
 func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
@@ -2842,7 +2842,7 @@ func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
 }
 
 // TestRealtimeFullRecheckKeepsManualSuccess 实时人数复核的"确证满员"分支不得覆盖手动报名
-// 成功的胜利状态（B23-01，第 23 轮）。锁外复核窗口（最长 15s）内手动路径 TryAcquireSubmit
+// 成功的胜利状态。锁外复核窗口（最长 15s）内手动路径 TryAcquireSubmit
 // 可抢到已释放的 inflight 位并 MarkDone 置 done+success；复核返回真满后旧实现 `cErr==nil
 // && full` 分支（markFullLocked，无 doneHas 复核）把 success 覆盖成"failed/已满员"并追加
 // 一条假"已满员"日志——与紧邻的"未现满员"分支（1338 行有 doneHas 复核"绝不覆盖胜利状态"）
@@ -2902,7 +2902,7 @@ func (s *Scheduler) markDoneTestHelper(acct string, classID int) error {
 }
 
 // TestRealtimeFullRecheckWithNoManualDoneMarksFull 对偶守卫：复核"真满"且没有手动成功介入时，
-// 满员分支必须照常记 full 并置 failed（B23-01 修复不得误伤正常满员退避）。
+// 满员分支必须照常记 full 并置 failed（修复不得误伤正常满员退避）。
 func TestRealtimeFullRecheckWithNoManualDoneMarksFull(t *testing.T) {
 	fc := newFakeClient(true)
 	fc.mu.Lock()
@@ -2930,7 +2930,7 @@ func TestRealtimeFullRecheckWithNoManualDoneMarksFull(t *testing.T) {
 }
 
 // TestSpawnChainSkipsWhenTokenInvalid token 已知失效（tokenValid=true 且重登退避中）时，
-// spawnChain 必须在链顶短路、绝不真实打平台 SelectClass（B23-03，第 23 轮）——此前链顶
+// spawnChain 必须在链顶短路、绝不真实打平台 SelectClass——此前链顶
 // 只有 relogging 短路，失效+重登退避期（relogging 已清）每个 tick 仍对每门目标真实发起
 // SelectClass（必然 code=-1）并每题 AppendLog"教务令牌失效"，烧平台请求额度 + 日志堆积。
 // 修复后已知失效链不得发起任何 SelectClass 调用。
@@ -2966,7 +2966,7 @@ func TestSpawnChainSkipsWhenTokenInvalid(t *testing.T) {
 
 // TestReloginSuccessWithNilStoreNoPanic 重登成功分支在 store 为 nil（测试直构 Scheduler
 // 不注入 Store 的形态）时不得 nil panic——全仓库其余落库点都包 `if s.store != nil`，
-// 唯有重登成功分支的 UpdateIDToken 此前裸写（B39-03 修复前此测试 panic 即红灯）。
+// 唯有重登成功分支的 UpdateIDToken 此前裸写（修复前此测试 panic 即红灯）。
 // 语义：nil store = 无持久化需求，跳过落库继续完成重登恢复。
 func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
 	fc := newFakeClient(false)
@@ -3008,7 +3008,7 @@ func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
 }
 
 // TestDeletedAccountRebuiltSameNameChainDropsSuccess 删除账号后同名重建（换绑/误删加回）
-// 时，陈旧在飞链返回成功不得写回重建身份——B39-01 核心场景。
+// 时，陈旧在飞链返回成功不得写回重建身份——同名重建核心场景。
 // 缺陷形态：spawnChain 成功分支只校验"账号名当前是否在注册表"（ClientFor ok），不校验
 // "客户端是否仍是发起提交时的同一身份"。删号后同名重建会用新 *zhidao.Client 顶替，
 // 旧链在 SelectClass 网络往返期间被顶替，返回后 ClientFor(acct) 仍 ok（新客户端）→
@@ -3059,7 +3059,7 @@ func TestDeletedAccountRebuiltSameNameChainDropsSuccess(t *testing.T) {
 
 	// 等链完全退出（chains 活跃标记消失 = goroutine 的 defer 已执行，成功/静默分支全部
 	// 落地）。注意绝不能用 inflight 等待：PurgeAccount 已把 acct1 的 inflight map 整体删除，
-	// 读 nil map 恒 false——测试会在旧链写回之前假绿（B39-01 实测踩坑，与
+	// 读 nil map 恒 false——测试会在旧链写回之前假绿（同名重建实测踩坑，与
 	// TestRealtimeRecheckDeletedAccountDropsLog 同款等待契约）。
 	deadline := time.Now().Add(3 * time.Second)
 	key := "acct1\x001"
@@ -3073,26 +3073,26 @@ func TestDeletedAccountRebuiltSameNameChainDropsSuccess(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// B39-01 契约：重建身份不得落库 success 行（重启后假成功）
+	// 同名重建契约：重建身份不得落库 success 行（重启后假成功）
 	store.mu.Lock()
 	rows := store.successRows["acct1\x0061115"]
 	store.mu.Unlock()
 	if rows != 0 {
-		t.Fatalf("同名重建后陈旧旧链成功不得写回重建身份（B39-01），实际 %d 行 success", rows)
+		t.Fatalf("同名重建后陈旧旧链成功不得写回重建身份，实际 %d 行 success", rows)
 	}
 	// 重建身份的内存 done 也不得被旧链污染（PurgeAccount 已清空，旧链不得写回）
 	s.mu.Lock()
 	_, inDone := s.done["acct1"][61115]
 	s.mu.Unlock()
 	if inDone {
-		t.Fatal("同名重建后陈旧旧链不得写回重建身份的 done（B39-01）")
+		t.Fatal("同名重建后陈旧旧链不得写回重建身份的 done")
 	}
 }
 
 // waitChainExit 等待指定发布链完全退出（chains 活跃标记消失 = goroutine 的 defer
 // 已执行，成功/静默分支全部落地）。注意绝不能用 inflight 等待：PurgeAccount 已把该
 // 账号的 inflight map 整体删除，读 nil map 恒 false——测试会在旧链写回之前假绿
-// （与 TestRealtimeRecheckDeletedAccountDropsLog/R39 同款等待契约）。
+// （与 TestRealtimeRecheckDeletedAccountDropsLog 同款等待契约）。
 func waitChainExit(t *testing.T, s *Scheduler, key string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -3113,14 +3113,14 @@ func waitChainExit(t *testing.T, s *Scheduler, key string) {
 // 实时人数复核确证满员三条 err 处理路径此前只判账号名存在（ClientFor ok），同名重建
 // 后新身份存在但指针不同——陈旧链命中这三类错误时会把 rateLimited/full 写进重建身份
 // （假"已满员"永久退避黄金期 / 假退避）。三个测试补齐：重建身份绝不落 rateLimited/full。
-// TestDeletedAccountRebuiltSameNameChainDropsRelogin B42-02：失效分支必须先做指针身份
+// TestDeletedAccountRebuiltSameNameChainDropsRelogin 失效分支必须先做指针身份
 // 复核、再决定是否 maybeRelogin——旧链命中 ErrUnauthorized 且账号已删/同名重建（身份已变）
 // 时，绝不得调用 maybeRelogin：否则幽灵账号残留 reloginFail 计数（Manager.Relogin 对已删
 // 账号 ClientFor 不存在仍递增失败计数），污染同名重建账号的首次自动重登（无辜退避 30s）。
 // 修复前（maybeRelogin 在复核之前无条件调用）：红——relogCalls == 1。
 // 修复后（先复核通过才 maybeRelogin）：绿——relogCalls == 0。
 func TestDeletedAccountRebuiltSameNameChainDropsRelogin(t *testing.T) {
-	// 关键夹具与 R39 同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
+	// 关键夹具与删号重建同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
 	// （perAccount 值被替换），旧链发起时捕获的是旧 *fakeClient——指针身份比对必然不等。
 	oldClient := newFakeClient(true)
 	oldClient.mu.Lock()
@@ -3179,7 +3179,7 @@ func TestDeletedAccountRebuiltSameNameChainDropsRelogin(t *testing.T) {
 }
 
 func TestDeletedAccountRebuiltSameNameChainDropsRateLimitBackoff(t *testing.T) {
-	// 关键夹具与 R39 同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
+	// 关键夹具与删号重建同款：perAccount 让"acct1"在删除+重建后返回**新的** *fakeClient
 	// （perAccount 值被替换），旧链捕获的是旧 *fakeClient——指针身份比对必然不等。
 	oldClient := newFakeClient(true)
 	oldClient.mu.Lock()
@@ -3382,7 +3382,7 @@ func TestSubmitAllowedWhenWindowOpenedWithZeroOpenTime(t *testing.T) {
 // 没有 ClientFor 存在性复核：删号与在飞探测返回 ErrUnauthorized 同帧时，会把
 // tokenValid=true / reloginFail++ / reloginAt / relogging=true 重新写进已删账号的 map key
 // （PurgeAccount 已清），同名重建后新账号 tokenValid 残留 true（前端"已失效"）+ spawnChain
-// 整链挂起 + 首登无辜退避 30s。B21-03 只护重登 goroutine 写回侧，决策侧裸露。
+// 整链挂起 + 首登无辜退避 30s。重登写回侧防线只护重登 goroutine 写回侧，决策侧裸露。
 // 修复前（入口直接写 map）：红——四 map 均残留 key。
 // 修复后（入口先 ClientFor 复核）：绿——四 map 均无 key。
 func TestMaybeReloginDeletedAccountSkipsMaps(t *testing.T) {
@@ -3412,7 +3412,7 @@ func TestMaybeReloginDeletedAccountSkipsMaps(t *testing.T) {
 	}
 }
 
-// TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin B43-02：
+// TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin
 // 实时复核命中 token 失效（cErr == ErrUnauthorized）分支此前只用 ClientFor 存在性复核，
 // 缺 sameClientFor 指针身份比对——同名重建（注册表现指针已换）后旧链命中新身份的
 // ErrUnauthorized 会把 maybeRelogin 写进新身份（无辜消耗登录预算）。
@@ -3496,8 +3496,8 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 	}
 }
 
-// TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight B43-03 实测归因：
-// 成功分支 1502 行在任何分支判定前已统一清 inflight（含身份复核失败路径），
+// TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight 实测归因：
+// 成功分支在任何分支判定前已统一清 inflight（含身份复核失败路径），
 // 与失效分支 1479/1490 行对称——"成功分支身份复核失败时 inflight 位漏删"的
 // 原审查结论不成立。本测试固化为回归：同名重建后旧链成功身份复核失败，
 // 重建账号的 inflight[classID] 必须不存在（PurgeAccount 已清 + 1502 行统一清位）。
@@ -3550,7 +3550,7 @@ func TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight(t *testing.T) {
 	}
 }
 
-// TestScheduleIntervalClamped F46-O1：interval 非正数兜底——NewTicker(0) 直接 panic
+// TestScheduleIntervalClamped interval 非正数兜底——NewTicker(0) 直接 panic
 // 会让 Start() 协程整崩且无 recover（与 tick 无 recover 同族防御缺口）；New 内
 // clamp 到 300ms 后 Start 正常运转。修复前（无 clamp）：红——NewTicker(0) panic。
 // 修复后（clamp）：绿——Start 可正常起停。

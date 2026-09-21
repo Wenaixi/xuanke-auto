@@ -18,7 +18,7 @@ import (
 
 // socketPreheat 测试夹具端口预加热：预创建并关闭一个 127.0.0.1 回环套接字，
 // 排空 Windows 宿主回环 TIME_WAIT 队列冷启动期（httptest mock 服务器 accept 尚未
-// 就绪即收到连接 → connectex 连接拒绝，R46 起多轮 flake 同根）。
+// 就绪即收到连接 → connectex 连接拒绝，起自多轮 flake 同根）。
 // 与 api 包 newTestDepsModeName 的套接字预创建同款根治；本包装内各测试独立
 // 建 httptest server，全量串行下首个 server 仍有冷启动窗口，故每个用 server 的
 // 测试入口都调用一次。
@@ -33,9 +33,9 @@ func socketPreheat() {
 // Windows 回环 TIME_WAIT 冷启动队列在跑任何测试之前排空——覆盖不经
 // loginMockServer 的裸 httptest.NewServer 入口（TestNoAutoRelogin 等），
 // 是全量轮前序包 TIME_WAIT 残留下所有 mock 首请求 connectex 的兜底
-// （R56 全量 12 轮 R1 zhidao FAIL 根因；socketPreheat 逐测试调用仍保留，
+// （全量 12 轮首轮 zhidao FAIL 根因记录；socketPreheat 逐测试调用仍保留，
 // 双保险）。不做 log.SetOutput 静默——TestLoginLogs* 依赖日志捕获断言，
-// 包级静默会与测试缓冲切换产生竞态（R57 MINOR-57-01）。
+// 包级静默会与测试缓冲切换产生竞态。
 func TestMain(m *testing.M) {
 	socketPreheat()
 	os.Exit(m.Run())
@@ -45,8 +45,8 @@ func TestMain(m *testing.M) {
 // failRecognize: 前 N 次识别返回空串（识别失败）；failSubmit: 前 M 次提交被拒。
 // 构造后主动发一条健康探测请求把 Windows 回环冷启动窗口前移到夹具构造期
 // （与 api 包 readyProbe 同款轮询：200ms×10 + 显式 2s 超时，总窗口 ~2s）——socketPreheat 只预占
-// 单个端口，全量轮前序包 TIME_WAIT 残留下 Login 首请求仍可 connectex（R56
-// 全量 12 轮 R1 zhidao FAIL 实证），探测把 accept 就绪前的最首请求吃掉。
+// 单个端口，全量轮前序包 TIME_WAIT 残留下 Login 首请求仍可 connectex
+// （全量 12 轮首轮 zhidao FAIL 实证），探测把 accept 就绪前的最首请求吃掉。
 func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Server, *int32, *int32) {
 	t.Helper()
 	socketPreheat()
@@ -81,8 +81,8 @@ func loginMockServer(t *testing.T, failRecognize, failSubmit int) (*httptest.Ser
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环
 // 冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms×10 + 显式 2s 超时，
-// 总窗口 ~2s）——与 api 包 readyProbe 同款宽栅栏（R67 OBSERVE-67-01：zhidao
-// 原 200ms×5 窄栅栏在 store 包 59s 高耗时后全量 R1 TestLoginLogsFailureSummary
+// 总窗口 ~2s）——与 api 包 readyProbe 同款宽栅栏（zhidao
+// 原 200ms×5 窄栅栏在 store 包 59s 高耗时后全量首轮 TestLoginLogsFailureSummary
 // readyProbe 5 次全败 connectex，flake 残余流动宿主=包序最末 mock 包+最窄栅栏），
 // 全部失败才上抛由调用方 Fatal；socketPreheat 双保险仍保留。
 func readyProbe(t *testing.T, baseURL string) {
@@ -159,7 +159,7 @@ func TestLoginNetworkErrorAbortsImmediately(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError) // 登录页 500
 	}))
 	t.Cleanup(srv.Close)
-	// R70 MINOR-70-02：包内仅剩的无探活 mock 首请求宿主——与 TestCaptchaConcurrency
+	// 包内仅剩的无探活 mock 首请求宿主——与 TestCaptchaConcurrency
 	// 双保险成族闭环（探活只关心 accept 就绪，500 响应不影响就绪判定）。
 	readyProbe(t, srv.URL)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
@@ -208,7 +208,7 @@ func TestNoAutoRelogin(t *testing.T) {
 	}
 }
 
-// TestSetCookiesMergeSemantics 验证 SetCookies 合并语义（MAJOR-B）：
+// TestSetCookiesMergeSemantics 验证 SetCookies 合并语义：
 // 只写入给定键、绝不删除未提及的既有 Cookie（恢复旧会话时不能清掉
 // _jfinal_captcha/_jfinal_token 等服务端会话 Cookie）。
 func TestSetCookiesMergeSemantics(t *testing.T) {
@@ -240,7 +240,7 @@ func TestSetCookiesMergeSemantics(t *testing.T) {
 }
 
 // TestSetVisionKeepsLocalRecognizer 验证 SetVision 传入的 cfg.recognizer 为零值（nil）时，
-// 绝不能清空当前生效的本地识别引擎（M6）：热更新 Vision 配置不应波及识别引擎选择。
+// 绝不能清空当前生效的本地识别引擎：热更新 Vision 配置不应波及识别引擎选择。
 func TestSetVisionKeepsLocalRecognizer(t *testing.T) {
 	c := New("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "k", Model: "m"})
 	c.SetRecognizer(localRecognizer{name: "ddddocr-local"})
@@ -315,7 +315,7 @@ func TestReloginIfNeeded(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// B6-01：运行时登录（/api/login）后客户端内部必须有账密——自动重登
+	// 运行时登录（/api/login）后客户端内部必须有账密——自动重登
 	// ReloginIfNeeded 直接可用的回归测试。修复前：Login 成功分支不写 c.account/c.password，
 	// 依赖 SetCredentials 的旧断言（ReloginIfNeeded 手动 SetCredentials 后可用）无法覆盖
 	// 线上真实路径——每次账密登录后自动重登永远报"未登录且无保存账密"。
@@ -412,7 +412,7 @@ func TestLoginLogsFailureSummary(t *testing.T) {
 
 // TestLoginRetriesTransientInitError 验证：登录初始化会话（GET /login）遇瞬时连接
 // 错误时重试一次即可成功——不能因低频网络抖动直接判登录失败。
-// 根因背景（R46 起 4 轮 6+ 样本）：Windows 宿主 api 包测试内 httptest mock 服务器
+// 根因背景（起自 4 轮 6+ 样本）：Windows 宿主 api 包测试内 httptest mock 服务器
 // 连接瞬时失败（connectex），经 Login→fetchLoginPage 翻译成"初始化登录会话失败"
 // 业务文案落在任意断言行上误红。此处为产品层网络瞬时抖动自愈重试——纯 GET /login
 // 不消耗验证码限额，不违背"识别失败不刷限流"既有契约（网络层自愈，绝不含验证码重试）。

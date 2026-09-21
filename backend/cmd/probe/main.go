@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	// token 从数据库读取（不再硬编码：安全审计 CRITICAL#2——硬编码实测 token 已随源码提交 git，
+	// token 从数据库读取（不再硬编码：安全审计——硬编码实测 token 已随源码提交 git，
 	// 即使当时已失效也存在被误当现役会话复用的风险）。真实运行以数据库当前 token 为准。
 	token := os.Getenv("XUANKE_PROBE_TOKEN")
 	if token == "" {

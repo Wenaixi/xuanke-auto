@@ -34,7 +34,7 @@ var sharedTransport = &http.Transport{
 }
 
 // SharedTransport 导出共享连接池给外部工具（cmd/probe 等）复用——与全仓生产 HTTP
-// 契约对齐：64 连接/host + 120s 空闲保活 + HTTP/2（R63 MINOR-63-01：probe 原用
+// 契约对齐：64 连接/host + 120s 空闲保活 + HTTP/2（probe 原用
 // http.DefaultClient 无超时无自愈，真实平台 RST/FIN 时挂起至内核超时分钟级）。
 func SharedTransport() *http.Transport { return sharedTransport }
 
@@ -150,7 +150,7 @@ func (c *Client) SetCredentials(account, password, token string) {
 }
 
 // SetCookies 设置附加 Cookie（如 access_limit_cookie），用于复用现有会话。
-// 合并语义（MAJOR-B 修复）：只写入给定键，绝不删除未提及的既有 Cookie——
+// 合并语义：只写入给定键，绝不删除未提及的既有 Cookie——
 // 恢复旧会话时若整体覆盖，会清掉登录流程收集的 _jfinal_captcha/_jfinal_token
 // 等服务端会话 Cookie，导致平台鉴权缺失。
 func (c *Client) SetCookies(cookies map[string]string) {
@@ -170,7 +170,7 @@ func (c *Client) SetVision(cfg VisionConfig) {
 	if _, ok := c.visionCfg.recognizer.(*VisionRecognizer); ok || c.visionCfg.recognizer == nil {
 		cfg.recognizer = NewVisionRecognizer(cfg)
 	} else {
-		// 当前是本地引擎且调用方未显式指定新引擎：保留本地引擎（M6 修复）
+		// 当前是本地引擎且调用方未显式指定新引擎：保留本地引擎（热更新修复）
 		cfg.recognizer = c.visionCfg.recognizer
 	}
 	c.visionCfg = cfg
@@ -261,7 +261,7 @@ func (c *Client) Login(account, password string) (string, error) {
 			log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, submitErr)
 			continue // 验证码可能已失效：刷新验证码重识别
 		}
-		// B6-01：登录成功即把账密写入客户端内部——运行时登录（/api/login、
+		// 登录成功即把账密写入客户端内部——运行时登录（/api/login、
 		// LoginByPassword）此前从未 SetCredentials，客户端内部只有 Restore 路径有账密，
 		// 导致线上每次账密登录后自动重登（ReloginIfNeeded）永远报"未登录且无保存账密"：
 		// token 失效只能人工重新登录，黄金期失效即全程停摆。这里与 SetCredentials 的
@@ -353,7 +353,7 @@ func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification 
 	form.Set("captcha", captchaText)
 	form.Set("identification", identification)
 	form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
-	// 契约微差（OBSERVE-54-01）：真实网站 `priorityId: localStorage["priorityId"]`
+	// 契约微差：真实网站 `priorityId: localStorage["priorityId"]`
 	// 在学生首次登录（未进 /home/menus）时 undefined，jQuery 表单编码静默丢弃该键；
 	// Go 端恒发 `priorityId=` 空串。平台解析"空串"与"缺键"等价（不触发切换用户），
 	// 学生登录本就无真值，两形态无实质差异——保留空串（行为零变化），载明语义即可。
@@ -402,7 +402,7 @@ func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification 
 	if _, ok := c.cookies["access_limit_cookie"]; !ok {
 		// 占位补充：真实值由登录响应 Set-Cookie 收集（上方 sess.Jar.Cookies 循环），
 		// 平台未下发时用统一占位防缺失（与 accounts 重启恢复 SetCookies 的 "1" 同语义，
-		// 对齐 manager.go:313——R61 MINOR-61-01：不得用审查脱敏产物当活值）
+		// 对齐 manager.go:313——不得用审查脱敏产物当活值）
 		c.cookies["access_limit_cookie"] = "1"
 	}
 	c.mu.Unlock()
@@ -464,7 +464,7 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 }
 
 // httpDo 统一发送请求并自愈吸收 Windows 回环 keep-alive 池连接活性衰减。
-// 背景（R52）：httptest mock 服务器 + 长时间连跑下，连接保持期内服务端可能有
+// 背景：httptest mock 服务器 + 长时间连跑下，连接保持期内服务端可能有
 // 静默关闭（仅对端知道），发送端继续复用写出 → connectex/read tcp 中断/403/429
 // 四形态 flake 同根。机制：首次 c.Do 返回连接层错误后整体重发一次（新连接新
 // dial）——重试即等效达成"换新连接"。**只重试 dial/write 错误**（请求未到达
@@ -502,8 +502,8 @@ func isConnErrRetryable(err error) bool {
 
 // IsReadErr 判断是否为"请求已发出、响应读取中断"类错误——语义：服务端已完整
 // 消费请求体、可能已处理（报名成功但未响应），上抛方应给"可能已处理"的提示而非
-// "失败"——scheduler/api 记日志/状态时区分文案（R59 MINOR-59-02 / R60 MINOR-60-01）。
-// 覆盖三种形态（R60 独立程序实证形态矩阵）：
+// "失败"——scheduler/api 记日志/状态时区分文案（read 类错误区分文案）。
+// 覆盖三种形态（独立程序实证形态矩阵）：
 //   - RST（响应头读取阶段连接重置）：*net.OpError.Op=="read"（errors.As 穿透
 //     url.Error 包装链命中；body 读阶段不产生该包装）
 //   - FIN（服务端读完 body 后正常 Close，真实平台"处理完成未响应"的典型形态）：
@@ -559,7 +559,7 @@ func cloneReq(req *http.Request) *http.Request {
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。
 // 最多重登一次：返回 (是否已重登, 错误)。
 //
-// 加固（并发重登 CRITICAL）：此方法与调用方传入的账号名无关——客户端本身就
+// 加固（并发重登）：此方法与调用方传入的账号名无关——客户端本身就
 // 有唯一绑定的账号（ensure 分配、Restore/SetCredentials 注入），重登一律用
 // 客户端内部 account/password，绝不被调用方传入的参数影响。这样并发为多个
 // 账号调用时，每个客户端只用自己的账密重登自己，杜绝交叉污染。
@@ -750,7 +750,7 @@ func (c *Client) SelectClass(classID int) (string, error) {
 }
 
 // ExitClass 退选。请求体与报名一致（form classId），路径为 exitElectivesClass。
-// B11-A5：doRequest 对 code=-1 已统一返回 ErrUnauthorized（服务端会话过期），
+// doRequest 对 code=-1 已统一返回 ErrUnauthorized（服务端会话过期），
 // 本函数与 SelectClass 仅需把 code!=0 的其余业务错误原样回传，无需特判。
 func (c *Client) ExitClass(classID int) (string, error) {
 	form := url.Values{}

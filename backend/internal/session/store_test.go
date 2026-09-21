@@ -103,7 +103,7 @@ func TestRevokeAccount(t *testing.T) {
 	}
 }
 
-// TestIsAdminAccount 已随 M-3 移除 IsAdminAccount 方法而删除：
+// TestIsAdminAccount 已随移除 IsAdminAccount 方法而删除：
 // 管理员判定统一走 Deps.IsAdminAccountName（配置名）与 Store.IsAdminToken（会话身份），
 // 不再有"会话账号=字面量 admin"这套陈旧判定（避免两套真相错位）。
 
@@ -123,7 +123,7 @@ func TestRandTokenPanicsOnRandFailure(t *testing.T) {
 	randToken()
 }
 
-// TestActivationTicket 激活票据（C-2）：登录颁发、绑定账号、单次消费、短时过期。
+// TestActivationTicket 激活票据：登录颁发、绑定账号、单次消费、短时过期。
 func TestActivationTicket(t *testing.T) {
 	s := New(time.Hour)
 
@@ -166,7 +166,7 @@ func TestActivationTicketExpiry(t *testing.T) {
 	}
 }
 
-// TestSweepExpired M-7：周期清扫删除过期会话与过期票据（后台协程 5 分钟一拍；
+// TestSweepExpired 周期清扫删除过期会话与过期票据（后台协程 5 分钟一拍；
 // 直接调 sweepExpired 验证清扫语义），且有效会话/票据不被误删。
 func TestSweepExpired(t *testing.T) {
 	s := New(time.Hour)
@@ -209,7 +209,7 @@ func TestSweepExpired(t *testing.T) {
 	}
 }
 
-// TestSweeperLoopStopsOnClose M-7：Close 停止清扫协程且不泄漏（-race 下运行，
+// TestSweeperLoopStopsOnClose Close 停止清扫协程且不泄漏（-race 下运行，
 // 若协程未退出会因访问已关闭 channel 报竞态/死锁）。
 func TestSweeperLoopStopsOnClose(t *testing.T) {
 	s := New(time.Hour)

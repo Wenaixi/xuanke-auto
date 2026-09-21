@@ -9,7 +9,7 @@ import (
 )
 
 // randomAdminToken 生成 24 位十六进制随机管理口令（首次运行自动生成，用户可在 .env 修改）。
-// crypto/rand 失败（熵源故障）时拒绝启动：宁可显式报错也不接受可预测兜底口令（评审 MINOR 4）。
+// crypto/rand 失败（熵源故障）时拒绝启动：宁可显式报错也不接受可预测兜底口令（评审项）。
 func randomAdminToken() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
@@ -87,7 +87,7 @@ func loadDotEnv(path string) {
 		}
 		key = strings.TrimSpace(key)
 		if os.Getenv(key) == "" {
-			// n5 修复：不再按 # 截断值——口令/密钥中合法 # 会被截断破坏。
+			// 不再按 # 截断值——口令/密钥中合法 # 会被截断破坏。
 			// 旧版"行内注释截断"只服务于模板注释（# 开头行已被上方整行跳过）；
 			// 真实值里出现 # 属于合法字符，宁可保留也不破坏凭据。
 			// "仅回填空值"语义：XUANKE_MASTER_KEY 在 .env 里会被 loadDotEnv
@@ -100,7 +100,7 @@ func loadDotEnv(path string) {
 
 // CaptchaEngineDefault 默认验证码识别引擎。
 // 默认 ddddocr 本地识别（免 API 密钥、无外网依赖，双击 exe 开箱即用）；需云识别
-// 时显式设 XUANKE_CAPTCHA_ENGINE=vision 并填 SF_API_KEY（R71 需求：默认改 ddddocr）。
+// 时显式设 XUANKE_CAPTCHA_ENGINE=vision 并填 SF_API_KEY（默认改 ddddocr）。
 // 说明：ddddocr 引擎可用性依赖本机 Python + ddddocr 包（或内嵌模型），未装时
 // 登录会报识别引擎不可用——管理员可在后台热切换回 vision。
 func CaptchaEngineDefault() string {

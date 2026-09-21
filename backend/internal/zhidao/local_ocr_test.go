@@ -7,7 +7,7 @@ import (
 
 // TestLocalDdddOcrAvailable 验证本机 ddddocr 能力探测函数：
 // ①环境存在 Python+ddddocr → 应返回 true（实证）。
-// ②装了 Python 但无 ddddocr → 应返回 false（R67 OBSERVE-67-02：原测试三态
+// ②装了 Python 但无 ddddocr → 应返回 false（原测试三态
 //
 //	恒绿死——available=false 且 python 存在时走到函数结尾无任何断言，对
 //	applyCaptchaRecognizerFor 的 ddddocr 分支探测（router.go）零验证力；

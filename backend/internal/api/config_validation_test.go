@@ -6,7 +6,7 @@ import (
 )
 
 // TestAdminConfigRejectsInvalidCaptchaEngine 管理端 PUT /api/admin/config 对非法识别引擎必须拒绝
-// （D-A1：值域校验）——垃圾字符串不能进入运行时配置与落库，否则 stats 显示与实际引擎错位。
+// （值域校验）——垃圾字符串不能进入运行时配置与落库，否则 stats 显示与实际引擎错位。
 // 先 PUT 建立合法基线（production 里 main 启动恒注入 vision/1），再 PUT 非法值验证拒绝且基线不被污染。
 func TestAdminConfigRejectsInvalidCaptchaEngine(t *testing.T) {
 	d := newTestDeps(t)

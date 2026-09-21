@@ -119,7 +119,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 才走管理员签发；不匹配的 adminName 撞名学生走教务登录正常登录（LoginByPassword 成功正常
 	// 签发），不再吞。教务登录也失败且账号是管理员名时才报"管理口令错误"（管理员口令输错语义）。
 	if req.Account == adminName && subtle.ConstantTimeCompare([]byte(req.Password), []byte(d.AdminToken)) == 1 {
-		// A5：正确口令分支与错误分支等时——延迟后再签发会话，抹平"口令对错"时延差。
+		// 正确口令分支与错误分支等时——延迟后再签发会话，抹平"口令对错"时延差。
 		// 管理员登录低频操作，300ms 无感；撞库者无法再靠"这个账号返回快=口令对"定位管理员口令。
 		time.Sleep(loginTimingFlat)
 		sess := d.Sessions.CreateAdmin(adminName)

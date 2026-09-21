@@ -1,6 +1,6 @@
 package zhidao
 
-// IsReadErr 形态矩阵契约测试（R60 MINOR-60-01 补）：IsReadErr 必须覆盖"请求已发出、
+// IsReadErr 形态矩阵契约测试：IsReadErr 必须覆盖"请求已发出、
 // 平台可能已处理"的全部三种形态——RST（net.OpError read）/ FIN（io.EOF）/ 超时
 // （Client.Timeout exceeded awaiting headers）。任一形态 miss 会让 scheduler/api
 // 对"平台可能已抢到课"的错误显示"报名失败"误导文案（黄金期重复报名被拒时 failed 残留）。
@@ -43,7 +43,7 @@ func TestIsReadErrCoversAllForms(t *testing.T) {
 		t.Fatalf("超时形态应命中 IsReadErr，实际 false")
 	}
 	// 超时形态二：reading body（响应头已到达、正文传输超时——比 awaiting headers
-	// 更强地"平台已响应"，标准库 client.go:994 wrap 文案，R61 MINOR-61-02）
+	// 更强地"平台已响应"，标准库 client.go:994 wrap 文案）
 	bodyTimeout := errors.New("context deadline exceeded (Client.Timeout or context cancellation while reading body)")
 	if !IsReadErr(bodyTimeout) {
 		t.Fatalf("reading body 超时形态应命中 IsReadErr，实际 false")

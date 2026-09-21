@@ -132,7 +132,7 @@ func (s *Store) SaveSuccess(acct string, classID int) error {
 	return err
 }
 
-// B8-M2：DeleteSuccess 手动退选后删除 success 行——否则重启后
+// DeleteSuccess 手动退选后删除 success 行——否则重启后
 // RestoreDone 会把用户已退选的课恢复成"已报名成功"，退选意图丢失。
 func (s *Store) DeleteSuccess(acct string, classID int) error {
 	_, err := s.db.Exec("DELETE FROM success WHERE account = ? AND class_id = ?", acct, classID)
@@ -158,13 +158,13 @@ func (s *Store) LoadSuccess() (map[string][]int, error) {
 	return out, rows.Err()
 }
 
-// SaveRefused 记录某账号某课程已手动退选（幂等，B9-02 持久化 refused）。
+// SaveRefused 记录某账号某课程已手动退选（幂等，持久化 refused）。
 func (s *Store) SaveRefused(acct string, classID int) error {
 	_, err := s.db.Exec("INSERT OR IGNORE INTO refused (account, class_id) VALUES (?, ?)", acct, classID)
 	return err
 }
 
-// DeleteRefused 清空某账号的全部已退选记录（重设目标 = 主动重新接管，B9-02）。
+// DeleteRefused 清空某账号的全部已退选记录（重设目标 = 主动重新接管）。
 func (s *Store) DeleteRefused(acct string) error {
 	_, err := s.db.Exec("DELETE FROM refused WHERE account = ?", acct)
 	return err
@@ -178,7 +178,7 @@ func (s *Store) DeleteRefusedClass(acct string, classID int) error {
 	return err
 }
 
-// LoadRefused 读取全部已退选记录（map[账号][]classID，重启恢复用，B9-02）。
+// LoadRefused 读取全部已退选记录（map[账号][]classID，重启恢复用）。
 func (s *Store) LoadRefused() (map[string][]int, error) {
 	rows, err := s.db.Query("SELECT account, class_id FROM refused")
 	if err != nil {
@@ -224,7 +224,7 @@ func (s *Store) LoadLogs(acct string, limit int) ([]LogEntry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	// 档①（R54）：保留最近日志窗口的查询前置——task_log 无清理无限增长，
+	// 保留最近日志窗口的查询前置——task_log 无清理无限增长，
 	// 百万行后全表扫描退化为秒级。自增主键 max(id) 走 O(1) 索引，窗口恒为
 	// 最近 2 万条（日志仅展示用途，审计无合规要求），零删除零 DDL 契约不变。
 	rows, err := s.db.Query(
@@ -261,7 +261,7 @@ func (s *Store) CreateActivationCode(code string, totalUses int) error {
 	return err
 }
 
-// CreateActivationCodes 批量新建激活码（B5-02）：全部码在同一事务内原子落库——
+// CreateActivationCodes 批量新建激活码：全部码在同一事务内原子落库——
 // 任一条 INSERT 失败整体回滚，绝不产生"前 N-1 个已入库、响应报错"的隐身码滞留。
 // SQLite 单写者串行化，事务无并发锁成本；失败时调用方得到一致性错误并重试整批。
 func (s *Store) CreateActivationCodes(codes []string, totalUses int) error {
@@ -306,7 +306,7 @@ func (s *Store) ConsumeActivationCode(code, acct string) (bool, error) {
 	if n == 0 {
 		return false, nil // 激活码不存在或次数已用尽
 	}
-	// B5-08：已激活账号绝不重复扣次。INSERT OR IGNORE 对已激活账号静默跳过，
+	// 已激活账号绝不重复扣次。INSERT OR IGNORE 对已激活账号静默跳过，
 	// 但这里仍返回 (true, nil)——次数被扣、账号无变化、前端显示"激活成功"实未生效。
 	// 先查询是否已激活：已激活直接返回 (false, nil) 且不扣次（事务回滚），
 	// 让前端提示"该账号已激活"，杜绝双扣。

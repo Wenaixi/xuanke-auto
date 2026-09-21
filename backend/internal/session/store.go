@@ -22,13 +22,13 @@ type Session struct {
 const ticketTTL = 5 * time.Minute
 
 // Store 内存会话注册表：随机令牌 -> 账号绑定，过期自动失效。
-// ticket 激活票据：登录成功但未激活的账号凭它完成激活（短期单次，C-2）。
+// ticket 激活票据：登录成功但未激活的账号凭它完成激活（短期单次）。
 type Store struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	tickets  map[string]*ticket
 	ttl      time.Duration
-	// sweeperStop / sweeperDone：周期清扫协程控制（M-7 会话过期后台清扫）。
+	// sweeperStop / sweeperDone：周期清扫协程控制（会话过期后台清扫）。
 	sweeperStop  chan struct{}
 	sweeperDone  chan struct{}
 	sweeperClose sync.Once
@@ -41,7 +41,7 @@ type ticket struct {
 	used    bool
 }
 
-// New 创建会话存储，ttl 为会话有效期，并启动周期清扫协程（M-7：后台定期
+// New 创建会话存储，ttl 为会话有效期，并启动周期清扫协程（后台定期
 // 删除过期会话与过期激活票据，杜绝令牌表无限膨胀）。ttl<=0 时不启动清扫
 // （零 TTL 测试场景——会话立即过期，清扫无意义）。
 func New(ttl time.Duration) *Store {
@@ -98,7 +98,7 @@ func (s *Store) Close() {
 }
 
 // CreateTicket 为"刚通过教务登录但尚未激活"的账号签发短期单次激活票据。
-// 票据绑定该账号；激活接口校验票据与激活账号一致后才消耗激活码（C-2）。
+// 票据绑定该账号；激活接口校验票据与激活账号一致后才消耗激活码。
 func (s *Store) CreateTicket(account string) string {
 	tok := randToken()
 	s.mu.Lock()
@@ -111,7 +111,7 @@ func (s *Store) CreateTicket(account string) string {
 // 注意：本方法只做"校验并占用"，不落任何持久化副作用——调用方（handleActivate）在
 // 校验成功后紧接着调 ConsumeActivationCode 真正消耗激活码并签发会话。
 // 消费成功即作废该票据（一次登录一次激活，重复使用返回错误）。
-// F13-m1：票据在激活码校验失败时（无效/用尽/已激活）已被此步占用销毁——
+// 票据在激活码校验失败时（无效/用尽/已激活）已被此步占用销毁——
 // 调用方随后返回错误文案且不签发会话，用户必须重新登录拿新票据再试。这是"票据单次、
 // 防重放"的刻意设计决策：宁可输错激活码重登一次，也不让同一票据反复探测不同激活码
 // （票据 5 分钟 TTL 内可被重放穷举）。该契约已在 docs/review-round13.md 与 CLAUDE.md 落盘。
@@ -144,7 +144,7 @@ func (s *Store) Create(account string) string {
 
 // CreateAdmin 签发管理员会话（账号绑定配置的管理员账号名，Admin=true）。
 // 默认 admin；改名后（XUANKE_ADMIN_NAME）仍以配置名绑定，杜绝"会话账号=字面量 admin"
-// 与"IsAdminAccountName=配置名"两套真相错位（M-3）。
+// 与"IsAdminAccountName=配置名"两套真相错位。
 func (s *Store) CreateAdmin(name string) string {
 	return s.create(name, true)
 }

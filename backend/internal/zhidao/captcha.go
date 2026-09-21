@@ -157,7 +157,7 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 60 * time.Second}
-	// R52：识别请求同样走活性自愈（httpDo 对连接层错误重试一次）——Vision mock 服务器
+	// 识别请求同样走活性自愈（httpDo 对连接层错误重试一次）——Vision mock 服务器
 	// 在长时间连跑下同样可能复用濒死 keep-alive 连接导致 connectex，测试 flake 同根。
 	resp, err := httpDo(client, req)
 	if err != nil {
@@ -201,7 +201,7 @@ func (v *VisionRecognizer) Recognize(img []byte) (string, error) {
 		}
 		norm := normalizeCaptchaText(raw)
 		if len(norm) < 3 || len(norm) > 5 {
-			// A6：不再把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
+			// 不再把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
 			// 多租户/NAT 共享出口场景尤甚）——只回传字符数，调试痕迹留在进程日志。
 			log.Printf("[zhidao] Vision 识别字符数 %d 不匹配平台 3~5 位（原文已脱敏不回传）", len(norm))
 			return "", fmt.Errorf("识别长度为 %d，不匹配平台 3~5 位字符", len(norm))

@@ -1,6 +1,6 @@
 package store
 
-// 空库窗口语义实证（R55 主控独立验证）：
+// 空库窗口语义实证：
 // task_log 档①窗口前置 `WHERE id > (SELECT max(id)-20000)` 在空库时
 // max(id)=NULL → id > NULL 恒 false → 查询返回 0 行。本测试钉死该行为：
 // 空库返回空 slice 而非报错，且不 panic——这是日志展示层的安全语义。

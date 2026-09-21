@@ -7,7 +7,7 @@ import (
 )
 
 // persistentStore 真实语义的持久化假存储：SaveRefused 落库、DeleteRefused 真删、
-// LoadRefused 读当前表——用 map 忠实复刻 SQLite 行为（B10-01 顺序契约测试用，
+// LoadRefused 读当前表——用 map 忠实复刻 SQLite 行为（顺序契约测试用，
 // 避免 fakeStore 的 no-op DeleteRefused 让顺序 bug 假绿）。
 type persistentStore struct {
 	fakeStore
@@ -68,7 +68,7 @@ func (p *persistentStore) SetTargetsForAccount(acct string, targets []Target) er
 	return nil
 }
 
-// TestRefusedNeverResubmitted 用户手动退选后自动引擎绝不抢回（第 4 轮 MAJOR A2）：
+// TestRefusedNeverResubmitted 用户手动退选后自动引擎绝不抢回（历史设计定案）：
 // RemoveDone 记入 refused 集合，spawnChain 命中即跳过——即使窗口开放、课程未满、
 // 快照显示可报，也绝不再次调用 SelectClass；重新设为目标后 refused 解除，恢复自动接管。
 //
@@ -152,11 +152,11 @@ func TestManualReselectClearsRefusedRow(t *testing.T) {
 	}
 }
 
-// TestRefusedRestartOrderRealDB B10-01：用真实 SQLite 验证重启恢复顺序——
+// TestRefusedRestartOrderRealDB 用真实 SQLite 验证重启恢复顺序——
 // 手动退选落库后，按 main.go 的实际顺序（RestoreDone → 循环 RestoreTargets →
 // LoadRefused + RestoreRefused）恢复，refused 标记必须保留、自动引擎绝不抢回；
 // 若把 SetTargetsForAccount 用于恢复，其内部 DeleteRefused 会删库行、LoadRefused
-// 拿到空 map，重启后自动引擎立刻抢回退选课（B9-02 被抵消）——本测试用真实 DB 把
+// 拿到空 map，重启后自动引擎立刻抢回退选课（持久化被抵消）——本测试用真实 DB 把
 // 这条顺序契约固化（此前 refused_test 的 TestRefusedPersistedAcrossRestart 用
 // fakeStore 绕过真实删除，是假绿灯）。
 func TestRefusedRestartOrderRealDB(t *testing.T) {
@@ -212,10 +212,10 @@ func TestRefusedRestartOrderRealDB(t *testing.T) {
 	t.Fatal("重新设为目标后自动引擎应恢复该课程")
 }
 
-// TestRefusedPersistedAcrossRestart B9-02：手动退选必须落库，重启（新调度器 +
+// TestRefusedPersistedAcrossRestart 手动退选必须落库，重启（新调度器 +
 // 恢复顺序 SetTargetsForAccount → RestoreRefused）后自动引擎仍绝不抢回该课程。
 // 修复前 refused 只存内存：重启后 SetTargetsForAccount 清空、自动引擎把用户
-// 手动退选掉的课当新目标重新抢回——退选意图丢失（与 B8-M2 的"假成功"同根）。
+// 手动退选掉的课当新目标重新抢回——退选意图丢失（与删除 success 行的「假成功」同根）。
 func TestRefusedPersistedAcrossRestart(t *testing.T) {
 	fc := newFakeClient(true) // 窗口已开，课程可报
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), 10*time.Millisecond)

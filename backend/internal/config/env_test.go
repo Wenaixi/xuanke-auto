@@ -45,7 +45,7 @@ func TestConfigDoesNotInjectOpenTime(t *testing.T) {
 
 // TestActivationCodesDefaultOff 激活码机制默认关闭：未设置 XUANKE_ACTIVATION 时
 // ActivationCodesEnabled 必须为 false（本地双击 exe 开箱即用，账号登录直接进系统）；
-// 仅显式 XUANKE_ACTIVATION=on 才启用（公网分发场景）。R71 需求：默认配置改为不激活。
+// 仅显式 XUANKE_ACTIVATION=on 才启用（公网分发场景）。默认配置改为不激活。
 func TestActivationCodesDefaultOff(t *testing.T) {
 	// 未设置 → 默认关闭
 	t.Setenv("XUANKE_ACTIVATION", "")
@@ -66,7 +66,7 @@ func TestActivationCodesDefaultOff(t *testing.T) {
 }
 
 // TestCaptchaEngineDefaultDdddocr 识别引擎默认 ddddocr：未设置 XUANKE_CAPTCHA_ENGINE
-// 时 CaptchaEngineDefault 必须返回 ddddocr（本地免密钥、开箱即用，R71 需求）；显式
+// 时 CaptchaEngineDefault 必须返回 ddddocr（本地免密钥、开箱即用）；显式
 // vision/dddddocr 时才按配置返回。
 func TestCaptchaEngineDefaultDdddocr(t *testing.T) {
 	t.Setenv("XUANKE_CAPTCHA_ENGINE", "")

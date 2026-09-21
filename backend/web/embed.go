@@ -21,9 +21,9 @@ func SpaHandler() http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := path.Clean(r.URL.Path)
-		// B30-01：/api 无尾斜杠时顶层 `/api` 前缀不匹配 router.go 的
+		// /api 无尾斜杠时顶层 `/api` 前缀不匹配 router.go 的
 		// mux.HandleFunc("/api/",...)，会落到本 SPA 兜底把 index.html 当 200 返回——
-		// 未知 API 端点被安全扫描误判"任意路径可 200"（B7-C4 的极小残余）。统一在这里
+		// 未知 API 端点被安全扫描误判"任意路径可 200"。统一在这里
 		// 把所有 /api 前缀（含精确 /api）拒为 404，与 router.go 的 /api/ 显式 404 同案。
 		if p == "/api" || strings.HasPrefix(p, "/api/") {
 			http.NotFound(w, r)

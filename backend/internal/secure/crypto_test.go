@@ -80,7 +80,7 @@ func TestLoadOrCreateKey(t *testing.T) {
 	}
 }
 
-// TestLoadOrCreateKeyRejectsTruncatedFile F17-04：损坏/空 .master_key 文件
+// TestLoadOrCreateKeyRejectsTruncatedFile 损坏/空 .master_key 文件
 // 必须显式报错——此前原样返回任意字节，AES-256-GCM 初始化失败且 store 无对账，
 // 加密凭据静默不可读；更糟的是下一次新部署会用随机密钥覆盖损坏文件，数据库
 // "不可解密"永久损坏。测试：预写 16 字节（非 32）密钥文件，应报错而非返回。

@@ -118,7 +118,7 @@ func TestTargetPublishMetaPersisted(t *testing.T) {
 
 // TestTargetPublishMetaFallbackToGlobalFrame 兜底补全契约：该账号专属帧缺失/过期时，
 // SetTargetsForAccount 必须回退全校帧 lastData 补全发布元数据——HTTP 直存目标不触发
-// 探测（B6-04/B20-04 契约），专属帧常空；窗口关闭后 /electives 空发布，若全校帧也
+// 探测（探测契约），专属帧常空；窗口关闭后 /electives 空发布，若全校帧也
 // 不带本轮批次则重存空元数据落库（窗口重开后重存自愈）。修复前：只读 acctData[acct]，
 // 专属帧空 → 空元数据落库 → "未知日期"。
 func TestTargetPublishMetaFallbackToGlobalFrame(t *testing.T) {
@@ -129,7 +129,7 @@ func TestTargetPublishMetaFallbackToGlobalFrame(t *testing.T) {
 
 	// 只写全校帧 lastData（模拟"专属帧不存在"的浏览账号形态）：
 	// probe() 内部 FindElectives 成功后 s.lastData 被填、acctData 不填（无目标账号
-	// 不被 per-account 探测），与 B22-01/B28-01 的"无目标账号回退全校帧"同构。
+	// 不被 per-account 探测），与「无目标账号回退全校帧」同构。
 	s.probe()
 
 	// HTTP 直存目标（不触发探测，专属帧仍空）

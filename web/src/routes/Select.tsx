@@ -1072,8 +1072,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                               </div>
                             </div>
 
-                              {/* 容量统计 */}
-                              <div className="space-y-1.5 pt-1.5">
+                            {/* 容量统计 */}
+                            <div className="space-y-1.5 pt-1.5">
                                 <div className="flex items-center justify-between text-[11px]">
                                   <span className="text-neutral-500 flex items-center gap-1 font-mono">
                                     <Users className="h-3 w-3" />

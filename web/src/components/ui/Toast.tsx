@@ -27,14 +27,14 @@ export function useToast() {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<ToastMessage[]>([])
-  // F5-02：toast 自增 id 计数器（跨渲染保持，无碰撞）。
+  // toast 自增 id 计数器（跨渲染保持，无碰撞）。
   const idRef = React.useRef(0)
 
   const toast = React.useCallback((msg: Omit<ToastMessage, "id">) => {
-    // F5-02：唯一 id 用自增计数器而非 Math.random 7 位短串——
+    // 唯一 id 用自增计数器而非 Math.random 7 位短串——
     // 同一页 20 分钟内高频提示（满员退避/轮询失败）Math.random 碰撞会让 React key 重复、
     // 状态异常（一条 toast 被误删），自增 id 从根上消除碰撞概率。
-    // M-2：同 title 去重合并——目标保存失败退避重试链 46s 内最多 6 个同文红 toast
+    // 同 title 去重合并——目标保存失败退避重试链 46s 内最多 6 个同文红 toast
     // 轰炸即此根源；已存在同 title toast 时只更新其 description（文案取最新错误），
     // 不新增堆叠。title 为 ReactNode 时按文本比较，非同 title 照常追加。
     const key = typeof msg.title === "string" ? msg.title : null
@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         const idx = prev.findIndex((t) => t.title === key)
         if (idx >= 0) {
           const merged = [...prev]
-          // M-B：合并是"更新文案"语义——duration 保持首次挂载的配置（用户预期"这条
+          // 合并是"更新文案"语义——duration 保持首次挂载的配置（用户预期"这条
           // 消息显示这么久后消失"），不随新调用覆盖（Radix duration 变化会重启计时器，
           // 覆盖会让高频合并无限延寿）；variant 仍取最新（视觉即时反馈）。
           merged[idx] = { ...prev[idx], description: msg.description, variant: msg.variant ?? prev[idx].variant }
@@ -63,7 +63,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={{ toast }}>
       <ToastPrimitive.Provider swipeDirection="right">
         {children}
-        {/* F48-M1：定位类必须在 viewport 上而非外层空壳——Radix Toast.Root 全部
+        {/* 定位类必须在 viewport 上而非外层空壳——Radix Toast.Root 全部
             createPortal 进 viewport（wrapper 渲染完是空壳 div），且 viewport 无任何
             inset 类时 toast 落点交给浏览器「无 inset fixed 元素」的 static-position
             行为（当前视觉正常属碰巧稳定）。布局并入 viewport className，删空壳 wrapper。 */}

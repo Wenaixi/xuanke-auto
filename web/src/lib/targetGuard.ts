@@ -18,7 +18,7 @@ export function selectedHasStalePublish(
   })
 }
 
-// F40-M1：发布集合重建时清理 selected 中"非空且不在当前发布集合"的残留 key——
+// 发布集合重建时清理 selected 中"非空且不在当前发布集合"的残留 key——
 // 旧 publish_id 对应 Tab 已消失、用户无法通过界面清除，若守卫只置脏跳过后保存链被
 // 永久静默拦截（黄金期改目标永不落库）。随重建清理即解锁，防抖重跑自然落库当前目标。
 // 只删"非空且不在集合"的 key：空数组键 = 用户主动清空（清空语义绝不复活），保留。
@@ -42,7 +42,7 @@ export function cleanStaleSelected<T>(
   return changed ? next : selected
 }
 
-// F42-M1：防抖保存"回显未完成"守卫判据抽纯函数——/state 首帧未到（undefined）或
+// 防抖保存"回显未完成"守卫判据抽纯函数——/state 首帧未到（undefined）或
 // 首帧携带旧目标（courses 非空）时，后端旧目标尚未经回显合并进 selected，此刻整包
 // PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）→ 推迟保存（返回 true），置脏
 // 跳过等回显完成/数据到达自愈。courses 空 = 确证后端无旧目标（回显已完成语义）→
@@ -54,7 +54,7 @@ export function cleanStaleSelected<T>(
 // 全清空"——首帧携带旧目标但用户一个都没选 = 清空意图确凿（回显 effect 的 rev>0 且
 // 无任何条目守卫已承认清空语义绝不合并旧目标），放行 PUT []，绝不把清空当"待回显"
 // 打回置脏（否则清空永不落库，返回后旧目标复活=静默撤销）。
-// 第三参数 echoed（回显是否已完成，消费点传 echoedRef.current；R63 M-1）：
+// 第三参数 echoed（回显是否已完成，消费点传 echoedRef.current）：
 // "courses 非空 && 有选中"只该在"回显尚未完成"时推迟——已回显完成的账号（echoed=true），
 // 后端旧目标已合并进 selected、selected 完整无缺，整包 PUT 与后端一致，继续推迟
 // 会把后续所有编辑永久闷死（courses 永驻非空 + selected 无变化 bailout = 无解锁信号，

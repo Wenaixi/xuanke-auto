@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-// useTickingCountdown 选课开放倒计时（F8-04/F9-07 收敛共用）：
+// useTickingCountdown 选课开放倒计时（Dashboard/Select 收敛共用）：
 // 内部自 tick（每秒 setNow），只重渲染这一个 hook 的消费处，绝不带动整页重建。
 // - target 为开窗时刻字符串（null 表示未同步到/已清空，直接视为过期）
 // - 过期（diff<=0）返回全 00 + isExpired=true；数字带前导零（等宽雕刻感）
@@ -10,7 +10,7 @@ export function useTickingCountdown(target: string | null) {
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [])
-  // F10-07：目标变化时立刻校正 now——此前 diff 用上一拍的 now 计算，
+  // 目标变化时立刻校正 now——此前 diff 用上一拍的 now 计算，
   // target 从 null 变为有效开窗时刻（首次同步完成 / 窗口开启瞬间）时最多有 1 秒
   // 陈旧偏差，可能短暂误显为过期全 00；target 一变即回到当前时刻，注释意图落实。
   useEffect(() => {

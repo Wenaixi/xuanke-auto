@@ -18,18 +18,18 @@ export default function Login({ onLogin }: Props) {
 
   // 激活码模态框状态：登录返回 code=1001 时弹出
   const [pendingAccount, setPendingAccount] = useState("")
-  // F11-A1：票据必须随激活请求回传——后端 handleActivate 要求 ticket 非空
+  // 票据必须随激活请求回传——后端 handleActivate 要求 ticket 非空
   // 且 ConsumeTicket 校验绑定账号；此前 1001 分支只存账号把 data.ticket 丢弃，激活永远
   // 返回"激活票据无效或已过期"，激活码机制整链不可用。取消激活时一并清掉。
   const [pendingTicket, setPendingTicket] = useState("")
   const [activationCode, setActivationCode] = useState("")
   const [activating, setActivating] = useState(false)
-  // 激活错误独立状态（n7）：激活失败不清污染主登录表单的 error——
+  // 激活错误独立状态：激活失败不清污染主登录表单的 error——
   // 取消/成功返回登录后，主表单错误条保持干净
   const [activateError, setActivateError] = useState("")
 
   const submit = async () => {
-    // F19-02：提交入口先查进行中标记——按钮 disabled 靠 React 状态渲染
+    // 提交入口先查进行中标记——按钮 disabled 靠 React 状态渲染
     // 落地有延迟，连按两次 Enter/快速双击可在 `disabled` 生效前发出两个重复登录请求：
     // 教务多份并发登录会互相挤掉会话（旧 token 失效），且验证码识别并发放大平台限流
     // 压力。loading 本身就是"上一发在飞"的可靠判据，入口幂等短路。
@@ -49,7 +49,7 @@ export default function Login({ onLogin }: Props) {
       onLogin(data.token, data.account, data.adminName)
     } catch (e: any) {
       if (e.code === 1001) {
-        // 账号未激活：弹出激活码输入模态框（F11-A1：同时保存票据供激活回传）
+        // 账号未激活：弹出激活码输入模态框（同时保存票据供激活回传）
         setPendingAccount(account.trim())
         setPendingTicket((e.data?.ticket as string) || "")
         setActivationCode("")
@@ -62,7 +62,7 @@ export default function Login({ onLogin }: Props) {
   }
 
   const activate = async () => {
-    // F21-04：激活入口补幂等守卫——与 submit() 的 F19-02 `if (loading) return`
+    // 激活入口补幂等守卫——与 submit() 的 `if (loading) return`
     // 对称：激活按钮 disabled 依赖 React 渲染落地有延迟，连按两次可在 disabled 生效前
     // 发出两个重复激活请求（后到的响应处理 onLogin 会把会话挤成旧值）。
     if (activating) return
@@ -81,7 +81,7 @@ export default function Login({ onLogin }: Props) {
       setPendingTicket("")
       onLogin(data.token, data.account)
     } catch (e: any) {
-      // F12-M3：激活失败分两个场景引导——后端票据 5 分钟单次，
+      // 激活失败分两个场景引导——后端票据 5 分钟单次，
       // 过期/已用会报"激活票据无效或已过期"；此时账号其实已激活，重新登录即可
       // 直进，用户可能误以为激活码有问题而反复点激活（恒失败）。
       if (/激活票据无效或已过期/.test(e.message || "")) {
@@ -126,7 +126,7 @@ export default function Login({ onLogin }: Props) {
                 submit()
               }}
             >
-              {/* 账号输入框（n15：label 经 htmlFor 关联输入框，点击标签即聚焦） */}
+              {/* 账号输入框（label 经 htmlFor 关联输入框，点击标签即聚焦） */}
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="login-account" className="text-xs text-neutral-400 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -167,7 +167,7 @@ export default function Login({ onLogin }: Props) {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    // n10：可见性切换按钮语义化——aria-label 说明作用、aria-pressed 报状态
+                    // 可见性切换按钮语义化——aria-label 说明作用、aria-pressed 报状态
                     aria-label={showPassword ? "隐藏密码" : "显示密码"}
                     aria-pressed={showPassword}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded"
@@ -217,16 +217,16 @@ export default function Login({ onLogin }: Props) {
       </div>
 
       {/* 激活码输入模态框（登录返回 1001 时弹出） */}
-      {/* F7-03：裸 div 补无障碍语义——role=dialog/aria-modal/aria-labelledby/
+      {/* 裸 div 补无障碍语义——role=dialog/aria-modal/aria-labelledby/
           Esc 关闭回归键盘可达性（此前背景表单可 Tab 穿出、读屏不识别对话语义）。
-          完整焦点陷阱迁移到 Radix Dialog 属 F6-02 后续候选，这里先补最小语义门。 */}
+          完整焦点陷阱迁移到 Radix Dialog 属后续候选，这里先补最小语义门。 */}
       {pendingAccount && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-overlay"
           role="dialog"
           aria-modal="true"
           aria-labelledby="activate-dialog-title"
-          // F20-03：补 Esc 关闭——F7-03 注释承诺"Esc 关闭回归键盘可达性"但
+          // 补 Esc 关闭——注释承诺"Esc 关闭回归键盘可达性"但
           // 实现从未落地（裸 div 无 keydown 处理），键盘用户只能 Tab 到"取消"按钮；
           // 与取消按钮同逻辑（清待激活账号/票据/错误），激活中不响应防误关。
           onKeyDown={(e) => {
@@ -299,7 +299,7 @@ export default function Login({ onLogin }: Props) {
                 <button
                   type="button"
                   onClick={() => {
-                    // n7：取消激活——清除待激活账号/票据与激活错误，主表单错误保持干净
+                    // 取消激活——清除待激活账号/票据与激活错误，主表单错误保持干净
                     setPendingAccount("")
                     setPendingTicket("")
                     setActivateError("")

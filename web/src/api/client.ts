@@ -3,13 +3,13 @@
 // 未登录（会话失效）事件：全局通知 App 移除对应账号会话。
 // detail.session 为发起请求的 Bearer 会话令牌（401 的真实主体，App 据此反查归属账号）；
 // detail.account 为 ?account= 穿透目标（管理员代看学生大厅时为学生名，仅作展示线索，
-// F10-05：绝不用它判定归属——管理员自身令牌失效时 URL 上挂的是学生名，若优先取它
+// 绝不用它判定归属——管理员自身令牌失效时 URL 上挂的是学生名，若优先取它
 // 会把失效事件挂到本地无会话的学生名下，反查落空导致管理员会话永不被剔除）。
 // 避免 401 迟到返回时事件监听器闭包里的 current 已切到其他账号而误杀。
 export const UNAUTHORIZED_EVENT = "xk:unauthorized"
 
-// 从请求路径反查 ?account= 穿透目标（展示线索，F10-05：绝不用它判定归属——归属
-// 以发起请求的 Bearer 会话令牌为准）。F41-N2 抽出纯函数：HTTP 状态码 401 必须在
+// 从请求路径反查 ?account= 穿透目标（展示线索，绝不用它判定归属——归属
+// 以发起请求的 Bearer 会话令牌为准）。抽出纯函数：HTTP 状态码 401 必须在
 // r.json() 之前广播失效事件（网关/反代返回 HTML/文本 401 时 JSON 解析会抛错，若
 // 事件依赖解析后的 j.code 就永不广播、失效会话账号前端永久残留），此函数在广播
 // 路径复用，与响应处理不再耦合。
@@ -23,7 +23,7 @@ export function extractAccountFromPath(path: string): string {
 
 export class ApiError extends Error {
   code: number
-  // F11-A1：ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
+  // ApiError 携带响应体 data——1001 未激活响应的激活票据（data.ticket）
   // 必须透传给 Login.tsx 才能随激活请求回传；此前只存 code，票据在抛错处丢失。
   data?: unknown
   constructor(code: number, msg: string, data?: unknown) {
@@ -43,21 +43,21 @@ export async function api<T>(
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (session) headers.Authorization = `Bearer ${session}`
   Object.assign(headers, extraHeaders ?? {})
-  // 20 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不至于无限转圈（MAJOR-H 配套）。
-  // F10-04：注释原文写"2 秒"而实现为 20 秒，行为与注释分叉。保持 20 秒——
+  // 20 秒超时兜底：目标自动保存/报名等操作若服务端挂起，前端不至于无限转圈。
+  // 注释原文写"2 秒"而实现为 20 秒，行为与注释分叉。保持 20 秒——
   // 本 api() 是全站共用通道，/electives 大列表 GET 在开窗黄金期校园网下响应偏慢，
   // 收紧到 2 秒会掐断大列表刷新，在最关键的时刻引入回归；20 秒对"不无限转圈"的本意
   // 依然成立（abort 兜底），目标保存挂了还有指数退避重发兜底。
-  // M-10：signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
+  // signal 显式接入——调用方传入 signal 时以其为准（卸载清理），
   // 否则用兜底超时信号；此前 `...rest` 会把 ctrl.signal 被调用方 signal 静默覆盖。
-  // F7-09：abort 映射为友好文案——此前原生 AbortError("This operation was
+  // abort 映射为友好文案——此前原生 AbortError("This operation was
   // aborted") 直接进 toast，用户看不懂。
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 20000)
   try {
     const r = await fetch(BASE + path, { headers, ...rest, signal: rest.signal ?? ctrl.signal })
     let j: { code: number; data: T; msg: string }
-    // F41-N2：HTTP 状态码 401 在 r.json() 之前先广播失效事件——反向代理/网关返回
+    // HTTP 状态码 401 在 r.json() 之前先广播失效事件——反向代理/网关返回
     // 非 JSON 错误体（HTML/文本 401）时 r.json() 会抛错走 -2 文案，若失效广播挂在
     // JSON 解析之后的 j.code 判断上就永不执行，失效会话账号在前端永久残留。事件先到
     // App.onUnauthorized 摘除账号，JSON 解析失败仍抛 -2 文案，二者互不阻塞。
@@ -74,10 +74,10 @@ export async function api<T>(
     }
     if (j.code === 401) {
       // 会话过期：广播事件，附上「发起请求的会话令牌 + URL 穿透目标账号」。
-      // F10-05：session 恒为 401 的真实主体，account 只作展示线索——
+      // session 恒为 401 的真实主体，account 只作展示线索——
       // 管理员代看学生大厅时 URL account 是学生名，与失效的管理员令牌无映射；
       // 此前 account 优先导致 App 反查落空、管理员卡死在代理页。
-      // N-1（R45）：HTTP 401 已在 r.json() 前广播（F41-N2，防网关非 JSON 体），
+      // HTTP 401 已在 r.json() 前广播（防网关非 JSON 体），
       // writeJSONStatus 家族（requireAuth）返回「HTTP 401 + body 401」时若此分支再广播
       // 一次即同一响应双发 UNAUTHORIZED_EVENT（App.onUnauthorized 幂等无害，但批量
       // 吊销时事件风暴翻倍）——r.status===401 前置已广播，此处跳过 body 层重复广播；
@@ -97,7 +97,7 @@ export async function api<T>(
     if (j.code !== 0) throw new ApiError(j.code, j.msg || "请求失败", j.data)
     return j.data
   } catch (e) {
-    // F7-09：AbortError 无法识别（调用方 signal 或超时 abort 均触发）——统一映射为
+    // abort 无法识别（调用方 signal 或超时 abort 均触发）——统一映射为
     // 超时友好文案，绝不把原生 "This operation was aborted" 泄漏给用户
     if (e instanceof Error && e.name === "AbortError") {
       throw new ApiError(-2, "请求超时，请重试")

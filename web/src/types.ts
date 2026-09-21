@@ -55,7 +55,7 @@ export interface SchedulerState {
   open_time: string
   open_time_known: boolean
   window_opened: boolean
-  // n12：窗口已关闭信号（后端探测到空快照且从未开过窗即置真）。
+  // 窗口已关闭信号（后端探测到空快照且从未开过窗即置真）。
   // 前端据此降频轮询——状态已定型，不必再 3 秒高频打接口。
   window_closed?: boolean
   token_valid: boolean

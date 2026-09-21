@@ -50,7 +50,7 @@ function saveAdminName(name: string) {
 }
 // 管理员会话令牌持久化：仅由「登录响应带 adminName」写入。刷新后管理页恢复的
 // 唯一判据 =「当前管理员名账号的会话 token === 此标记 token」——撞名学生（账号名
-// 恰等于管理员名、B43-04 放行的普通教务会话）登录响应的会话 token 永远匹配不上
+// 恰等于管理员名、放行的普通教务会话）登录响应的会话 token 永远匹配不上
 // 此标记，刷新不会误进管理页。与 xk_admin_name 同款 try/catch 降级。
 function loadAdminToken(): string {
   try {
@@ -78,7 +78,7 @@ export default function App() {
   const [adminName, setAdminName] = useState<string>(loadAdminName)
   // 曾标记为管理会话的会话令牌：仅由「登录响应带 adminName」写入。刷新后管理页
   // 恢复的唯一判据 = 当前管理员名账号的会话 token === 此标记 token；账号名等于
-  // 管理员名绝不是管理标志（撞名学生 B43-04 放行的普通教务会话账号名也可等于
+  // 管理员名绝不是管理标志（撞名学生放行的普通教务会话账号名也可等于
   // 管理员名，拿名字判定会把普通会话误认成管理会话，永锁 403 管理页）。
   const [adminToken, setAdminToken] = useState<string>(loadAdminToken)
 
@@ -94,7 +94,7 @@ export default function App() {
       saveAdminName(adminName)
       // 登录响应带 adminName 即确证"本会话是管理会话"——标记该 token 为管理令牌，
       // 刷新后凭此恢复管理页（判定见渲染处 adminToken 态）。撞名学生教务登录响应
-      // 无 adminName（B43-04 放行），绝不误标。
+      // 无 adminName（放行），绝不误标。
       setAdminToken(token)
       saveAdminToken(token)
     }
@@ -120,11 +120,11 @@ export default function App() {
     // 残留不影响判定——sessions[admin] 已删，isCurrentAdminSession 恒 false）
     setAdminToken("")
     saveAdminToken("")
-    // F15-07：清除代理目标账号——管理员代理查看学生大厅退出后，重登同一
+    // 清除代理目标账号——管理员代理查看学生大厅退出后，重登同一
     // 管理员若不重置 targetAccount，渲染会直接命中代理分支再次掉进学生 Select，
     // 跳过管理页；登出即放弃代理态，重登后回到管理页。
     setTargetAccount(null)
-    // M29-02：同步重置 page 视图态——App 组件永挂载（Login 只是条件渲染
+    // 同步重置 page 视图态——App 组件永挂载（Login 只是条件渲染
     // 分支），page 不随 sessions 清空而重置：学生在选课大厅被 401 吊销（教务 token
     // 过期）后重新登录，page 残留 "select" 会跳过 Dashboard 直接掉进选课大厅；
     // 与 targetAccount 同族，登出即回到初始 dashboard 视图。
@@ -135,7 +135,7 @@ export default function App() {
   useEffect(() => {
     if (accounts.length === 0) {
       setCurrent("")
-      // M29-02：会话全部清空回登录页时必须重置 page——401 被动吊销
+      // 会话全部清空回登录页时必须重置 page——401 被动吊销
       // 不经过 logout()：学生在选课大厅被吊销（唯一账号）→ 回登录页 → 重新登录后
       // page 残留 "select" 跳过 Dashboard 直接掉进选课大厅（与主动登出同族）。
       // 登出/吊销即回到初始 dashboard 视图。
@@ -147,13 +147,13 @@ export default function App() {
     if (!isCurrentAdminSession(loadSessions(), adminName, adminToken)) setInAdmin(false)
   }, [accounts, current, adminName, adminToken])
 
-  // M28-01：管理员删除账号后同步清理本地会话——后端 DeleteAccount 只清
+  // 管理员删除账号后同步清理本地会话——后端 DeleteAccount 只清
   // 服务端（6 表事务 + RevokeAccount 吊销会话），localStorage 的 xk_sessions 若残留该
   // 账号条目，会继续占账号槽位、刷新复活，直到下次请求 401 才被吊销链摘除。快照式
   // 三连（与 logout/onUnauthorized 同款）：从最新快照删该账号 → 落盘 → setState。
   // 同时若被删账号恰是"当前正在查看的账号"（current）或"代理中的学生账号"
   // （targetAccount），必须同步退出对应视图态：渲染 `targetAccount ? <Select>` 在
-  // Admin 之前，targetAccount 残留会让管理员卡死在已删账号的代理页（F15-07 同族）。
+  // Admin 之前，targetAccount 残留会让管理员卡死在已删账号的代理页（代理态同族）。
   // 注意：绝不调用 logout()——删除的是他人账号，用当前管理员令牌调 /logout 语义
   // 完全错误（会登出管理员自己）；且服务端会话已由后端 RevokeAccount 吊销，本地
   // 清除不会造成"令牌仍有效"的残留。
@@ -177,10 +177,10 @@ export default function App() {
     }
   }
 
-  // 后端返回 401（会话过期）：剔除失效账号的令牌（CRITICAL 前端 C1 防御）。
+  // 后端返回 401（会话过期）：剔除失效账号的令牌（前端失效防御）。
   // detail.account 已由 client.ts 统一为"账号名 或 会话令牌"——按令牌反查
   // 不到账号时（如本地已注销）跳过，杜绝慢请求乱序返回时按闭包 current 误杀其他账号。
-  // F10-05：归属判定一律以 detail.session（发起请求的 Bearer 令牌）为准——
+  // 归属判定一律以 detail.session（发起请求的 Bearer 令牌）为准——
   // 它才是 401 的真实主体；detail.account（?account= 穿透目标）仅在 session 缺失时兜底，
   // 且先按"账号名直查"再按"令牌反查"，反查无果直接跳过（管理员代理页停留期间自身会话
   // 过期：事件带管理员令牌 → 反查出管理员 → 正常剔除回登录页，不再卡死在代理页）。
@@ -198,9 +198,9 @@ export default function App() {
       if (!lostAccount) return
       // 被吊销的账号恰是管理员当前代理查看的学生账号时，先退出代理视图——
       // 该学生会话已失效，继续停留只会拿着管理员令牌替它代操作。
-      // F25-01：被吊销的是管理员自身会话时同样必须退出代理态——
+      // 被吊销的是管理员自身会话时同样必须退出代理态——
       // 代理凭据随管理员会话一起没了，targetAccount 残留会让管理员重登后渲染直接
-      // 命中代理 Select 跳过管理页（F15-07 只覆盖主动 logout，被动吊销不对称）。
+      // 命中代理 Select 跳过管理页（主动 logout 只覆盖主动退出，被动吊销不对称）。
       setTargetAccount((prev) =>
         prev === lostAccount || lostAccount === adminName ? null : prev
       )
@@ -217,7 +217,7 @@ export default function App() {
       if (isCurrentAdminSession(loadSessions(), adminName, adminToken) && inAdmin && lostAccount !== adminName) {
         return
       }
-      // F8-01：F7-05 把落盘放进 setSessions updater 之后的 if——但 React 的
+      // 把落盘放进 setSessions updater 之后的 if——但 React 的
       // updater 不在 setState 调用栈内同步执行（render 阶段才跑），removedNext 求值时
       // 恒为 false，localStorage 永不更新 → 401 剔除的失效账号刷新后复活。改为与
       // login/logout 完全一致的"快照→改→落盘→setState"同步链路（幂等，无覆盖丢失），
@@ -311,7 +311,7 @@ export default function App() {
                   // 重新标记；不清则 isCurrentAdminSession 仍命中，Admin 继续显示）
                   setAdminToken("")
                   saveAdminToken("")
-                  // 无其他学生账号时回登录页（D4 + F21-05 完整登出语义）：
+                  // 无其他学生账号时回登录页（完整登出语义）：
                   // 否则 current 仍是 adminName，渲染 Admin 分支恒真，D4 的"回登录页"从未
                   // 生效。但"仅 setCurrent("")"会被 account-reselect effect 立即弹回
                   // accounts[0]（仍是 admin），Admin 继续显示。改为完整登出语义：无学生

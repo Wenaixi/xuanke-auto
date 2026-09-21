@@ -18,6 +18,8 @@ import (
 // 前移到夹具构造期（与 api/zhidao 包同款根治——R64 OBSERVE-64-02: accounts 是唯一
 // 无就绪前移的包，R12 全量轮两测试 mock /login 首请求 connectex 正是夹具缺口）。
 // 连接层失败轮询重试（200ms×5），全部失败才上抛由调用方 Fatal。
+// OBSERVE-65-03：三处夹具未有 socketPreheat 双保险（zhidao/api 有 socket 预创建），
+// 8 轮全绿实证无残余；若未来 accounts 再出冷启动 flake 第一候选即补 socketPreheat。
 func readyProbe(t *testing.T, baseURL string) {
 	t.Helper()
 	const (
@@ -67,6 +69,9 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 			// 恒拒绝：构造登录失败
 			json.NewEncoder(w).Encode(map[string]any{"code": 1, "isOk": false, "msg": "账号或密码错误"})
 		default: // /login 与 /login/captcha
+			// OBSERVE-65-02：与真实平台 text/html 差异（识别链路不消费响应体，无害），
+			// 补 CT 保持夹具语义对齐
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte("ok"))
 		}
 	}))
@@ -142,6 +147,8 @@ func gateSrv(t *testing.T) (*httptest.Server, *int32) {
 			atomic.AddInt32(&calls, 1)
 			json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "token": "tok-new"})
 		default: // /login 与 /login/captcha
+			// OBSERVE-65-02：与真实平台 text/html 差异（识别链路不消费响应体，无害）
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte("ok"))
 		}
 	}))

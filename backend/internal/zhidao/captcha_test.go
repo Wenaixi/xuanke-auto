@@ -66,6 +66,12 @@ func TestCaptchaConcurrency(t *testing.T) {
 		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\"ok3x\"}}]}"))
 	}))
 	defer srv.Close()
+	// R69 主控收尾回归：-p 1 下该测试偶发 18.95s FAIL（正常 0.16s）——10 个并发
+	// 识别请求的首请求撞上前序包 TIME_WAIT 冷启动窗口（R60/R64 已记录的历史宿主：
+	// 并发首请求 connectex 时信号量计数被误判）。socketPreheat 只预占单端口，
+	// 并发首请求形态需 readyProbe 把 accept 就绪前的最首请求吃掉（api/zhidao 同款
+	// 双保险，R69 OBSERVE-69-04「残余面宿主=并发形态」的实证）。
+	readyProbe(t, srv.URL)
 
 	r := NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	var wg sync.WaitGroup

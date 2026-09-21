@@ -5,7 +5,7 @@
 // 管理员名时恒命中 → 掉进 Admin 页五 Tab 全 403、403 不广播 401 → 循环死锁，
 // 该学生永远无法使用学生功能。修复后管理态绑定会话 token：撞名学生的普通会话
 // token 永远匹配不上被标记的管理 token，刷新不误进管理页。
-// 用法：node --import jiti scripts/admin-auth-check.ts（退出码非 0 即断言失败）
+// 用法：node --import jiti/register scripts/admin-auth-check.ts（退出码非 0 即断言失败）
 import { isCurrentAdminSession } from "../src/lib/adminAuth"
 
 let failed = 0

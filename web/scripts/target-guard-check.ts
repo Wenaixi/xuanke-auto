@@ -5,7 +5,7 @@
 // 并置脏跳过。空数组键 = 用户主动清空该发布（清空语义绝不复活），绝不判过期。
 // shouldDeferSave：防抖保存"回显未完成"守卫（/state 首帧未到或首帧携带旧目标时，
 // 后端旧目标尚未经回显合并进 selected，整包 PUT 会覆盖删除——置脏跳过等自愈）。
-// 用法：node --import jiti scripts/target-guard-check.ts（退出码非 0 即断言失败）
+// 用法：node --import jiti/register scripts/target-guard-check.ts（退出码非 0 即断言失败）
 import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave } from "../src/lib/targetGuard"
 import type { SchedulerState } from "../src/types"
 

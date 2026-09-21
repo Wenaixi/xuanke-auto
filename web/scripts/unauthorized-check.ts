@@ -4,7 +4,7 @@
 // 体），原实现 r.json() 先执行会抛错走 -2 文案、UNAUTHORIZED_EVENT 永不广播，失效会话
 // 账号在前端永久残留。修复后 401 事件先广播、JSON 解析失败仍抛 -2 文案但事件已到达。
 // 本脚本验证账号反查解析逻辑；广播副作用（window.dispatchEvent）由逻辑走查论证。
-// 用法：node --import jiti scripts/unauthorized-check.ts（退出码非 0 即断言失败）
+// 用法：node --import jiti/register scripts/unauthorized-check.ts（退出码非 0 即断言失败）
 import { extractAccountFromPath } from "../src/api/client"
 
 let failed = 0

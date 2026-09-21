@@ -50,10 +50,15 @@ for (const [file, text] of sources) {
     assertFile(!text.includes(cls), `${rel} 不含 ${cls}`)
   }
   assertFile(!text.includes("min-h-screen bg-black"), `${rel} 无整页 bg-black（不遮挡画布）`)
+  // bg-neutral-95x 实色只允许两类位置：原生下拉 <option>（无法毛玻璃、必须实色兜底）
+  // 与 tailwind hover: 前缀（悬停过渡态，非静默黑洞）。其余位置视为黑窟窿。
   if (text.includes("bg-neutral-950") || text.includes("bg-neutral-900")) {
-    // 允许出现在 <option> 行（原生下拉列表无法毛玻璃，必须实色兜底），其余位置视为黑窟窿
     for (const line of text.split("\n"))
-      if ((line.includes("bg-neutral-950") || line.includes("bg-neutral-900")) && !line.trim().startsWith("<option")) {
+      if (
+        (line.includes("bg-neutral-950") || line.includes("bg-neutral-900")) &&
+        !line.trim().startsWith("<option") &&
+        !/(^|\s)hover:bg-neutral-9\d{2}/.test(line)
+      ) {
         bad(`${rel} 含 bg-neutral-95x 实色：${line.trim().slice(0, 60)}`)
       }
   }

@@ -33,6 +33,11 @@ var sharedTransport = &http.Transport{
 	ExpectContinueTimeout: 1 * time.Second,
 }
 
+// SharedTransport 导出共享连接池给外部工具（cmd/probe 等）复用——与全仓生产 HTTP
+// 契约对齐：64 连接/host + 120s 空闲保活 + HTTP/2（R63 MINOR-63-01：probe 原用
+// http.DefaultClient 无超时无自愈，真实平台 RST/FIN 时挂起至内核超时分钟级）。
+func SharedTransport() *http.Transport { return sharedTransport }
+
 // VisionConfig 硅基流动 Vision 验证码识别配置。
 type VisionConfig struct {
 	BaseURL string

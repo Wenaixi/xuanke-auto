@@ -20,7 +20,7 @@ cd backend && CGO_ENABLED=1 go build -o xuanke.exe .
 
 - **学生**：填教务平台账号密码，登录成功进入选课控制台（选课大厅配置预选目标、调度器窗口开启自动抢报）
 - **管理员**：登录页账号填 `admin`、密码填 `data/.env` 中的 `XUANKE_ADMIN_TOKEN`，进入管理后台（激活码 / 系统配置 / 运行状态 / 账号管理 / 日志总览）
-- **激活码机制**：默认开启，学生账号首次登录需输入管理员分发的激活码（`XK-XXXX-XXXX-XXXX-XXXX`）；`XUANKE_ACTIVATION=off` 可完全关闭
+- **激活码机制**：默认关闭，本地双击 exe 账号登录直接进入系统；`XUANKE_ACTIVATION=on` 启用后，学生账号首次登录需输入管理员分发的激活码（`XK-XXXX-XXXX-XXXX-XXXX`）
 
 ## 二、配置（data/.env）
 
@@ -31,9 +31,8 @@ cd backend && CGO_ENABLED=1 go build -o xuanke.exe .
 | XUANKE_ADMIN_TOKEN | 随机生成 | 管理口令（必填；缺失拒绝启动） |
 | XUANKE_ADMIN_NAME | admin | 管理员登录账号名 |
 | SF_API_KEY | 空 | 硅基流动 Vision 密钥（登录验证码识别；ddddocr 引擎免密钥） |
-| XUANKE_CAPTCHA_ENGINE | vision | 识别引擎（vision=云识别；ddddocr=本地离线） |
-| XUANKE_ACTIVATION | on | 激活码机制开关（off=完全关闭） |
-| XUANKE_OPEN_TIME | 2026-09-13 09:00:00 | 选课开放时间 |
+| XUANKE_CAPTCHA_ENGINE | ddddocr | 识别引擎（ddddocr=本地离线免密钥；vision=云识别需填 SF_API_KEY） |
+| XUANKE_ACTIVATION | off | 激活码机制开关（on=启用激活码；默认 off 登录直接进入系统） |
 | XUANKE_PORT | 3091 | HTTP 端口 |
 | XUANKE_DB | data/xuanke.db | SQLite 路径 |
 | XUANKE_MASTER_KEY | 自动生成 | 数据加密主密钥（生成于 data/.master_key，需与 db 一起备份） |

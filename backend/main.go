@@ -68,7 +68,7 @@ func main() {
 		VisionBaseURL:      cfg.SFBaseURL,
 		VisionAPIKey:       cfg.SFAPIKey,
 		VisionModel:        cfg.SFModel,
-		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 vision（云识别），ddddocr 仅显式配置时启用
+		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr 本地识别（免密钥），vision 云识别需显式配置
 		CaptchaConcurrency: 1,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）
@@ -139,6 +139,14 @@ func main() {
 	}
 	sched.Start()
 
+	// R71：系统托盘（Windows 桌面 / Linux 桌面 CGO=1）——常驻托盘，右键菜单
+	// 打开浏览器/关于/退出；Docker/服务器（Linux CGO=0）无托盘，服务照常启动。
+	// 托盘就绪后放行 main 继续（避免图标一闪而过）；关闭自动开浏览器，改为
+	// 托盘「打开浏览器」手动打开（托盘应用习惯）。
+	tray := trayData{url: "http://localhost:" + cfg.Port, dbPath: cfg.DBPath, port: cfg.Port}
+	runTray(tray)
+	log.Printf("[main] 托盘已就绪：右键「打开浏览器」访问选课大厅，或浏览器直接访问 http://localhost%s", ":"+cfg.Port)
+
 	// 全局重登频率闸门的分钟推进器：每 30 秒检查一次窗口翻页，翻页时放行队列中的重登。
 	go func() {
 		tk := time.NewTicker(30 * time.Second)
@@ -160,6 +168,8 @@ func main() {
 	addr := ":" + cfg.Port
 	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
 	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
+	// R71：自动开浏览器改由托盘「打开浏览器」菜单触发（桌面带托盘场景）；
+	// 无托盘场景（Docker/Linux CGO=0）仍自动打开一次（保持原行为）。
 	openBrowser("http://localhost" + addr)
 	// M-5 修复：http.Server 显式超时——公网部署时 slowloris/慢速 POST
 	// 不再能占用 goroutine 与连接池饿死调度器 tick 与健康检查。

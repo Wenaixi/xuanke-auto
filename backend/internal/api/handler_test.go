@@ -47,16 +47,16 @@ func newTestDepsMode(t *testing.T, activation bool) *testDeps {
 	return newTestDepsModeName(t, activation, "admin")
 }
 
-// newTestDepsModeName 指定管理员账号名构造（M-3 改名回归用）。
+// newTestDepsModeName 指定管理员账号名构造（改名回归用）。
 func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testDeps {
 	t.Helper()
-	// R52：测试夹具套接字预创建——预先绑定一个 127.0.0.1 回环端口并立即关闭。
+	// 测试夹具套接字预创建——预先绑定一个 127.0.0.1 回环端口并立即关闭。
 	// 背景：Windows 宿主 api 包测试内 httptest mock 服务器（账号专属 per-test）
-	// 连接瞬时失败（connectex，R46 起 4 轮 6+ 样本）根因是回环 TIME_WAIT 队列冷启动
+	// 连接瞬时失败（connectex）根因是回环 TIME_WAIT 队列冷启动
 	// 未排空，mock 服务器 accept 尚未就绪即收到连接。预创建-关闭动作预占并释放一个
 	// 端口，排空后由 keep-alive 空闲连接吸收（模拟真实平台会话建立的热态），
 	// 杜绝 runaway accept+dispatch 竞态的开始期误拒。
-	// MAJOR-53-01 收尾（R53）：预创建只解决"连接池里有濒死连接"，解决不了
+	// 预创建只解决"连接池里有濒死连接"，解决不了
 	// "每个测试新建 mock server 自身 accept 就绪前的最首请求"——httptest.NewServer
 	// 返回后 server 在独立 goroutine accept，Windows 回环冷启动窗口仍可让首个测试
 	// 请求 connectex（api 12 轮 1 FAIL 实证）。构造完 zhi 后主动发一条健康探测
@@ -83,7 +83,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 		case strings.HasSuffix(r.URL.Path, "/findElectivesData"):
 			// 发布 A：窗口开启（inDateRange=true），61115 可报名 / 61116 已满员；
 			// 发布 B：窗口关闭（inDateRange=false），61117 有空位。
-			// 三态齐全，供手动报名服务端复核（M7）与满员/窗口测试使用。
+			// 三态齐全，供手动报名服务端复核与满员/窗口测试使用。
 			json.NewEncoder(w).Encode(map[string]any{
 				"code": 0, "beginTimes": []int64{1789261200000},
 				"selectElectivesData": []any{
@@ -132,7 +132,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	}))
 	t.Cleanup(zhi.Close)
 
-	// MAJOR-53-01 收尾：mock 服务器就绪探测——httptest.NewServer 返回后 server 已在
+	// mock 服务器就绪探测——httptest.NewServer 返回后 server 已在
 	// 独立 goroutine accept，但 Windows 回环冷启动窗口（TIME_WAIT 队列未排空）仍可让
 	// 首个测试请求 connectex（api 12 轮 1 FAIL 实证）。向 mock 发一条健康探测请求
 	// 把冷启动窗口前移到夹具构造期，之后测试请求全落在已就绪 server 上。
@@ -177,14 +177,14 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求（期望非连接错误响应），
 // 把 Windows 回环冷启动窗口前移到夹具构造期。连接层失败轮询重试（200ms 间隔 ×
-// 10 次，总窗口 ~2s，实测覆盖冷启动 TIME_WAIT 队列排空——R53 单次重试/5×200ms
-// 已有前序包结束后最恶劣时刻 connectex 样本（R58 全量 R3 readyProbe 自身 5 次
+// 10 次，总窗口 ~2s，实测覆盖冷启动 TIME_WAIT 队列排空——单次重试/5×200ms
+// 已有前序包结束后最恶劣时刻 connectex 样本（readyProbe 自身 5 次
 // 全败直接 Fatal 实证），加宽到 10 次 + 显式 2s 超时兜底），全部失败才上抛。
 // 探测请求恰好也排空首个连接的 TIME_WAIT 队列，之后测试请求落在已就绪 server 上。
 func readyProbe(baseURL string) error {
 	// 轮询重试：连接层失败后短暂休眠重试，把探测成功前的冷启动窗口彻底前移。
 	// 显式 2s 超时——http.DefaultClient 超时为 0=无限，mock 极端挂起时可阻塞分钟级
-	//（OBSERVE-56-04/57-03 延续）；探测请求只关心"accept 是否就绪"，2s 足够。
+	//（延续）；探测请求只关心"accept 是否就绪"，2s 足够。
 	client := &http.Client{Timeout: 2 * time.Second}
 	const (
 		probeRetries = 10
@@ -310,7 +310,7 @@ func TestHealth(t *testing.T) {
 
 func TestAuthRequired(t *testing.T) {
 	d := newTestDeps(t)
-	// 无会话访问受保护端点应 401（B39-02：HTTP 状态码真实 401，此前恒 200）
+	// 无会话访问受保护端点应 401（HTTP 状态码真实 401，此前恒 200）
 	code, j := doJSON(t, d.api, "GET", "/api/state", "")
 	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("无会话应 401: %d %v", code, j)
@@ -326,7 +326,7 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
-// TestLogoutRevokesToken M-7：登出接口立即吊销服务端令牌——
+// TestLogoutRevokesToken 登出接口立即吊销服务端令牌——
 // 注销后原令牌再次访问任意受保护接口必须 401（令牌外流残留被封堵）。
 func TestLogoutRevokesToken(t *testing.T) {
 	d := newTestDeps(t)
@@ -359,7 +359,7 @@ func TestAccountOverrideRequiresAdminSession(t *testing.T) {
 
 	// 准备三个账号：student（普通学生）、victim（被攻击目标）、adminName（名为 admin 的普通学生）
 	// authenticateDirect 直连批量注册多个账号：重置全局重登频率闸门预算（夹具语义
-	// 不关心登录流程，纯注册账号建会话），避免同一分钟窗口内被 B42-01 准入闸门误拦
+	// 不关心登录流程，纯注册账号建会话），避免同一分钟窗口内被准入闸门误拦
 	d.accts.ResetGateForTest()
 	studentTok := authenticateDirect(t, d, "student")
 	d.accts.ResetGateForTest()
@@ -500,18 +500,18 @@ func TestActivateBadCode(t *testing.T) {
 
 func TestAdminAuth(t *testing.T) {
 	d := newTestDeps(t)
-	// B43-04：管理员名 + 非管理口令先试教务登录 → mock 平台教务全成功 → 撞名学生登录
+	// 管理员名 + 非管理口令先试教务登录 → mock 平台教务全成功 → 撞名学生登录
 	// 走教务成功分支。未激活撞名学生返回 1001（颁发票据）而非管理员口令错误——这本身
-	// 就是 B43-04 契约（撞名学生绝不被管理员分支吞掉）；激活后的正常会话由
+	// 就是撞名学生绝不被管理员分支吞掉的契约；激活后的正常会话由
 	// TestLoginAdminNameCollisionStudentCredential 覆盖。
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"wrong"}`)
 	if code != 200 {
 		t.Fatalf("登录请求应 HTTP 200: %d", code)
 	}
 	if j["code"].(float64) == 1 && strings.Contains(j["msg"].(string), "管理口令错误") {
-		t.Fatalf("B43-04 后撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
+		t.Fatalf("撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
 	}
-	// 无会话访问管理接口应 403（B39-02：HTTP 状态码真实 403，此前恒 200）
+	// 无会话访问管理接口应 403（HTTP 状态码真实 403，此前恒 200）
 	code, j = doJSON(t, d.api, "GET", "/api/admin/codes", "")
 	if code != http.StatusForbidden || j["code"].(float64) != 403 {
 		t.Fatalf("无会话访问管理接口应 403: %d %v", code, j)
@@ -533,7 +533,7 @@ func TestAdminAuth(t *testing.T) {
 func TestAdminCodesGenerateListDelete(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
-	// uses 超上限（>1000）必须被拒绝（n3），拒绝不应入库
+	// uses 超上限（>1000）必须被拒绝，拒绝不应入库
 	code, j := doJSONAdmin(t, d.api, "POST", "/api/admin/codes", `{"count":1,"uses":1001}`, adminTok)
 	if code != 200 || j["code"].(float64) == 0 {
 		t.Fatalf("uses 超上限应被拒绝: %d %v", code, j)
@@ -553,9 +553,9 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	if code != 200 || j["code"].(float64) != 0 || len(list) != 2 {
 		t.Fatalf("激活码列表异常: %d %v", code, j)
 	}
-	// 用激活码激活账号，验证可用次数扣减（C-2：必须携带登录签发的激活票据）
+	// 用激活码激活账号，验证可用次数扣减（必须携带登录签发的激活票据）
 	first := codes[0].(string)
-	// 生成码为 16 位 hex（XK-XXXX-XXXX-XXXX-XXXX），断言熵提升落地（m7）
+	// 生成码为 16 位 hex（XK-XXXX-XXXX-XXXX-XXXX），断言熵提升落地
 	if strings.Count(first, "-") != 4 {
 		t.Fatalf("激活码应为 16 位 hex（4 段分隔），实际 %q", first)
 	}
@@ -584,7 +584,7 @@ func TestAdminCodesGenerateListDelete(t *testing.T) {
 	}
 }
 
-// TestRecoverMiddlewareHidesPanicDetail n1：panic 详情绝不回显客户端——统一 500 文案，
+// TestRecoverMiddlewareHidesPanicDetail panic 详情绝不回显客户端——统一 500 文案，
 // 内部细节只进日志。修复前（拼接 rec）响应会泄露 panic 内容，本测试即 RED。
 func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
 	// 直构一个会 panic 的 handler，验证 recoverMiddleware 包装后对外只见"内部错误"
@@ -608,7 +608,7 @@ func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
 	if msg, _ := j["msg"].(string); !strings.Contains(msg, "内部错误") {
 		t.Fatalf("应统一回显「内部错误」文案: %v", j)
 	}
-	// B39-02：panic 恢复除 body code=500 外，HTTP 状态码必须真实写 500——
+	// panic 恢复除 body code=500 外，HTTP 状态码必须真实写 500——
 	// 此前 writeJSON 只设 Content-Type 不写 WriteHeader，监控/反代在 HTTP 层
 	// 识别不了后端内部错误（恒 200 假象）。修复后 panic 路径 HTTP 500。
 	if rec.Code != http.StatusInternalServerError {
@@ -616,9 +616,9 @@ func TestRecoverMiddlewareHidesPanicDetail(t *testing.T) {
 	}
 }
 
-// TestAdminConfigSaveFailStillDispatch M-4 + F48-O3：落库失败时——配置已内存生效、下游热下发
+// TestAdminConfigSaveFailStillDispatch 落库失败时——配置已内存生效、下游热下发
 // 必须照常执行（识别引擎/Vision 同步新值），且响应如实区分"已生效但落库失败"（body code=500 且
-// HTTP 层亦为真实 500——家族整风后 B43-05 的 stats 与 handleAdminConfig 持久化错误统一真状态码）。
+// HTTP 层亦为真实 500——家族整风后 stats 与 handleAdminConfig 持久化错误统一真状态码）。
 func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
@@ -727,7 +727,7 @@ func TestAdminConfigHotReload(t *testing.T) {
 		t.Fatalf("配置回显不得再含 open_time 键: %v", cfgKeep)
 	}
 
-	// m8：带管理员会话 + 表单 Content-Type 的副作用请求必须被拒（CSRF 防线）。
+	// 带管理员会话 + 表单 Content-Type 的副作用请求必须被拒（CSRF 防线）。
 	// 路由层 requireJSONBody 对非 JSON 提交直接 403——跨站表单 POST 无法伪造 JSON 头。
 	// 本项目约定：业务码放 body.code，HTTP 状态恒定 200，故读 body 的 code 字段。
 	req5 := httptest.NewRequest(http.MethodPost, "/api/admin/codes", strings.NewReader("count=1"))
@@ -738,12 +738,12 @@ func TestAdminConfigHotReload(t *testing.T) {
 	var j5 map[string]any
 	json.Unmarshal(rec5.Body.Bytes(), &j5)
 	if c, _ := j5["code"].(float64); c != 403 {
-		t.Fatalf("表单 Content-Type 的 admin 副作用请求应返回 code=403（m8），实际 %v", j5)
+		t.Fatalf("表单 Content-Type 的 admin 副作用请求应返回 code=403，实际 %v", j5)
 	}
 	// 同时保证未走生成分支（激活码列表未新增）
 	code, j = doJSONAdmin(t, d.api, "GET", "/api/admin/codes", "", adminTok)
 	if lst, _ := j["data"].([]any); len(lst) != 0 {
-		t.Fatalf("被拒请求不应生成激活码（m8），当前列表 %v", lst)
+		t.Fatalf("被拒请求不应生成激活码，当前列表 %v", lst)
 	}
 }
 
@@ -798,7 +798,7 @@ func TestAdminConfigRefuseUnencryptedVisionKey(t *testing.T) {
 }
 
 // TestAdminDeleteProtectsRenamedAdmin 管理员删除保护必须跟随改名后的管理员账号名：
-// XUANKE_ADMIN_NAME=root 时，root 账号不可被删除（C1 修复）。
+// XUANKE_ADMIN_NAME=root 时，root 账号不可被删除。
 func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
 	// 判定辅助恒等：改名与默认名都能被 IsAdminAccountName 识别
 	if !(&Deps{AdminName: "root"}).IsAdminAccountName("root") {
@@ -844,7 +844,7 @@ func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
 	}
 }
 
-// TestRenamedAdminSessionBindsConfigName 管理员会话账号必须绑定配置名（M-3）：
+// TestRenamedAdminSessionBindsConfigName 管理员会话账号必须绑定配置名：
 // XUANKE_ADMIN_NAME=root 后，管理员会话的 sessionAccount 必须返回 root（而非字面量 admin），
 // 使 handleElectives/State 的 IsAdminAccountName 兜底路径判定一致——
 // 改名后无 ?account= 参数时不会再错误地当学生账号处理（ProbeForAccount("admin") 会撞不存在的客户端）。
@@ -862,7 +862,7 @@ func TestRenamedAdminSessionBindsConfigName(t *testing.T) {
 	if adminTok == "" {
 		t.Fatalf("改名管理员登录缺少会话令牌: %v", j)
 	}
-	// 管理员会话账号名应为 root（M-3 修复前是硬编码 admin，穿透兜底会错位）
+	// 管理员会话账号名应为 root（修复前是硬编码 admin，穿透兜底会错位）
 	sessAcct, ok := d.sessions.Account(adminTok)
 	if !ok || sessAcct != "root" {
 		t.Fatalf("管理员会话账号应绑定配置名 root，实际 %q %v", sessAcct, ok)
@@ -874,7 +874,7 @@ func TestRenamedAdminSessionBindsConfigName(t *testing.T) {
 	}
 }
 
-// TestAdminStatsTargetsLoadFailureReturns500 B43-05：stats 的 targetsCount 循环若某个账号
+// TestAdminStatsTargetsLoadFailureReturns500 stats 的 targetsCount 循环若某个账号
 // 目标读取失败必须记日志 + 明确报 500——此前静默 continue 计 0，DB 故障时 stats 显示
 // targets_count=0 误导管理员"无人设目标"，违反零吞错精神（对齐其他数据源"任一失败即 500"）。
 func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
@@ -882,7 +882,7 @@ func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
 	adminTok := adminTokenFor(t, d)
 	// 目标读取恒失败：Register 接收 *store.Store（非接口），无法注入替身——直接对真实
 	// store 的底层 DB 执行一次非法操作不可行（store 方法封装安全查询）。
-	// B43-05 的行为（失败 → 记日志 + 500）由实现注释与 handleAdminStats 其他数据源
+	// 的行为（失败 → 记日志 + 500）由实现注释与 handleAdminStats 其他数据源
 	// 同风格兜底，此处以最小契约回归：正常路径 stats 仍 200（回归 TestAdminStatsAccountsLogs
 	// 已覆盖 targets_count 正确计数）；失败路径的报错语义属"零吞错"族，走实现内复查。
 	// （替代注入方案需把 Deps.Store 改为接口——超范围改动，违反简洁优先。）
@@ -895,7 +895,7 @@ func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
 	}
 }
 
-// failingTargetsStore 包裹真实 Store，仅让目标读取恒失败（B43-05 测试专用）。
+// failingTargetsStore 包裹真实 Store，仅让目标读取恒失败（测试专用）。
 type failingTargetsStore struct {
 	*store.Store
 }
@@ -932,8 +932,8 @@ func TestAdminStatsAccountsLogs(t *testing.T) {
 	if code != 200 || j["code"].(float64) != 0 {
 		t.Fatalf("删除账号失败: %d %v", code, j)
 	}
-	// MAJOR-A：删除账号后其既有会话必须立即失效（吊销会话，不等 12h TTL）
-	// 会话失效由业务 code=401 表达（B39-02 后 HTTP 状态码同样真实 401）
+	// 删除账号后其既有会话必须立即失效（吊销会话，不等 12h TTL）
+	// 会话失效由业务 code=401 表达（HTTP 状态码同样真实 401）
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state", "", tok1)
 	if code != http.StatusUnauthorized || j["code"].(float64) != 401 {
 		t.Fatalf("删除账号后旧会话应立即失效 code=401，实际 %d %v", code, j)
@@ -1032,7 +1032,7 @@ func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
 		t.Fatalf("stats(window_opened=%v) 与调度器探测状态(%v) 不同源",
 			st["window_opened"], openedBySched)
 	}
-	// B39-05：window_closed 必须下发且与学生端 /state 同源（WindowClosed 三判据单源）——
+	// window_closed 必须下发且与学生端 /state 同源（WindowClosed 三判据单源）——
 	// 前端管理后台三态展示靠此字段区分，缺失时窗口关闭后后台仍显"待命中"误导管理员。
 	if _, ok := st["window_closed"]; !ok {
 		t.Fatalf("stats 必须下发 window_closed 字段（前端三态展示依赖），实际 %v", st)
@@ -1043,7 +1043,7 @@ func TestAdminStatsWindowOpenedUsesScheduler(t *testing.T) {
 	}
 }
 
-// TestElectiveSelectRejectsWindowClosed 手动报名服务端复核（M7）：
+// TestElectiveSelectRejectsWindowClosed 手动报名服务端复核：
 // 课程所在发布窗口未开放（in_date_range=false）→ 拒绝报名并返回友好错误。
 func TestElectiveSelectRejectsWindowClosed(t *testing.T) {
 	d := newTestDeps(t)
@@ -1070,7 +1070,7 @@ func TestElectiveSelectRejectsWindowClosed(t *testing.T) {
 	}
 }
 
-// TestElectiveSelectRejectsFullClass 手动报名服务端复核（M7）：
+// TestElectiveSelectRejectsFullClass 手动报名服务端复核：
 // 快照显示课程已满员（selected_count >= max_count）→ 拒绝报名并返回友好错误。
 func TestElectiveSelectRejectsFullClass(t *testing.T) {
 	d := newTestDeps(t)
@@ -1208,9 +1208,9 @@ func TestSetTargetsEmptyAllowed(t *testing.T) {
 	}
 }
 
-// TestAdminElectivesUnknownAccountRejects B26-02：管理员 ?account= 透传查看
+// TestAdminElectivesUnknownAccountRejects 管理员 ?account= 透传查看
 // 课程的账号必须真实存在。此前任意串（typo/残留参数）静默走 ElectivesSnapshotFor 的全局帧
-// 回退路径返回全局课程数据，管理员以为看到的就是该账号年级的课程——与 B15-M4 在
+// 回退路径返回全局课程数据，管理员以为看到的就是该账号年级的课程——与
 // handleSetTargets 的"凭据表校验"判据同源但读路径缺失，写路径拒绝、读路径假装成功不对称。
 // 触发前提是"全局帧已存在"（首账号已探测），否则恰好因 ProbeForAccount 报错而掩盖缺陷，
 // 故此测试先用真实账号探测填充全局帧再穿透。契约：凭据表查无此账号 → 明确"账号不存在"；
@@ -1232,7 +1232,7 @@ func TestAdminElectivesUnknownAccountRejects(t *testing.T) {
 	}
 	// 反向防线：真实登录过的账号（acct1 在凭据表）穿透正常放行
 	if _, jr := doJSONAuth(t, d.api, "GET", "/api/electives?account=acct1", "", adminTok); jr["code"].(float64) != 0 {
-		t.Fatalf("真实账号穿透查看课程应正常放行（B26-02 不得误伤）: %v", jr)
+		t.Fatalf("真实账号穿透查看课程应正常放行（不得误伤）: %v", jr)
 	}
 	// 学生会话自己读自己的课程不受影响
 	if _, js := doJSONAuth(t, d.api, "GET", "/api/electives", "", tok); js["code"].(float64) != 0 {
@@ -1240,8 +1240,8 @@ func TestAdminElectivesUnknownAccountRejects(t *testing.T) {
 	}
 }
 
-// TestAdminElectiveSelectUnknownAccountRejects B27-01：管理员 ?account= 透传
-// 手动报名/退选，账号必须真实存在（凭据表有记录）——与 B15-M4（目标写）/B26-02（课程读）
+// TestAdminElectiveSelectUnknownAccountRejects 管理员 ?account= 透传
+// 手动报名/退选，账号必须真实存在（凭据表有记录）——与目标写/课程读
 // 同款判据，手动操作两路（select/exit）对称补齐。此前 override 分支只 `acct = q` 放行，
 // 幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable 放行 →
 // ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案；凭据表查无此账号 →
@@ -1273,14 +1273,14 @@ func TestAdminElectiveSelectUnknownAccountRejects(t *testing.T) {
 	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select?account=acct1",
 		`{"class_id":61115,"course_name":"健美操"}`, adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("真实账号透传报名应放行（B27-01 不得误伤）: %d %v", code, j)
+		t.Fatalf("真实账号透传报名应放行（不得误伤）: %d %v", code, j)
 	}
 }
 
-// TestAdminStateUnknownAccountRejects B27-02：管理员 ?account= 透传读取状态，
+// TestAdminStateUnknownAccountRejects 管理员 ?account= 透传读取状态，
 // 账号必须真实存在。此前 handleState override 分支任意串放行，StateForAccount(ghost) 返回
 // 空 Courses + token_valid=true + window 状态——与"账号存在但确实无目标"返回形状完全相同，
-// 管理员无法分辨"账号不存在"与"账号没目标"（B26-02 修掉的假装成功的轻量版）。凭据表
+// 管理员无法分辨"账号不存在"与"账号没目标"（修掉的假装成功的轻量版）。凭据表
 // 查无此账号 → 明确"账号不存在"；真实账号透传不受影响。
 func TestAdminStateUnknownAccountRejects(t *testing.T) {
 	d := newTestDeps(t)
@@ -1297,11 +1297,11 @@ func TestAdminStateUnknownAccountRejects(t *testing.T) {
 	authenticateDirect(t, d, "acct1")
 	code, j = doJSONAuth(t, d.api, "GET", "/api/state?account=acct1", "", adminTok)
 	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("真实账号透传状态应放行（B27-02 不得误伤）: %d %v", code, j)
+		t.Fatalf("真实账号透传状态应放行（不得误伤）: %d %v", code, j)
 	}
 }
 
-// TestSetTargetsBounds 目标数量与范围必须受校验（n2）：
+// TestSetTargetsBounds 目标数量与范围必须受校验：
 // 超过 100 门 / 非法 publish_id / 非法 priority 一律拒绝，且不得入库。
 func TestSetTargetsBounds(t *testing.T) {
 	d := newTestDeps(t)
@@ -1348,7 +1348,7 @@ func TestSetTargetsBounds(t *testing.T) {
 	}
 }
 
-// TestAccountsNonAdminSeesOnlySelf 普通会话只能看到自身账号（M-2）：
+// TestAccountsNonAdminSeesOnlySelf 普通会话只能看到自身账号：
 // 即使系统里注册了多个账号，普通会话的 /api/accounts 也只回显自己的账号名，
 // 杜绝账号枚举（学号/姓名高价值情报）；管理员会话回显全量。
 func TestAccountsNonAdminSeesOnlySelf(t *testing.T) {
@@ -1410,7 +1410,7 @@ func TestLoginRateLimit(t *testing.T) {
 			t.Fatalf("响应不是 JSON: %s", rec.Body.String())
 		}
 		codes = append(codes, j["code"].(float64))
-		// B39-02：限流响应的 HTTP 状态码必须真实 429（修复前恒 200）
+		// 限流响应的 HTTP 状态码必须真实 429（修复前恒 200）
 		if j["code"].(float64) == 429 && rec.Code != http.StatusTooManyRequests {
 			t.Fatalf("限流应写 HTTP 429，实际 %d", rec.Code)
 		}
@@ -1442,13 +1442,13 @@ func TestLoginLimiterGC(t *testing.T) {
 	}
 }
 
-// TestLoginActivateSeparateBuckets M-6：登录与激活各自独立限流桶——
+// TestLoginActivateSeparateBuckets 登录与激活各自独立限流桶——
 // 刷空登录额度后，激活接口不受影响；刷空激活额度后，登录接口不受影响。
 // 反代/学校 NAT 下二者互不锁死（选课当天并发登录不会因激活爆破被全员 429）。
 func TestLoginActivateSeparateBuckets(t *testing.T) {
 	d := newTestDeps(t)
 	// 先立刻榨干激活桶：连续 7 次激活（未携带票据，每次都被拒但消耗激活额度）
-	// 第 6 次起应触发激活限流 429（B39-02：HTTP 状态码真实 429）
+	// 第 6 次起应触发激活限流 429（HTTP 状态码真实 429）
 	limited := false
 	for i := 0; i < 7; i++ {
 		req := httptest.NewRequest("POST", "/api/activate", strings.NewReader(`{"account":"x","code":"XK-NOPE","ticket":"t"}`))
@@ -1481,21 +1481,21 @@ func TestLoginActivateSeparateBuckets(t *testing.T) {
 	}
 }
 
-// TestLoginAdminWrongPasswordTimingFlat n4 登录时延侧信道：管理员口令错误分支必须
+// TestLoginAdminWrongPasswordTimingFlat 登录时延侧信道：管理员口令错误分支必须
 // 固定延迟 loginTimingFlat 后再响应，使"管理员名（口令错立即回）"与"未知学生
 // （教务登录网络往返）"的响应时延差被拉平——管理员账号名不能靠响应快慢被枚举。
-// B43-04 后语义：管理员名 + 非管理口令先试教务登录（mock 平台教务全成功 → 撞名学生
+// 管理员名 + 非管理口令先试教务登录（mock 平台教务全成功 → 撞名学生
 // 登录成功返回 code=0 签发普通会话），错误口令显式失败路径在真实平台教务 doLogin
 // 对该口令也失败时才触达（返回"管理口令错误"），代码保留该分支。
-// 本用例退化为验证 B43-04 契约：管理员名 + 非管理口令在教务 mock 全成功下被当作
+// 本用例退化为验证撞名学生契约：管理员名 + 非管理口令在教务 mock 全成功下被当作
 // 撞名学生签发普通会话（不再返回"管理口令错误"）。
 func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
 	d := newTestDeps(t)
-	// 管理员名 + 非管理口令：B43-04 后先试教务登录 → mock 平台教务全成功 → 撞名学生
+	// 管理员名 + 非管理口令：先试教务登录 → mock 平台教务全成功 → 撞名学生
 	// 登录走教务成功分支。未激活撞名学生返回 1001（颁发票据）而非管理员口令错误——
-	// 这本身就是 B43-04 契约（撞名学生绝不被管理员分支吞掉），激活后的普通会话由
+	// 这本身就是撞名学生绝不被管理员分支吞掉的契约，激活后的普通会话由
 	// TestLoginAdminNameCollisionStudentCredential 覆盖。
-	// 时延语义（n4）：管理员名 + 口令错已不再"立即返回"——先走教务登录网络往返，
+	// 时延语义：管理员名 + 口令错已不再"立即返回"——先走教务登录网络往返，
 	// 与未知学生天然等时；教务登录也失败时才进 adminName 分支补 Sleep(loginTimingFlat)
 	//（代码 137 行保留），侧信道语义由结构保证，不在此断定时长。
 	code, j := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"nope"}`)
@@ -1503,11 +1503,11 @@ func TestLoginAdminWrongPasswordTimingFlat(t *testing.T) {
 		t.Fatalf("登录请求应 HTTP 200: %d", code)
 	}
 	if j["code"].(float64) == 1 && strings.Contains(j["msg"].(string), "管理口令错误") {
-		t.Fatalf("B43-04 后撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
+		t.Fatalf("撞名学生绝不被管理员分支吞掉（不得返回管理口令错误）: %v", j)
 	}
 }
 
-// TestLoginAdminNameCollisionStudentCredential B43-04：教务学生账号与配置管理员名撞名时，
+// TestLoginAdminNameCollisionStudentCredential 教务学生账号与配置管理员名撞名时，
 // 用学生自己的教务口令登录必须走教务登录分支（成功签发普通会话），绝不能因"账号名==adminName"
 // 而被管理员口令比对吞掉（旧实现：口令=管理口令必错 → 该学生永远无法登录，DoS）。
 // 反向用例：管理员名 + 错误口令仍明确"管理口令错误"。
@@ -1515,17 +1515,17 @@ func TestLoginAdminNameCollisionStudentCredential(t *testing.T) {
 	d := newTestDeps(t)
 	// 撞名学生账号需要"已激活"才走 issueSession（否则返回 1001）。激活前置必须走
 	// 教务登录分支——但撞名学生未激活时登录即走教务成功分支（返回 1001 颁发票据），
-	// 这正是 B43-04 的核心契约：撞名学生绝不被管理员分支吞掉。先验证未激活登录拿到票据
+	// 这正是撞名学生绝不被管理员分支吞掉的核心契约。先验证未激活登录拿到票据
 	if err := d.store.CreateActivationCode("XK-ABCD-EF12-3456", 10); err != nil {
 		t.Fatal(err)
 	}
 	code, jAct := doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"pwd"}`)
 	if code != 200 || jAct["code"].(float64) != 1001 {
-		t.Fatalf("未激活撞名学生登录必须走教务分支颁发票据（B43-04），实际 %d %v", code, jAct)
+		t.Fatalf("未激活撞名学生登录必须走教务分支颁发票据，实际 %d %v", code, jAct)
 	}
 	ticket, _ := jAct["data"].(map[string]any)
 	if ticket == nil || ticket["ticket"] == nil || ticket["ticket"] == "" {
-		t.Fatalf("未激活撞名学生登录应颁发激活票据（B43-04），实际 %v", jAct)
+		t.Fatalf("未激活撞名学生登录应颁发激活票据，实际 %v", jAct)
 	}
 	code, j := doJSON(t, d.api, "POST", "/api/activate",
 		`{"account":"admin","code":"XK-ABCD-EF12-3456","ticket":"`+ticket["ticket"].(string)+`"}`)
@@ -1535,7 +1535,7 @@ func TestLoginAdminNameCollisionStudentCredential(t *testing.T) {
 	// 教务 mock 平台对任意账号+正确验证码登录成功（token=tok-new）——撞名学生可正常登录
 	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"pwd"}`)
 	if code != 200 || j["code"].(float64) != 0 {
-		t.Fatalf("撞名学生用教务口令登录必须成功签发普通会话（B43-04），实际 %d %v", code, j)
+		t.Fatalf("撞名学生用教务口令登录必须成功签发普通会话，实际 %d %v", code, j)
 	}
 	tok, _ := j["data"].(map[string]any)
 	if tok == nil || tok["token"] == nil || tok["token"] == "" {
@@ -1543,7 +1543,7 @@ func TestLoginAdminNameCollisionStudentCredential(t *testing.T) {
 	}
 	// 签发的是普通学生会话（非管理员会话）：撞名学生绝不能获得管理员权限
 	if d.sessions.IsAdmin(tok["token"].(string)) {
-		t.Fatal("撞名学生登录签发的必须是普通学生会话，绝不带管理员权限（B43-04）")
+		t.Fatal("撞名学生登录签发的必须是普通学生会话，绝不带管理员权限")
 	}
 	// 反向用例：管理员名 + 错误口令 → 明确"管理口令错误"（业务 code=1）
 	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"admin","password":"wrong-password"}`)
@@ -1560,7 +1560,7 @@ func TestLoginAdminNameCollisionStudentCredential(t *testing.T) {
 // 从源头封堵 CSRF 触发的副作用登录（攻击者借受害者 IP 分布式爆破）。
 func TestLoginRejectsFormContentType(t *testing.T) {
 	d := newTestDeps(t)
-	// 表单编码提交登录（模拟恶意跨站表单）：应被 403 拒绝（B39-02：HTTP 状态码真实 403）
+	// 表单编码提交登录（模拟恶意跨站表单）：应被 403 拒绝（HTTP 状态码真实 403）
 	req := httptest.NewRequest("POST", "/api/login", strings.NewReader("account=a&password=b"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -1588,7 +1588,7 @@ func TestLoginRejectsFormContentType(t *testing.T) {
 // TestRequireJSONBodyRejectsFormContentType requireJSONBody 是副作用请求的 CSRF
 // 第一道门（POST 选课/退选/目标设置/管理改配），其拒绝分支必须写真实 HTTP 403——
 // 与登录/激活两处 CSRF 门同款。HTTP 层状态分裂会让安全扫描/反代无法识别被 CSRF
-// 拒掉的副作用请求（此前 writeJSON 恒 200，B39-02 改漏的最后一处）。
+// 拒掉的副作用请求（此前 writeJSON 恒 200，改漏的最后一处）。
 func TestRequireJSONBodyRejectsFormContentType(t *testing.T) {
 	d := newTestDeps(t)
 	// 构造一个需登录 + requireJSONBody 的副作用路由（POST /api/electives/select 最典型）
@@ -1654,10 +1654,10 @@ func TestClientIPTrustedProxy(t *testing.T) {
 	}
 }
 
-// TestApiUnknownPath404 B7-C4：未注册的 /api/xxx 必须 404 JSON，绝不可能回退 SPA
+// TestApiUnknownPath404 未注册的 /api/xxx 必须 404 JSON，绝不可能回退 SPA
 // index.html（此前落入 main.go "/" SPA 兜底 → 200 text/html：前端 fetch 解析 JSON
 // 报错掩盖真实 404；安全扫描误判任意 /api/ 路径可 200）。已注册的固定路由不受影响。
-// R59 MINOR-59-01：真实 net/http Server 上 404 的 Content-Type 必须在 writeJSONStatus
+// 真实 net/http Server 上 404 的 Content-Type 必须在 writeJSONStatus
 // 的"先设头再 WriteHeader"路径下发 application/json——httptest.ResponseRecorder 允许
 // WriteHeader 后设头、恒绿假绿掩盖真实 Server 行为分叉，故除 Recorder 断言外补真实
 // Server 端到端断言（httptest.NewServer + http.Get 真发请求抓 HTTP 层 CT）。
@@ -1680,8 +1680,8 @@ func TestApiUnknownPath404(t *testing.T) {
 		t.Fatalf("未知 /api/ 应 JSON code=404，实际 %s", rec.Body.String())
 	}
 	// 真实 Server 端到端断言：Recorder 允许 WriteHeader 后设 Header 是假绿——
-	// 真实 net/http Server 丢弃已提交响应后的 Header 设置（R59 实证 404 错标
-	// text/plain），此断言确保未来改动在真实 HTTP 层不回归。
+	// 真实 net/http Server 丢弃已提交响应后的 Header 设置（404 错标
+	// text/plain 实证），此断言确保未来改动在真实 HTTP 层不回归。
 	realSrv := httptest.NewServer(d.api)
 	defer realSrv.Close()
 	resp, err := http.Get(realSrv.URL + "/api/not-registered-path")
@@ -1705,7 +1705,7 @@ func TestApiUnknownPath404(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteCodeNoBodyOK B7-M8/M9：DELETE /api/admin/codes 无 body（标准 REST 客户端
+// TestAdminDeleteCodeNoBodyOK DELETE /api/admin/codes 无 body（标准 REST 客户端
 // 默认行为）必须可用——此前强制 requireJSONBody 导致 curl/脚本删码必踩 403 可用性噪音。
 // 副作用 + 需要 body 的 POST 仍强制 JSON（跨站表单防挟持）；GET/DELETE 放行空 body。
 func TestAdminDeleteCodeNoBodyOK(t *testing.T) {
@@ -1728,7 +1728,7 @@ func TestAdminDeleteCodeNoBodyOK(t *testing.T) {
 	rec := httptest.NewRecorder()
 	d.api.ServeHTTP(rec, req)
 	if rec.Code == 403 {
-		t.Fatalf("无 body DELETE 不应被 403 拒绝（B7-M8 回归）：http=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("无 body DELETE 不应被 403 拒绝（回归）：http=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var jr map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &jr); err != nil {
@@ -1791,8 +1791,8 @@ func TestHandleElectivesSelectAndExit(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteAccountNoBodyOK B31-01：DELETE /api/admin/accounts 无 body（标准 REST
-// 客户端 curl/Postman/脚本默认行为）必须可用——B7-M8 只给 codes 的 DELETE 放行空 body，
+// TestAdminDeleteAccountNoBodyOK DELETE /api/admin/accounts 无 body（标准 REST
+// 客户端 curl/Postman/脚本默认行为）必须可用——此前只给 codes 的 DELETE 放行空 body，
 // 账号删除同为"DESTROY + 空 body 合法"语义却被 requireJSONBody 门挡成 403。
 // 与 TestAdminDeleteCodeNoBodyOK 对称：空 body DELETE 应返回明确业务错误而非 403；
 // 带 body 的正常删除由既有 TestAdminDeleteAccount 覆盖。
@@ -1808,7 +1808,7 @@ func TestAdminDeleteAccountNoBodyOK(t *testing.T) {
 	rec := httptest.NewRecorder()
 	d.api.ServeHTTP(rec, req)
 	if rec.Code == 403 {
-		t.Fatalf("无 body DELETE 不应被 403 拒绝（B31-01 回归）：http=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("无 body DELETE 不应被 403 拒绝（回归）：http=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var jr map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &jr); err != nil {
@@ -1824,7 +1824,7 @@ func TestAdminDeleteAccountNoBodyOK(t *testing.T) {
 	}
 }
 
-// TestHandleElectivesSelectUnauthorizedRelogin B8-M7：手动报名命中教务 token 失效
+// TestHandleElectivesSelectUnauthorizedRelogin 手动报名命中教务 token 失效
 // （ErrUnauthorized）时，接口返回友好提示「正在自动重登」，并实际触发了调度器的
 // maybeRelogin（重登计数/失效标记状态可观测）。此前手动路径把原始报错抛给前端、
 // 永不触发重登（UX 断裂：用户手动点报名被告知失败却无人自愈）。
@@ -1889,9 +1889,9 @@ func TestHandleElectivesSelectUnauthorizedRelogin(t *testing.T) {
 	}
 }
 
-// TestHandleElectivesSelectReadErrMessage MINOR-61-03：手动报名/退选路径在 read 类错误
+// TestHandleElectivesSelectReadErrMessage 手动报名/退选路径在 read 类错误
 // （请求已发出、平台可能已处理）下必须区分"可能已处理"文案，与 scheduler 自动链对称。
-// 此前 R60 MINOR-60-03 只补了代码分支、零测试覆盖——未来 IsReadErr 语义变化或分支被
+// 此前只补了代码分支、零测试覆盖——未来 IsReadErr 语义变化或分支被
 // 误删时此测试会红。mock 用 FLUSH+Hijack 直断连接触发真实 read 错误（url.Error 包装
 // io.EOF/OpError，不依赖超时），断言响应 msg 含"平台可能已处理"。
 func TestHandleElectivesSelectReadErrMessage(t *testing.T) {
@@ -1960,7 +1960,7 @@ func TestHandleElectivesSelectReadErrMessage(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteRejectsUnnormalizedAccount B15-M5：管理员删除带尾随空格的账号名必须拒绝。
+// TestAdminDeleteRejectsUnnormalizedAccount 管理员删除带尾随空格的账号名必须拒绝。
 // 此前 handleAdminDeleteAccount 只做 `strings.TrimSpace(req.Account) != ""` 的判空，
 // 未把 trim 后的账号回写——前端一次空格失手（如 "12345 " 或粘贴带换行）会被 trim 后
 // 删除真实账号 12345，响应却显示"已删除 "12345 ""（假删除成功：store 里账号列表/news
@@ -2011,7 +2011,7 @@ func TestAdminDeleteRejectsUnnormalizedAccount(t *testing.T) {
 	}
 }
 
-// TestSetTargetsUnknownAccountDoesNotFabricate B15-M4：管理员对不存在账号设置目标必须拒绝。
+// TestSetTargetsUnknownAccountDoesNotFabricate 管理员对不存在账号设置目标必须拒绝。
 // 此前 handleSetTargets 对 `?account=` 透传的任意字符串都无条件 SetTargetsForAccount——
 // 未知账号名既不在 Store 账号表、也不在 Accounts 客户端注册表，目标会被写进孤儿行
 // （store.targets 无主数据；重启恢复时 LoadTargetsForAccount 读回 → 目标幽灵复活），
@@ -2037,9 +2037,9 @@ func TestSetTargetsUnknownAccountDoesNotFabricate(t *testing.T) {
 	}
 }
 
-// TestAdminDeleteAccountMemoryFirst B26-01：删账号必须"先摘注册表、后清库"。
+// TestAdminDeleteAccountMemoryFirst 删账号必须"先摘注册表、后清库"。
 // 此前顺序 Store.DeleteAccount（清 6 表）→ PurgeAccount → Accounts.Remove 之间存在毫秒级
-// 空窗——在飞提交链（SelectClass 最长 15s）恰在空窗完成时做 B18-M2/B20-01 的"落库前锁内
+// 空窗——在飞提交链（SelectClass 最长 15s）恰在空窗完成时做"落库前锁内
 // 复核 ClientFor 仍存在"，客户端尚未摘除 → 复核放行 → SaveSuccess/SaveRefused 把刚清掉的
 // success/refused 行写回，重启 RestoreDone 假成功、自动引擎永久跳过退选课。
 // 契约：删除成功返回后，accounts 注册表已无该客户端（内存先失效），库内凭据同步清空。
@@ -2082,10 +2082,10 @@ func TestAdminDeleteAccountMemoryFirst(t *testing.T) {
 	_ = tok
 }
 
-// TestAdminSetTargetsWithoutAccountRejects B20-04：管理员会话不带 ?account= 时必须整体拒绝，
+// TestAdminSetTargetsWithoutAccountRejects 管理员会话不带 ?account= 时必须整体拒绝，
 // 绝不让目标落入管理员账号孤儿行——此前 acct 停留在 sessionAccount(r)=管理员名，
 // SetTargetsForAccount(admin, ts) 写进 store.targets 无主行（重启 LoadTargetsForAccount
-// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（B10-04 排序后 admin 可能成"核心账号"）。
+// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（排序后 admin 可能成"核心账号"）。
 // 契约：目标只该属于学生账号；管理员未指定学生账号（且无任何有目标账号可兜底）→ 拒绝。
 // 与 handleElectives/handleState 的"对齐核心账号"不同——目标是写入操作，无法确定归属时
 // 宁可拒绝绝不张冠李戴；若会话绑定学生账号（非管理员名），不受影响照常写入。
@@ -2119,7 +2119,7 @@ func TestAdminSetTargetsWithoutAccountRejects(t *testing.T) {
 }
 
 // TestStudentSetTargetsWithoutAccountOK 学生账号（非管理员名）会话不带 ?account= 时
-// 照常写入自己的目标（B20-04 反向防线：修复只该管管理员，绝不误伤普通学生会话）。
+// 照常写入自己的目标（反向防线：修复只该管管理员，绝不误伤普通学生会话）。
 func TestStudentSetTargetsWithoutAccountOK(t *testing.T) {
 	d := newTestDeps(t)
 	tok := authenticateDirect(t, d, "acct1")

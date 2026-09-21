@@ -977,7 +977,7 @@ func (s *Scheduler) tick() {
 	s.maybeSyncClock(now)
 
 	// 探测闸门：距上次成功探测不足当前阶段间隔且非首次则跳过
-	// open 已在本函数开头取过单次快照（830 行前）——probeIntervalFor 内部不再重取，
+	// open 已在本函数开头取过单次快照（973 行）——probeIntervalFor 内部不再重取，
 	// 与 B33-02"探测间隔判定取单次 open 快照"同策略：热改亚毫秒窗口内立即探测判定与
 	// 节流间隔若各自取 open，可能读到新旧两个不同值（一次放行、一次被节流或反之）。
 	probe := last.IsZero() || now.Sub(last) >= s.probeIntervalForOpen(now, open)

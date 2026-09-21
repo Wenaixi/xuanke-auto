@@ -29,6 +29,14 @@ func TestIsReadErrCoversAllForms(t *testing.T) {
 	if !IsReadErr(&urlError{err: io.EOF}) {
 		t.Fatalf("url.Error 包装的 FIN 应命中（errors.Is 穿透），实际 false")
 	}
+	// 短读形态：正文 Content-Length 未传完就断连（标准库 body.readLocked 对
+	// LimitedReader 短读包装为 ErrUnexpectedEOF；Do 层再包 url.Error，errors.Is 穿透）
+	if !IsReadErr(io.ErrUnexpectedEOF) {
+		t.Fatalf("短读(ErrUnexpectedEOF) 形态应命中 IsReadErr，实际 false")
+	}
+	if !IsReadErr(&urlError{err: io.ErrUnexpectedEOF}) {
+		t.Fatalf("url.Error 包装的短读应命中（errors.Is 穿透），实际 false")
+	}
 	// 超时形态：awaiting headers（请求体已到达、等待响应头超时）
 	timeout := errors.New("Post \"https://x\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)")
 	if !IsReadErr(timeout) {

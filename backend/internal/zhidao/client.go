@@ -281,8 +281,9 @@ const loginUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/53
 // fetchLoginPage 初始化登录会话：GET /login 种下会话 Cookie。
 // 网络瞬时抖动自愈：首请求连接失败重试一次（纯 GET /login 不消耗验证码限额，
 // 不违背"失败即返回不刷限流"既有契约——自愈只覆盖网络层，绝不含验证码重试）。
-// 403/429 同覆盖：Windows 回环长时间 keep-alive 复用濒死连接时服务端可能返回
-// 403/429 而非连接错误（timeout 后连接断开），按同类瞬时抖动自愈一次。
+// 4xx/5xx 归入瞬时抖动重试一次：与连接层自愈独立（GET /login 无副作用、不消耗
+// 验证码；403/429 是服务端响应，重试一次收敛，非连接层自愈语义——仅容忍
+// keep-alive 复用濒死连接时的偶发服务端拒绝，不承诺对限流重试生效）。
 func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, baseURL+"/login", nil)
@@ -294,8 +295,8 @@ func fetchLoginPage(sess *http.Client, ua string, baseURL string) error {
 		resp, err := sess.Do(req)
 		if err == nil {
 			if resp.StatusCode >= 400 {
-				// 4xx/5xx：非 2xx 视为初始化失败（HTTP 层不可解析，无业务 json）
-				// fallthrough 归入"瞬时抖动"语义，重试一次（绝不含验证码重试）
+				// 4xx/5xx：非 2xx 视为初始化失败（HTTP 层不可解析，无业务 json），
+				// 归入瞬时抖动语义重试一次（绝不含验证码重试）
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				if attempt == 2 {
@@ -498,13 +499,14 @@ func isConnErrRetryable(err error) bool {
 // 消费请求体、可能已处理（报名成功但未响应），上抛方应给"可能已处理"的提示而非
 // "失败"——scheduler/api 记日志/状态时区分文案（R59 MINOR-59-02 / R60 MINOR-60-01）。
 // 覆盖三种形态（R60 独立程序实证形态矩阵）：
-//   - RST（有未读数据时 SO_LINGER(0) 关闭）：*net.OpError.Op=="read"（errors.As 穿透
-//     url.Error 包装链命中）
+//   - RST（响应头读取阶段连接重置）：*net.OpError.Op=="read"（errors.As 穿透
+//     url.Error 包装链命中；body 读阶段不产生该包装）
 //   - FIN（服务端读完 body 后正常 Close，真实平台"处理完成未响应"的典型形态）：
 //     url.Error{Err: io.EOF}（不带 net.OpError）→ errors.Is(err, io.EOF)
-//   - 短读（服务端已发响应头但 Content-Length 未传完就断连——响应已开始=比
-//     awaiting headers 更强地"已处理"，标准库 transfer.go 短读包装）：
-//     io.ErrUnexpectedEOF（不带 OpError）→ errors.Is(err, io.ErrUnexpectedEOF)
+//   - 短读（正文读取阶段 Content-Length 未传完就断连——响应已开始=比 awaiting
+//     headers 更强地"已处理"）：body.readLocked（transfer.go:865）对 LimitedReader
+//     短读包装为 io.ErrUnexpectedEOF，Do 层包 url.Error、errors.Is 穿透；该形态
+//     与 RST 在 body 读阶段互斥（RST 由响应头阶段的读失败产生）
 //   - 超时（平台已处理但响应超过客户端 Timeout）：两种 wrap 文案（标准库
 //     client.go:737 等待响应头 / client.go:994 读响应体中途）→ strings.Contains 判定
 //
@@ -517,9 +519,10 @@ func IsReadErr(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
-	// 短读形态：响应头已到达、正文 Content-Length 未传完就断连——平台已开始响应、
-	// 必然已处理完请求（标准库 transfer.go 对未读满 body 的 FIN 包装为
-	// ErrUnexpectedEOF；真实 SelectClass 响应体小、Hijack 直断时该形态最常见）
+	// 短读形态：正文读取阶段 Content-Length 未传完就断连——平台已开始响应、必然已
+	// 处理完请求（标准库 body.readLocked 对 LimitedReader 短读包装为 ErrUnexpectedEOF，
+	// Do 层包 url.Error、errors.Is 穿透命中；真实 SelectClass 响应体小、Hijack 直断时
+	// 该形态最常见，与 RST 在 body 读阶段互斥）
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}

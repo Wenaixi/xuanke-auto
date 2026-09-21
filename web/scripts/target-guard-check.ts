@@ -56,14 +56,26 @@ const nonEmptyState: SchedulerState = {
   token_valid: true,
 }
 deferAssert(
-  "courses 非空 + 有选中 → 推迟",
-  shouldDeferSave(nonEmptyState, true),
+  "courses 非空 + 有选中 + 未回显 → 推迟",
+  shouldDeferSave(nonEmptyState, true, false),
   true
 )
 deferAssert(
   "courses 非空 + 全清空 → 放行",
-  shouldDeferSave(nonEmptyState, false),
+  shouldDeferSave(nonEmptyState, false, false),
   false
+)
+// R63 M-1：已回显完成（echoed=true）稳态——courses 永驻非空 + 有选中，旧目标已合并
+// 进 selected（selected 完整），整包 PUT 与后端一致，放行普通编辑；未回显才推迟
+deferAssert(
+  "courses 非空 + 有选中 + 已回显 → 放行（稳态编辑不闷死）",
+  shouldDeferSave(nonEmptyState, true, true),
+  false
+)
+deferAssert(
+  "首帧未到 + 已回显标志 → 仍推迟（回显未发生整包覆盖）",
+  shouldDeferSave(undefined, true, true),
+  true
 )
 
 // 场景 A（缺陷触发）：旧发布 P1 仍有课 + 新发布 P9 新课 → 必须判"有过期条目"置脏，

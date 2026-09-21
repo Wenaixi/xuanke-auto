@@ -54,9 +54,19 @@ export function cleanStaleSelected<T>(
 // 全清空"——首帧携带旧目标但用户一个都没选 = 清空意图确凿（回显 effect 的 rev>0 且
 // 无任何条目守卫已承认清空语义绝不合并旧目标），放行 PUT []，绝不把清空当"待回显"
 // 打回置脏（否则清空永不落库，返回后旧目标复活=静默撤销）。
+// 第三参数 echoed（回显是否已完成，消费点传 echoedRef.current；R63 M-1）：
+// "courses 非空 && 有选中"只该在"回显尚未完成"时推迟——已回显完成的账号（echoed=true），
+// 后端旧目标已合并进 selected、selected 完整无缺，整包 PUT 与后端一致，继续推迟
+// 会把后续所有编辑永久闷死（courses 永驻非空 + selected 无变化 bailout = 无解锁信号，
+// 编辑永不落库、返回后旧目标覆盖=静默撤销）。稳态（echoed=true）放行普通编辑；
+// 暂态（echoed=false）仍推迟（回显未完成）。首帧未到（stateData===undefined）无条件
+// 推迟保留——回显未发生时 selected 只含用户新改动，整包 PUT 会覆盖删除后端旧目标。
 export function shouldDeferSave(
   stateData: SchedulerState | undefined,
-  hasSelected: boolean
+  hasSelected: boolean,
+  echoed: boolean
 ): boolean {
-  return stateData === undefined || ((stateData.courses?.length ?? 0) > 0 && hasSelected)
+  if (stateData === undefined) return true
+  if (echoed) return false
+  return (stateData.courses?.length ?? 0) > 0 && hasSelected
 }

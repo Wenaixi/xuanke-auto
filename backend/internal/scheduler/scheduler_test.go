@@ -991,7 +991,7 @@ func TestDeletedAccountReloginSuccessDropsState(t *testing.T) {
 	// 复核实测 TokenValidFor/reloginAt 均未写回即可（落库被同一复核门挡住）。
 }
 
-// TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 5s 收紧。
+// TestProbeIntervalFor 分阶段探测间隔：平日 30s、临门与已到点 2s 收紧。
 func TestProbeIntervalFor(t *testing.T) {
 	open := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)
 	s := New(&fakeAccts{c: &fakeClient{}}, &fakeStore{}, open, time.Second)
@@ -1001,15 +1001,15 @@ func TestProbeIntervalFor(t *testing.T) {
 	if got := s.probeIntervalFor(far); got != probeIntervalFar {
 		t.Fatalf("平日应 30s，实际 %v", got)
 	}
-	// 临门：距开放 4 分钟 → 5 秒
+	// 临门：距开放 4 分钟 → 2 秒
 	near := open.Add(-4 * time.Minute)
 	if got := s.probeIntervalFor(near); got != probeIntervalNear {
-		t.Fatalf("临门应 5s，实际 %v", got)
+		t.Fatalf("临门应 2s，实际 %v", got)
 	}
-	// 已到点：开放后 1 分钟 → 5 秒盯守
+	// 已到点：开放后 1 分钟 → 2 秒盯守
 	passed := open.Add(time.Minute)
 	if got := s.probeIntervalFor(passed); got != probeIntervalNear {
-		t.Fatalf("已到点应 5s，实际 %v", got)
+		t.Fatalf("已到点应 2s，实际 %v", got)
 	}
 }
 

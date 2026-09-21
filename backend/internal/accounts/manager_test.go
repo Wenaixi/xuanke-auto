@@ -3,6 +3,7 @@ package accounts
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,32 @@ import (
 
 	"xuanke-auto/backend/internal/zhidao"
 )
+
+// readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环冷启动窗口
+// 前移到夹具构造期（与 api/zhidao 包同款根治——R64 OBSERVE-64-02: accounts 是唯一
+// 无就绪前移的包，R12 全量轮两测试 mock /login 首请求 connectex 正是夹具缺口）。
+// 连接层失败轮询重试（200ms×5），全部失败才上抛由调用方 Fatal。
+func readyProbe(t *testing.T, baseURL string) {
+	t.Helper()
+	const (
+		probeRetries = 5
+		probeDelay   = 200 * time.Millisecond
+	)
+	var lastErr error
+	for i := 0; i <= probeRetries; i++ {
+		resp, err := http.Get(baseURL + "/login")
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return
+		}
+		lastErr = err
+		if i < probeRetries {
+			time.Sleep(probeDelay)
+		}
+	}
+	t.Fatalf("mock 服务器就绪探测失败: %v", lastErr)
+}
 
 // fakeStore 内存假凭据持久化（记录 SaveCredential 调用，供断言"有效登录才落库"）。
 type fakeStore struct {
@@ -44,6 +71,7 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 		}
 	}))
 	t.Cleanup(srv.Close)
+	readyProbe(t, srv.URL)
 	return srv
 }
 
@@ -118,6 +146,7 @@ func gateSrv(t *testing.T) (*httptest.Server, *int32) {
 		}
 	}))
 	t.Cleanup(srv.Close)
+	readyProbe(t, srv.URL)
 	return srv, &calls
 }
 
@@ -200,6 +229,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 		w.Write([]byte(`{"code":0,"isOk":true,"token":"tok-ok"}`))
 	}))
 	t.Cleanup(srv.Close)
+	readyProbe(t, srv.URL)
 	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "", Model: ""}, &fakeStore{})
 
 	// 模拟 initCaptchaAtStartup：配置 ddddocr 引擎（SF_API_KEY 留空的典型部署）

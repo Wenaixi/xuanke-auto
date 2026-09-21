@@ -16,12 +16,17 @@ func init() {
 func TestRecognizeCaptcha(t *testing.T) {
 	socketPreheat() // R52：端口预加热，防冷启动 connectex（同 client_test）
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-key" {
+		// Authorization 断言只针对真实识别路径——readyProbe 探活 GET /login 无
+		// 业务头，命中此断言会把探活当业务请求误报（R70 MINOR-70-02 补探活后实证）。
+		if r.URL.Path == "/chat/completions" && r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("Authorization header 缺失或错误: %q", r.Header.Get("Authorization"))
 		}
 		w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\" abcd \"}}]}"))
 	}))
 	defer srv.Close()
+	// R70 MINOR-70-02：包内仅剩的无探活 mock 首请求宿主（R70 全量 R1 该测试
+	// connectex FAIL 实证）——与 TestCaptchaConcurrency 双保险成族闭环。
+	readyProbe(t, srv.URL)
 
 	got, err := recognizeCaptcha(VisionConfig{BaseURL: srv.URL, APIKey: "test-key", Model: "m", recognizer: NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "test-key", Model: "m"})}, []byte("fake-jpeg"))
 	if err != nil {

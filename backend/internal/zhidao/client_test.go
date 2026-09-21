@@ -159,6 +159,9 @@ func TestLoginNetworkErrorAbortsImmediately(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError) // 登录页 500
 	}))
 	t.Cleanup(srv.Close)
+	// R70 MINOR-70-02：包内仅剩的无探活 mock 首请求宿主——与 TestCaptchaConcurrency
+	// 双保险成族闭环（探活只关心 accept 就绪，500 响应不影响就绪判定）。
+	readyProbe(t, srv.URL)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	if _, err := c.Login("acct", "pwd"); err == nil {
 		t.Fatal("应报错")

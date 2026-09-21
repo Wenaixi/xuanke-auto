@@ -60,7 +60,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
   const { toast } = useToast()
   // 删除账号成功后立即失效账号列表查询（否则 10s 轮询前行不消失）
   const queryClient = useQueryClient()
-  // N3：删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
+  // 删除账号确认态（账号名 + 确认中），用极简黑白 Dialog 二次确认替代 window.confirm
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -712,7 +712,7 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
         // M-E：字段可选声明下 undefined 要保守视为"未识别"——`!== true` 兜底
         // （后端恒下发，但类型契约不排除未来缺键，绝不把 undefined 当"已识别"空展示）。
         { label: "识别开放时间", value: s.open_time_set !== true ? "未识别" : s.open_time },
-        // N3：窗口关闭信号三态——window_closed 字段依赖后端 /api/admin/stats 补发
+        // 窗口关闭信号三态——window_closed 字段依赖后端 /api/admin/stats 补发
         // （统计口径从学生端 /state 对齐），补发前 undefined 走"待命中"，绝不假报关闭。
         {
           label: "窗口状态",

@@ -97,7 +97,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     } catch (err: any) {
       toast({ title: "报名失败", description: err.message || "请求被拒绝", variant: "destructive" })
     } finally {
-      // N2：无论成功失败都强制失效 electives/state 缓存——
+      // 无论成功失败都强制失效 electives/state 缓存——
       // 报名失败（满员/窗口关闭）后名额与按钮状态同样已变化，必须立即刷新，
       // 否则前端显示"还可报名"实则已满，用户看到的是过期数据。
       queryClient.invalidateQueries({ queryKey: ["electives"] })
@@ -752,7 +752,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     stateData?.open_time_known && stateData.open_time
       ? stateData.open_time
       : null
-  // M-1：识别缺席时用 begin_times[0] 兜底（与 Dashboard N1 同构）——同一浏览器
+  // 识别缺席时用 begin_times[0] 兜底（与 Dashboard 同构）——同一浏览器
   // 主看板有确切倒计时、选课大厅全 00 的跨页矛盾收口；识别槽建立后仍以识别真值为准。
   const cd = useTickingCountdown(
     openTimeStr ??

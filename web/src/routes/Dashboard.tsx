@@ -37,7 +37,7 @@ function isFullFallback(c: { status: string; result: string }): boolean {
   return c.status === "failed" && c.result.includes("已满员")
 }
 
-// N10：错误条只在会话真正失效（业务码 401）时显示"请重新登录"。
+// 错误条只在会话真正失效（业务码 401）时显示"请重新登录"。
 // 网络错误/服务端 5xx 会被 react-query 重试，误判为会话失效会让用户无谓重登。
 function isSessionError(err: unknown): boolean {
   return err instanceof ApiError && err.code === 401
@@ -58,7 +58,7 @@ function CollapseSection({
   header: React.ReactNode
   children: React.ReactNode
 }) {
-  // N2：aria-controls 指向的 id 此前是硬编码 "collapse-body"——正文 div 无 id 落位
+  // aria-controls 指向的 id 此前是硬编码 "collapse-body"——正文 div 无 id 落位
   // （悬空，读屏收不到跟随目标），且组件多处实例化（extras 折叠段 + 每个日期组）
   // 时重复 id 违反 DOM 唯一性。useId 保证单实例唯一、零冲突。
   const id = useId()
@@ -114,7 +114,7 @@ function parseDateKey(k: string): number {
   return new Date(k + "T00:00:00").getTime()
 }
 
-// localTodayMs：本地日期零点（N1）。与 parseDateKey 的本地零点同基准——
+// localTodayMs：本地日期零点。与 parseDateKey 的本地零点同基准——
 // toISOString() 恒 UTC，UTC+8 凌晨 00:00-07:59 时拿到的是昨天日期，日期分组
 // "距今天最近在前"排序整体错一档；setHours(0,0,0,0) 锁本地零点无此偏移。
 export function localTodayMs(now: Date = new Date()): number {
@@ -184,7 +184,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // 倒计时组件 target=null 即显全 00 + 过期态，绝不显示编造时间。
   const openTimeStr =
     state?.open_time_known && state.open_time ? state.open_time : null
-  // N1：主倒计时输入 openTimeStr 未识别时用 begin_times[0] 兜底（唯一未来开窗点），
+  // 主倒计时输入 openTimeStr 未识别时用 begin_times[0] 兜底（唯一未来开窗点），
   // 避免"主矩阵全 00 过期态 + 同屏『预计开放时间』显示未来时刻"的自相矛盾；识别槽
   // 建立（open_time_known=true）后仍以识别真值为准，兜底只在识别缺席时生效。
   const cd = useTickingCountdown(

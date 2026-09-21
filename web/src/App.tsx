@@ -14,7 +14,7 @@ const queryClient = new QueryClient({
 })
 
 // 本地会话映射存取：账号名 -> 服务端签发令牌（多账号互不干扰）
-// N4：localStorage 在隐私模式/配额受限时可读不可写，try/catch 静默降级为内存态
+// localStorage 在隐私模式/配额受限时可读不可写，try/catch 静默降级为内存态
 function loadSessions(): Sessions {
   try {
     return JSON.parse(localStorage.getItem("xk_sessions") || "{}")
@@ -27,7 +27,7 @@ function saveSessions(next: Sessions) {
   try {
     localStorage.setItem("xk_sessions", JSON.stringify(next))
   } catch {
-    // N4：存储不可用（隐私模式/配额受限）时静默降级——会话仅存内存，刷新即需重新登录
+    // 存储不可用（隐私模式/配额受限）时静默降级——会话仅存内存，刷新即需重新登录
   }
 }
 // 管理员账号名持久化：后端 XUANKE_ADMIN_NAME 可自定义，登录响应回 adminName——本地
@@ -45,7 +45,7 @@ function saveAdminName(name: string) {
   try {
     localStorage.setItem("xk_admin_name", name)
   } catch {
-    // N4：存储不可用时静默降级，下次登录重新同步
+    // 存储不可用时静默降级，下次登录重新同步
   }
 }
 // 管理员会话令牌持久化：仅由「登录响应带 adminName」写入。刷新后管理页恢复的
@@ -63,7 +63,7 @@ function saveAdminToken(tok: string) {
   try {
     localStorage.setItem("xk_admin_token", tok)
   } catch {
-    // N4：存储不可用时静默降级，下次管理登录重新同步
+    // 存储不可用时静默降级，下次管理登录重新同步
   }
 }
 
@@ -107,7 +107,7 @@ export default function App() {
     setInAdmin(!!adminName)
   }
   // 退出当前账号：仅移除该账号会话，其他账号保留。
-  // M-7：登出前调用后端 /api/logout 作废服务端令牌（浏览器本地删除只是第一步，
+  // 登出前调用后端 /api/logout 作废服务端令牌（浏览器本地删除只是第一步，
   // 令牌被复制/窃取后仍在服务端有效——登出即吊销，杜绝令牌外流残留）。
   const logout = (token: string) => {
     apiLogout(token)

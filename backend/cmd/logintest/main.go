@@ -27,9 +27,6 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Load()
-	if cfg.SFAPIKey == "" {
-		log.Fatal("未设置 SF_API_KEY：验证码识别需要 Vision API Key")
-	}
 
 	// 打开数据库 + 解密主密钥（与主程序完全一致）
 	d, err := db.Open(cfg.DBPath)

@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -88,6 +89,18 @@ func showAboutLinux(td trayData) {
 	}
 	body := "数据库路径：" + dbAbs + "\n监听地址：http://localhost:" + td.port + "\n选课大厅：" + td.url
 	showZenityOrPrint("关于 至道选课自动化", "至道选课自动化\n\n"+body)
+}
+
+// showZenityOrPrint 用 zenity 弹关于对话框（多数 Linux 桌面发行版自带）；
+// 无 zenity（最小化桌面/无 X 环境）时降级打印到控制台，绝不因对话框失败阻塞托盘。
+func showZenityOrPrint(title, body string) {
+	if path, err := exec.LookPath("zenity"); err == nil {
+		cmd := exec.Command(path, "--info", "--title", title, "--text", body)
+		if err := cmd.Run(); err == nil {
+			return
+		}
+	}
+	fmt.Printf("[tray] 关于（无 zenity 降级打印）：%s\n%s\n", title, body)
 }
 
 var _ = strings.Builder{}

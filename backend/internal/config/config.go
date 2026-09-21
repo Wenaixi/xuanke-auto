@@ -145,7 +145,7 @@ func ensureEnvFile(path string) {
 # 管理员口令（首次运行自动生成；删除本行后重启可重新生成随机口令）
 XUANKE_ADMIN_TOKEN=` + admin + `
 
-# 教务登录验证码识别密钥（可选留空；默认识别引擎 vision 才需要密钥，ddddocr 免密钥）
+# 教务登录验证码识别密钥（可选留空；默认识别引擎 ddddocr 免密钥，vision 云识别才需填）
 SF_API_KEY=
 # 识别引擎（ddddocr=默认，本地免密钥无外网；vision=硅基流动云识别，需填 SF_API_KEY）
 XUANKE_CAPTCHA_ENGINE=ddddocr

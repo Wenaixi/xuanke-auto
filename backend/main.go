@@ -188,6 +188,8 @@ func main() {
 	// 解锁自然退出（此前只 systray.Quit() 会让托盘消失而服务活挂后台，见
 	// tray_quit_test.go M86-01 回归钉）。systrayQuit 另一半由托盘文件注入
 	// （systray.Quit）；无托盘平台不注入、quitApplication 判 nil 跳过。
+	// 尽力优雅语义：进程退出会强杀在飞 goroutine（含 spawnChain 网络往返），
+	// 最后时刻的提交结果以重启后重试为准（RestoreDone 只恢复已落库的成功）。
 	srvShutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

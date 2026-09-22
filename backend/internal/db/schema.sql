@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS targets (
   priority INTEGER NOT NULL DEFAULT 0,
   publish_name TEXT NOT NULL DEFAULT '',
   begin_date TEXT NOT NULL DEFAULT '',
-  allow_swap INTEGER NOT NULL DEFAULT 0,
+  allow_swap INTEGER NOT NULL DEFAULT 0, -- 历史遗留死列（换课引擎已移除，保留以兼容旧库形状）
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

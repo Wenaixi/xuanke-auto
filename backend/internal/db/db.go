@@ -75,7 +75,8 @@ func refuseLegacy(d *sql.DB) error {
 	}
 	// 旧 v2 库缺列（targets.priority / task_log.account）——不兼容，提示删除重建
 	// 注意：targets.publish_name/begin_date 不在此列——它们由 migrateAddPublishMeta
-	// 增量迁移补齐，缺列绝不拒绝启动（数据保留契约）。
+	// 增量补齐；targets.allow_swap 是历史遗留死列（换课引擎已移除，全仓零消费），
+	// 保留于 schema 以兼容旧库形状，也保留在缺列清单（缺它=比换课引擎更旧的库）。
 	for _, col := range [][2]string{{"targets", "priority"}, {"targets", "allow_swap"}, {"task_log", "account"}} {
 		ok, err := columnExists(d, col[0], col[1])
 		if err != nil {

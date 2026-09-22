@@ -21,6 +21,16 @@ func TestTrayIconAsset(t *testing.T) {
 	if ico[6] != 32 || ico[7] != 32 {
 		t.Fatalf("ICO 尺寸须 32x32, got %dx%d", ico[6], ico[7])
 	}
+	// ICONDIRENTRY[14:18] dwBytesInRes 须为数据区全量（总长 - 目录头 = 22 后字节数），
+	// 而非偏移值——R79 曾误填 22（offset 值打入 bytesInRes），LoadImageW 实测 FAIL。
+	if want := uint32(len(ico)) - 22; binary.LittleEndian.Uint32(ico[14:18]) != want {
+		t.Fatalf("dwBytesInRes 须 %d, got %d", want, binary.LittleEndian.Uint32(ico[14:18]))
+	}
+	// ICONDIRENTRY[18:22] dwImageOffset 须指向目录后首个数据字节（= 22），
+	// 而非数据区总长——R79 曾把 len(ico)（4286）填入 offset。
+	if off := binary.LittleEndian.Uint32(ico[18:22]); off != 22 {
+		t.Fatalf("dwImageOffset 须 22, got %d", off)
+	}
 	// BITMAPINFOHEADER：biSize=40 / 宽 32 / XOR+AND 双高 64 / planes=1 / bitcount=32
 	dib := ico[22:]
 	if binary.LittleEndian.Uint32(dib[0:4]) != 40 {

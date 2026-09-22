@@ -7,6 +7,7 @@ package main
 // 关于对话框用 Win32 原生 MessageBox（深色系统主题自动暗色，符合项目纯黑极简风格）。
 
 import (
+	"encoding/binary"
 	"path/filepath"
 	"syscall"
 	"unsafe"
@@ -88,15 +89,12 @@ func trayIcon() []byte {
 	ico[7] = height
 	ico[10], ico[11] = 1, 0  // planes
 	ico[12], ico[13] = 32, 0 // bitcount
-	dataOff := headerSize
-	ico[14] = byte(dataOff)
-	ico[15] = byte(dataOff >> 8)
-	ico[16] = byte(dataOff >> 16)
-	ico[17] = byte(dataOff >> 24)
-	ico[18] = byte(len(ico))
-	ico[19] = byte(len(ico) >> 8)
-	ico[20] = byte(len(ico) >> 16)
-	ico[21] = byte(len(ico) >> 24)
+	// ICONDIRENTRY[14:22] 两字段（Microsoft ICO 布局）：[14:18]=dwBytesInRes（数据区
+	// 全量 = len(ico)-22）、[18:22]=dwImageOffset（目录后首个数据字节 = 22）。R79
+	// LoadImageW 实测：两值写反/写错即加载失败（图标不可见）；此前代码把 22 填进
+	// bytesInRes、4286 填进 offset 双重错位。
+	binary.LittleEndian.PutUint32(ico[14:18], uint32(len(ico)-headerSize)) // dwBytesInRes
+	binary.LittleEndian.PutUint32(ico[18:22], uint32(headerSize))          // dwImageOffset
 	// BITMAPINFOHEADER（偏移 22）：biSize=40 / biWidth=32 / biHeight=64(XOR+AND 双高) /
 	// biPlanes=1 / biBitCount=32。字段各 32/32/16/16 位，逐字节铺不越界不串位。
 	dib := ico[22:]

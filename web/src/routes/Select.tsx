@@ -498,7 +498,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的 selected
     // 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack 的 5s
     // 等待只保证"等待期间合并完成"——/state 首帧持续失败超时后，守卫在这里兜住：
-    // 置脏跳过、不 PUT，脏块保留（dirtyRef=true），下次进入/刷新/回显完成后再落库
+    // 置脏跳过、不 PUT，脏块保留在内存 selected（守卫不置 dirtyRef——终局绝不误报
+    // 保存失败），下次进入/刷新/回显完成后再落库
     // （安全方向：绝不静默丢改动）。判据为纯数据（shouldDeferSave 不依赖 echoedRef）：
     // /state 数据到达触发防抖 effect 重跑自愈，唯一解锁不求刷新。
     // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下

@@ -636,6 +636,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       }
       // 脏块被守卫拦下（等无可等）：下轮再试即放行
     }
+    // 终局提示：保存链停手（退避 5 次全失败 / 守卫拦下后无信号）后离开，内存改动
+    // 未落库——明确告知用户，绝不静默。右侧两个可重入 toast（保存失败红条）已随
+    // 阶段结束过期，这里补一次最终落定提示（同 title 去重合并机制防轰炸）。
+    if (dirtyRef.current || savingRef.current || retryState.current.timer !== null) {
+      toast({
+        title: "目标保存失败",
+        description: "改动未落库，返回后将以服务端保存的目标为准",
+        variant: "destructive",
+      })
+    }
     onDone()
   }
   // 退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），

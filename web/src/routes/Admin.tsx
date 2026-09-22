@@ -444,6 +444,13 @@ function CodesTab({
 
       {codesQuery.isLoading ? (
         <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
+      ) : codesQuery.isError ? (
+        <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
+          <span>激活码加载失败（网络异常或服务端不可达）</span>
+          <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+            重试
+          </button>
+        </div>
       ) : codesQuery.data && codesQuery.data.length > 0 ? (
         <div className="max-h-64 overflow-y-auto rounded-[var(--radius-lg)] border border-neutral-900 divide-y divide-neutral-900">
           {codesQuery.data.map((c) => {

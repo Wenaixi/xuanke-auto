@@ -409,18 +409,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     retryState.current.timer = null
     retryState.current.attempt = 0
   }
-  // 守卫拦下（数据缺席/发布重建/联查空/漂移）的脏块与"真实保存失败"（saveNow catch）
-  // 必须分标记：守卫脏块是安全拦截（目标安全，后端旧目标未被抹除），终局 toast 只对
-  // 真实保存失败触发——rev>0 且守卫命中时绝不弹"目标保存失败"误导归因。
-  const guardBlockedRef = useRef(false)
-  // 终局判据：守卫拦截（guardBlockedRef）绝不报"目标保存失败"；dirtyRef 现仅承载
-  // "保存失败置脏"（saveNow catch 与"飞行中标记脏补发"），该值在
-  // finally 补发/成功后清零，handleBack 循环内消费后若仍 true 即真实失败。
-  // 命中返回 false → 终局 toast 不弹；守卫/rev=0 两类误报彻底闭合。
-  const pendingUnsaved = () => {
-    if (guardBlockedRef.current) return false
-    return dirtyRef.current || savingRef.current || retryState.current.timer !== null
-  }
+  // 守卫拦下（数据缺席/发布重建/联查空/漂移）是安全拦截：目标安全、后端旧目标未被
+  // 抹除，且守卫命中不置 dirtyRef——终局 toast 只对"真实保存失败"（dirtyRef，仅
+  // saveNow catch 与飞行中标记补发会置）触发，守卫场景自然不弹，绝无"目标保存失败"
+  // 误导归因（rev>0 亦然）。
+  const pendingUnsaved = () =>
+    dirtyRef.current || savingRef.current || retryState.current.timer !== null
   const scheduleRetry = () => {
     const attempt = retryState.current.attempt
     if (attempt >= 5) return // 连续失败 5 次后停止自动重发（等用户改动触发新一轮）
@@ -510,15 +504,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下
     // 编辑不闷死（selected 已含后端旧目标，整包 PUT 与后端一致），未回显仍推迟。
     if (shouldDeferSave(stateDataRef.current, latestSelectedCount > 0, echoedRef.current)) {
-      guardBlockedRef.current = true
-      return
+      return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
     }
     // 与防抖回调同款消费时刻守卫（同意图，判据从渲染期
     // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
     // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。
     if (publishesRef.current.length === 0 && latestSelectedCount > 0) {
-      guardBlockedRef.current = true // 发布缺席：安全拦截，绝不假清空覆盖；返回绝不误报保存失败
-      return
+      return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
     }
     // 发布集合整体重建后 selected 仍残留旧 publish_id 的非空条目——build()
     // 只遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
@@ -529,7 +521,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 目标永不落库且无任何反馈）。发布重建路径已在回显 effect 随建随清（首选出路），
     // 此处 toast 兜底"清理未覆盖到的旧残留"，并把恢复路径指给用户（刷新后重新选择）。
     if (selectedHasStalePublish(latestSelected, publishesRef.current)) {
-      guardBlockedRef.current = true // selected 残留旧发布：安全拦截，绝不整包覆盖后端旧目标
       if (!unmountedRef.current) {
         toast({
           title: "发布已更新",
@@ -557,14 +548,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     // 这里在消费时刻校验"selectedCount>0 却构建出空集"：数据缺席/错位绝非用户清空
     // 意图，保留脏跳过；selectedCount 只随用户改动所在渲染更新，只会偏保守绝不放过。
     if (targets.length === 0 && latestSelectedCount > 0) {
-      guardBlockedRef.current = true // 联查为空：安全拦截，绝不假清空覆盖；返回绝不误报保存失败
-      return
+      return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
     }
     // 发布集合在"渲染→回调"窗口内重建（id 漂移）时，targets 的 publish_id 已
     // 不属于当前发布集 → 这份快照是错位假清空，绝不 PUT，置脏等下次正确联查再落库。
     if (!targetsUseCurrentPublishes(targets, publishesRef.current)) {
-      guardBlockedRef.current = true // 发布 id 漂移：错位假清空，安全拦截，返回绝不误报保存失败
-      return
+      return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
     }
     targetRef.current = targets
     if (savingRef.current) {
@@ -581,10 +570,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // （publishes 恒空）不在此列——那是防抖/flush 消费时刻双闸的刻意安全方向，
   // 等无可等，绝不强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
   const handleBack = async () => {
-    // 返回前先清守卫拦截标记：三轮 flush 循环内守卫重新命中会再置位；循环结束后若
-    // guardBlockedRef 仍 true 即"本次返回被守卫拦下（数据缺席）"，终局 toast 绝不为
-    // 它弹"目标保存失败"——守卫是安全拦截，目标安全，无需惊扰用户。
-    guardBlockedRef.current = false
     // 消费时刻读 selectedRef 算"当前是否留有选中"（handleBack 无渲染闭包可直接用）：
     // shouldDeferSave 第二参数——首帧携带旧目标但用户已全清空（hasSelected=false）时
     // 放行立即保存，绝不等 5s 又当"待回显"打回（见 handleBack 下方注释的守卫语义）。
@@ -653,10 +638,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 脏块被守卫拦下（等无可等）：下轮再试即放行
     }
     // 终局提示：仅当"用户真实改动过（rev>0）且保存链有真实失败"才提示。判据
-    // pendingUnsaved() 排除守卫拦截（guardBlockedRef）——守卫拦下的假清空脏块是
-    // 安全拦截非保存失败，绝不误报；rev=0（纯浏览/无改动）绝不报"改动未落库"；
-    // savingRef（在飞）/ retryState.timer（退避排队）为"确实未落库"信号，同 title
-    // 去重合并机制防轰炸。
+    // pendingUnsaved() 三信号（dirtyRef 真实失败/savingRef 在飞/timer 退避排队）为
+    // "确实未落库"；守卫拦下的假清空脏块是安全拦截（守卫不置 dirtyRef）绝不误报；
+    // rev=0（纯浏览/无改动）绝不报"改动未落库"。同 title 去重合并机制防轰炸。
     if (revRef.current > 0 && pendingUnsaved()) {
       toast({
         title: "目标保存失败",
@@ -710,8 +694,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 防抖保存不闷死（selected 已含后端旧目标、整包 PUT 与后端一致），未回显仍置脏
       // 等回显合并自愈。
       if (shouldDeferSave(stateDataRef.current, selectedCount > 0, echoedRef.current)) {
-        guardBlockedRef.current = true
-        return
+        return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
       }
       // 防抖回调在 400ms 后执行，读到的是渲染期旧闭包
       // （publishesMissing 恒为本次渲染推算值）。若这期间发布集被清空（开窗瞬间平台
@@ -721,8 +704,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 意图，跳过本次保存保留脏（等发布恢复/下次改动再落库）；selectedCount 只可能
       // 偏保守（用户已清空时为假阳守卫，安全方向），绝不会放过真实假清空。
       if (publishesRef.current.length === 0 && selectedCount > 0) {
-        guardBlockedRef.current = true
-        return
+        return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
       }
       // 防抖消费时刻同款前置守卫——发布集合整体重建后 selected 残留旧 publish_id
       // 非空条目时，build() 只产出新发布课程，整包 PUT 覆盖删除后端已保存的旧目标。
@@ -730,7 +712,6 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 用户主动清空该发布（清空语义绝不复活），不判过期。
       // 命中给明确提示（防抖回调可能迟于卸载执行，卸载后绝不弹 toast 轰炸）。
       if (selectedHasStalePublish(selected, publishesRef.current)) {
-        guardBlockedRef.current = true
         if (!unmountedRef.current) {
           toast({
             title: "发布已更新",
@@ -746,14 +727,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 发布全缺席（构建来源为空的极限情况）时，selectedCount 可能滞后于本次清空
       // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
       if (next.length === 0 && selectedCount > 0) {
-        guardBlockedRef.current = true
-        return
+        return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
       }
       // 防抖消费时刻同样过"发布 id 全数校验"——publishesMissing 是渲染期旧值，只在
       // load 时一次，防抖回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
       if (!targetsUseCurrentPublishes(next, publishesRef.current)) {
-        guardBlockedRef.current = true
-        return
+        return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
       }
       targetRef.current = next
       if (savingRef.current) {

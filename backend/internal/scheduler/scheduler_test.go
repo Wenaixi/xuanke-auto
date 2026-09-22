@@ -1259,7 +1259,7 @@ func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
-// 原 openTime 为未来 1 小时——tick 守卫 702 行 `!opened && !now.After(open)`
+// 原 openTime 为未来 1 小时——tick 提交守卫（零值守卫/未开点守卫）
 // 恒 return，提交循环根本无法抵达（首段断言恒等 pending 超时必红，恒绿假象的另一面"恒红"）。
 // 改为过去时刻：守卫放行提交路径，而探测仍被 lastProbe 节流挡住（不 resetProbe），
 // 真正验证"提交不依赖探测节流"。本次为修复失效契约的测试，非业务代码改动（无红灯需先见）。
@@ -2845,7 +2845,7 @@ func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
 // 成功的胜利状态。锁外复核窗口（最长 15s）内手动路径 TryAcquireSubmit
 // 可抢到已释放的 inflight 位并 MarkDone 置 done+success；复核返回真满后旧实现 `cErr==nil
 // && full` 分支（markFullLocked，无 doneHas 复核）把 success 覆盖成"failed/已满员"并追加
-// 一条假"已满员"日志——与紧邻的"未现满员"分支（1338 行有 doneHas 复核"绝不覆盖胜利状态"）
+// 一条假"已满员"日志——与紧邻的"未现满员"分支（下方 doneHas 复核"绝不覆盖胜利状态"）
 // 不对称，同族竞态对称缺口。手动成功后实时复核不得改变胜利状态，且不再记 full。
 func TestRealtimeFullRecheckKeepsManualSuccess(t *testing.T) {
 	fc := newFakeClient(true)
@@ -3498,9 +3498,9 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 
 // TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight 实测归因：
 // 成功分支在任何分支判定前已统一清 inflight（含身份复核失败路径），
-// 与失效分支 1479/1490 行对称——"成功分支身份复核失败时 inflight 位漏删"的
+// 与失效分支（ErrUnauthorized 段）对称——"成功分支身份复核失败时 inflight 位漏删"的
 // 原审查结论不成立。本测试固化为回归：同名重建后旧链成功身份复核失败，
-// 重建账号的 inflight[classID] 必须不存在（PurgeAccount 已清 + 1502 行统一清位）。
+// 重建账号的 inflight[classID] 必须不存在（PurgeAccount 已清 + SelectClass 返回后统一清位）。
 // 修复前同样绿（该行本就存在），故非 TDD 红→绿项，作为契约回归测试落库。
 func TestDeletedAccountRebuiltSameNameChainSuccessDropsInflight(t *testing.T) {
 	oldClient := newFakeClient(true)

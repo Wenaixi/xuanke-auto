@@ -65,7 +65,7 @@ deferAssert(
   shouldDeferSave(nonEmptyState, false, false),
   false
 )
-// R63 M-1：已回显完成（echoed=true）稳态——courses 永驻非空 + 有选中，旧目标已合并
+// 已回显完成（echoed=true）稳态——courses 永驻非空 + 有选中，旧目标已合并
 // 进 selected（selected 完整），整包 PUT 与后端一致，放行普通编辑；未回显才推迟
 deferAssert(
   "courses 非空 + 有选中 + 已回显 → 放行（稳态编辑不闷死）",

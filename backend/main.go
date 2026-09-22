@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -181,7 +183,24 @@ func main() {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	// 托盘「退出」= 整进程退出：mQuit 点击 → quitApplication() 先优雅关服务
+	// 再退图标。srv.Shutdown 使本行 ListenAndServe 返回 ErrServerClosed，main
+	// 解锁自然退出（此前只 systray.Quit() 会让托盘消失而服务活挂后台，见
+	// tray_quit_test.go M86-01 回归钉）。systrayQuit 另一半由托盘文件注入
+	// （systray.Quit）；无托盘平台不注入、quitApplication 判 nil 跳过。
+	srvShutdown := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("[main] 服务优雅关闭异常: %v", err)
+		}
+	}
+	setExitActions(srvShutdown, nil)
 	if err := srv.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[main] 托盘「退出」触发，服务已优雅关闭")
+			return
+		}
 		log.Fatalf("服务启动失败: %v", err)
 	}
 }

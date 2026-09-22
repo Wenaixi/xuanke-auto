@@ -47,6 +47,10 @@ func onReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("退出", "退出程序")
 
+	// 注入「退图标」半段（「关服务」半段由 main 注入，见 quit_shared.go 注释）。
+	// 退出 = 整进程退出：quitApplication() 先关服务再退图标，与 Windows 同语义。
+	setExitActions(nil, systray.Quit)
+
 	go func() {
 		for {
 			select {
@@ -55,7 +59,9 @@ func onReady() {
 			case <-mAbout.ClickedCh:
 				showAboutLinux(trayCurrent)
 			case <-mQuit.ClickedCh:
-				systray.Quit()
+				// 退出 = 整进程退出：先优雅关服务再退图标（两个注入点按
+				// quit_shared.go 顺序保证），与 Windows 托盘同一条退出语义。
+				quitApplication()
 				return
 			}
 		}

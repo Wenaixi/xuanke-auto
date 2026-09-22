@@ -174,10 +174,11 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     refetchInterval: 30000,
   })
 
-  // 删除整页每秒 setTick——倒计时内部自 tick（useTickingCountdown），
-  // 日志列表/状态卡片不再每秒全量重建。数组改为 hooks 层的派生常量，杜绝重复计算
-  // useTickingCountdown 收敛到 lib/ 共用（Dashboard/Select 同一实现），
-  // 且 effect 依赖 [] 时 interval 内读 Date.now() 而非闭包 state——绝不随 target 卡旧值。
+  // 删除整页每秒 setTick——倒计时收敛 useTickingCountdown 自 tick（Dashboard/Select
+  // 同实现）。注意：hook 在路由组件顶层调用，每秒 setNow 实际触发本路由组件整树
+  // 重渲染（React 语义不可绕过），DOM 差分成本可忽略；「只重渲染倒计时一处」需
+  // 拆 memo 叶子组件（潜在优化，非当前承诺）。日志/状态卡不再每秒全量重建，数组
+  // 改为 hooks 层派生常量，杜绝重复计算。
   const courses = state?.courses ?? []
   // 开放时间唯一事实源 = 平台 beginTimes 自动识别（不可配置，识别槽已含"识别过期"
   // 语义：窗口关闭/批次已过后识别值视为无效）；识别不到 = 未知（open_time_known=false），

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react"
 
 // useTickingCountdown 选课开放倒计时（Dashboard/Select 收敛共用）：
-// 内部自 tick（每秒 setNow），只重渲染这一个 hook 的消费处，绝不带动整页重建。
+// 内部自 tick（每秒 setNow）。注意：hook 在路由组件顶层被消费，每秒 setNow
+// 实际触发宿主路由组件整树重渲染（React 语义：useState 归属宿主即重渲染宿主），
+// DOM 差分成本可忽略；「只重渲染倒计时一处」需拆 memo 叶子组件（潜在优化，
+// 非当前承诺——本注释已按实现如实口径，不再声称局部渲染）。
 // - target 为开窗时刻字符串（null 表示未同步到/已清空，直接视为过期）
 // - 过期（diff<=0）返回全 00 + isExpired=true；数字带前导零（等宽雕刻感）
 export function useTickingCountdown(target: string | null) {

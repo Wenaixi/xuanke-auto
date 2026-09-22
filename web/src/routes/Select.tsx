@@ -201,8 +201,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     setEchoDone(false)
   }
 
-  // 本地每秒刷新倒计时：收敛到 lib/useTickingCountdown 自 tick 组件，
-  // 整页只重渲染倒计时一处，Tab 徽章"已锁定"计数随 selected 变化即时更新，无需每秒重算。
+  // 本地每秒刷新倒计时：收敛到 lib/useTickingCountdown 自 tick 组件。
+  // 注意：hook 在路由组件顶层调用，每秒 setNow 触发的是本路由组件整树重渲染
+  // （React 语义：useState 归属宿主即重渲染宿主），DOM 差分成本可忽略；
+  // 如需真正做到「只重渲染倒计时一处」需拆独立 memo 叶子组件（潜在优化，非当前承诺）。
 
   // 进入页面时自动回显已保存的目标课程（含多备选优先级）。
   // 函数体内统一用 prev 构造初始值，杜绝 `const initial` 遮蔽

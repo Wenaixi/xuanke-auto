@@ -165,11 +165,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 信号（见防抖回调内的回显未完成守卫与 echo effect 的空 courses 分支）。
   const [echoDone, setEchoDone] = useState(false)
   // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
-  // 注意：F7 修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
+  // 注意：修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
   // 镜像 ref：handleBack/flushTargets 是渲染闭包捕获的 async 函数，等待循环期间
   // 用户新改动触发重渲染不会更新闭包里的 selected/rev 快照——flush 在消费时刻
-  // 必须读 ref 拿最新状态，否则旧快照会把等待期间的新改动覆盖删除（32-01）。
+  // 必须读 ref 拿最新状态，否则旧快照会把等待期间的新改动覆盖删除。
   const selectedRef = useRef(selected)
   selectedRef.current = selected
   const revRef = useRef(rev)
@@ -609,12 +609,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       await new Promise((r) => setTimeout(r, 0))
     }
     for (let i = 0; i < 3; i++) {
-      // 33-01：首帧未到等满 5s 后，若回显合并仍未发生（/state 持续失败），继续 flush
+      // 首帧未到等满 5s 后，若回显合并仍未发生（/state 持续失败），继续 flush
       // 是唯一合法路径——flush 内的假清空守卫（发布缺席 + 已有选中）仍拦截覆盖；若
       // /state 已经成功但 courses 非空，回显 effect 必然已合并完成，5s 内 echoedRef 已
       // 置位，条件不成立。本循环 flush 消费最新 ref 快照。
       flushTargets()
-      // 32-01：flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——
+      // flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——
       // 若等待窗口刚有用户改动（pick 的 setRev → effect 挂 400ms 防抖 timer，异步）
       // 此刻还没触发，onDone 同步卸载会清掉 timer，改动静默丢失。等一帧后复查
       // revRef：与本轮 flush 消费的一致才真正静止；又变了就多等一轮 flush 收敛。
@@ -962,7 +962,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   (c.class_room_name &&
                     c.class_room_name.toLowerCase().includes(search.toLowerCase()))
 
-                // 32-02：max_count=0（名额未公布，与 isFull 判据同源）不能被
+                // max_count=0（名额未公布，与 isFull 判据同源）不能被
                 // "仅看有余量"当已满滤掉——0 表示未公布而非满员，课程照常显示。
                 const matchAvailable = !onlyAvailable || c.max_count === 0 || c.selected_count < c.max_count
                 return matchSearch && matchAvailable

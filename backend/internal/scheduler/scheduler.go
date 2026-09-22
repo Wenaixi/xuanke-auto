@@ -43,11 +43,11 @@ type CourseStatus struct {
 
 // SchedulerState 对外状态快照。
 type SchedulerState struct {
-	// OpenTime 当前账号的"预计开放时间"——优先取管理员配置，未配置时取该账号
-	// 自己探测识别的 beginTimes（全校共享同一开窗时刻）；识别不到且无配置 = 未知
-	// （零值 + OpenTimeKnown=false），前端展示"未识别到开放时间"，绝不显示编造时间。
+	// OpenTime 当前账号的"预计开放时间"——来自该账号自己探测识别的 beginTimes
+	//（全校共享同一开窗时刻）；识别不到 = 未知（零值 + OpenTimeKnown=false），
+	// 前端展示"未识别到开放时间"，绝不显示编造时间。
 	OpenTime      time.Time      `json:"open_time"`
-	OpenTimeKnown bool           `json:"open_time_known"` // 是否已识别到开放时间（管理员配置或平台 beginTimes）
+	OpenTimeKnown bool           `json:"open_time_known"` // 是否已识别到开放时间（平台 beginTimes 自动识别）
 	WindowOpened  bool           `json:"window_opened"`
 	WindowClosed  bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
 	TokenValid    bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
@@ -75,9 +75,8 @@ const (
 // probeIntervalFor 按当前时刻与开放时间的距离选择探测间隔。
 // 平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒盯守，保证平台一开立即被发现。
 // 窗口已关闭（开放时间已过且快照为空）时降回 30 秒——窗口结束后再高频盯守毫无意义，
-// 只会浪费请求并刷屏日志；若管理员热改开放时间到未来（新一轮），临门判断仍优先生效。
-// open 为零值（全新部署未配置 / 管理员 PUT open_time="" 显式解除
-// 窗口机制，runtime.reparse 置 OpenTimeParsed 零值）时提前返回远间隔——此前
+// 只会浪费请求并刷屏日志；平台若开放新一轮选课（识别槽刷新到未来），临门判断仍优先生效。
+// open 为零值（全新部署未识别到开放时间 / 识别槽被显式清除）时提前返回远间隔——此前
 // `now.After(open.Add(-nearWindow))` 对零值 open 恒 true 落入临门 2s 分支，且快照非空时
 // WindowClosed 恒 false，探测永久 2s 高频轰炸 findElectivesData（"访问过于频繁"熔断形态）；
 // 提交已被零值守卫挂起，探测也必须同步降频，行为不自相矛盾。

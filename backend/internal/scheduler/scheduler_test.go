@@ -3417,8 +3417,8 @@ func TestMaybeReloginDeletedAccountSkipsMaps(t *testing.T) {
 // 缺 sameClientFor 指针身份比对——同名重建（注册表现指针已换）后旧链命中新身份的
 // ErrUnauthorized 会把 maybeRelogin 写进新身份（无辜消耗登录预算）。
 // 与同函数成功/失效/风控/窗口关闭/确证满员五分支对称，此处补齐最后一块裸露写点。
-// 修复前（1575 行只有 ClientFor）：红——fakeAccts.Relogin 被触发（relogCalls == 1）。
-// 修复后（1575 行换 sameClientFor）：绿——relogCalls == 0，reloginFail 无残留。
+// 修复前（实时复核入口只有 ClientFor）：红——fakeAccts.Relogin 被触发（relogCalls == 1）。
+// 修复后（实时复核入口换 sameClientFor）：绿——relogCalls == 0，reloginFail 无残留。
 func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *testing.T) {
 	// 与 TestDeletedAccountRebuiltSameNameChainDropsRealtimeRecheckFull 同款夹具：
 	// perAccount 让 acct1 在删除+重建后返回新 *fakeClient（指针身份必然不等）。

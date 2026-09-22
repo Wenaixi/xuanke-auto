@@ -97,13 +97,15 @@ func trayIcon() []byte {
 	ico[19] = byte(len(ico) >> 8)
 	ico[20] = byte(len(ico) >> 16)
 	ico[21] = byte(len(ico) >> 24)
-	// BITMAPINFOHEADER（偏移 22）
+	// BITMAPINFOHEADER（偏移 22）：biSize=40 / biWidth=32 / biHeight=64(XOR+AND 双高) /
+	// biPlanes=1 / biBitCount=32。字段各 32/32/16/16 位，逐字节铺不越界不串位。
 	dib := ico[22:]
 	dib[0], dib[1], dib[2], dib[3] = 40, 0, 0, 0 // biSize
-	dib[4], dib[5] = width, 0
-	dib[6], dib[7] = byte(height*2), byte((height*2)>>8) // XOR + AND 双高
-	dib[8], dib[9] = 1, 0                                // planes
-	dib[10], dib[11] = 32, 0                             // bitcount
+	dib[4], dib[5], dib[6], dib[7] = width, 0, 0, 0
+	dib[8], dib[9] = byte(height*2), byte((height*2)>>8) // XOR + AND 双高
+	dib[10], dib[11] = 0, 0
+	dib[12], dib[13] = 1, 0  // biPlanes
+	dib[14], dib[15] = 32, 0 // biBitCount
 	// 像素：全黑（alpha 255 不透明） + 中心 3x3 白点
 	pixStart := headerSize + dibHeaderSize
 	for y := 0; y < height; y++ {

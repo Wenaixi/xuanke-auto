@@ -684,9 +684,17 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         </CardContent>
       </Card>
 
-      {!loaded && (
+      {!loaded && !configQuery.isError && (
         <p className="text-[11px] text-amber-400/90">
           配置加载中——表单尚未回填，保存按钮已锁定，避免用初始空值覆盖生效配置
+        </p>
+      )}
+      {configQuery.isError && (
+        <p className="text-[11px] text-neutral-300">
+          配置加载失败（网络异常或服务端不可达）——
+          <button onClick={() => configQuery.refetch()} className="underline hover:text-white">
+            重试
+          </button>
         </p>
       )}
       <Button
@@ -746,7 +754,14 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
         <CardDescription className="text-xs text-neutral-500">每 5 秒自动刷新</CardDescription>
       </CardHeader>
       <CardContent className="pt-3">
-        {!s ? (
+        {statsQuery.isError ? (
+          <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
+            <span>运行状态加载失败（网络异常或服务端不可达）</span>
+            <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              重试
+            </button>
+          </div>
+        ) : !s ? (
           <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
         ) : (
           <div className="divide-y divide-neutral-900">
@@ -871,6 +886,13 @@ function AccountsTab({
             </tbody>
           </table>
         </div>
+      ) : accountsQuery.isError ? (
+        <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3">
+          <span>账号数据加载失败（网络异常或服务端不可达）</span>
+          <button onClick={() => accountsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+            重试
+          </button>
+        </div>
       ) : (
         <div className="p-8 text-center text-xs text-neutral-600">暂无账号</div>
       )}
@@ -908,6 +930,13 @@ function LogsTab({ account, sessionToken }: { account: Account; sessionToken: st
               <span className="text-neutral-400 break-all">{l.result}</span>
             </div>
           ))
+        ) : logsQuery.isError ? (
+          <div className="py-8 text-center text-neutral-300 flex flex-col items-center gap-3">
+            <span className="font-mono">日志加载失败（网络异常或服务端不可达）</span>
+            <button onClick={() => logsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              重试
+            </button>
+          </div>
         ) : (
           <div className="py-8 text-center text-neutral-600 font-mono">暂无日志</div>
         )}

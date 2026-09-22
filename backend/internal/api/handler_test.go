@@ -149,6 +149,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 
 	accts := accounts.New(zhi.URL, zhidao.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"}, st)
 	sessions := session.New(time.Hour)
+	t.Cleanup(sessions.Close) // 防清扫协程泄漏（O82-01：55 测试 × 高频轮次产生数百常驻协程窗口）
 
 	// 开放时间不做任何配置注入：识别槽（平台 beginTimes）是唯一事实源，New 传零值。
 	// 调度器窗口判定/探测/展示全部走自动识别。

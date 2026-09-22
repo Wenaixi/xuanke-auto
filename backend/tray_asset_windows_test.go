@@ -21,9 +21,10 @@ func TestTrayIconAsset(t *testing.T) {
 	if ico[6] != 32 || ico[7] != 32 {
 		t.Fatalf("ICO 尺寸须 32x32, got %dx%d", ico[6], ico[7])
 	}
-	// ICONDIRENTRY[14:18] dwBytesInRes 须为数据区全量（总长 - 目录头 = 22 后字节数），
-	// 而非偏移值——R79 曾误填 22（offset 值打入 bytesInRes），LoadImageW 实测 FAIL。
-	if want := uint32(len(ico)) - 22; binary.LittleEndian.Uint32(ico[14:18]) != want {
+	// ICONDIRENTRY[14:18] dwBytesInRes 须为数据区全量。按格式语义三加数独立推导
+	// （BITMAPINFOHEADER 40 + 像素 32×32×4=4096 + AND mask 32×4=128 = 4264）——
+	// 与实现"总长减头部"不同源，字段值算错（像素字节数写错/offset 值打进）仍能红。
+	if want := uint32(4264); binary.LittleEndian.Uint32(ico[14:18]) != want {
 		t.Fatalf("dwBytesInRes 须 %d, got %d", want, binary.LittleEndian.Uint32(ico[14:18]))
 	}
 	// ICONDIRENTRY[18:22] dwImageOffset 须指向目录后首个数据字节（= 22），

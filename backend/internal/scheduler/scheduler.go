@@ -96,7 +96,7 @@ func (s *Scheduler) probeIntervalForOpen(now time.Time, open time.Time) time.Dur
 		// 从未开过窗 + 开放时间已过 + 空快照 = 幽灵窗口（平台窗口从未
 		// 开启或已关闭且从未被探测确认）——2s 高频盯守只剩烧平台（"访问过于频繁"熔断
 		// 形态）。以空快照 + 时钟失败裕量判定幽灵窗口，探测降回 30s 常态（窗口若真开、
-		// 管理员热改开放时间，临门判断自然重新收紧）。黄金期不受影响：开窗瞬间探测
+		// 平台下发新一轮 beginTimes，临门判断自然重新收紧）。黄金期不受影响：开窗瞬间探测
 		// 确认 opened=true，绝不走此分支。
 		if now.After(open) && s.WindowClosed() {
 			return probeIntervalFar // 开放时间已过且窗口关闭：降回 30s
@@ -925,7 +925,7 @@ func (s *Scheduler) windowClosedLocked() bool {
 	// 从未被确认开过（主判据 requirement 不满足 + 时钟正常时兜底不触发），
 	// 2s 探测/1s 提交恒高频轰炸 findElectivesData + 报名接口（防轰炸契约闭环缺口）。
 	// 首次探测（acctDataAt 全空）不计数、不误伤；runs≥3 即连续三轮空快照确证"从未开过"，
-	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、管理员热改开放时间，success 探测
+	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、平台下发新一轮 beginTimes，success 探测
 	// 数据后势必推开始 open 实况、emptyRuns 归零自愈。
 	if !open.IsZero() && !s.state.WindowOpened && s.state.EmptyProbeRuns >= 3 {
 		return true

@@ -1439,7 +1439,7 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 		t.Fatalf("窗口关闭后应 30s 探测，实际 %v", got)
 	}
 
-	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（管理员热改新一轮的防守场景）
+	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（平台下发新一轮 beginTimes 的防守场景）
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
 	s2.mu.Lock()
 	s2.state.WindowOpened = true // 开过窗（关闭判定前提）

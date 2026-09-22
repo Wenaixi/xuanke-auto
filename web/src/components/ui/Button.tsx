@@ -36,6 +36,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={cn(
           "inline-flex items-center justify-center gap-2 select-none font-medium transition-all duration-150 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100",
+          // 键盘焦点可见性：global.css「基础交互重置」对 button 统一 outline:none 抹掉
+          // 原生 focus，此处补 focus-visible ring 作补偿——Tab 键盘导航的焦点环可见，
+          // 鼠标点击不显示（focus-visible 语义），全站 Button 一次收敛（无障碍基线）。
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cyan)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
           variantStyles[variant],
           sizeStyles[size],
           className

@@ -182,6 +182,7 @@ type fakeClient struct {
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，持锁复核测试用）
 	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，在飞竞态测试用）
 	fullErr     error  // 实时人数复核错误（命中 token 失效测试用）
+	findBlock   func() // FindElectives 阻塞钩子（模拟慢网络，在飞探测身份切换测试用）
 }
 
 // SyncServerTime 可控时钟对齐：返回预置偏差或错误（时钟失败回退测试用）。
@@ -205,10 +206,18 @@ func (f *fakeClient) setOpen(open bool) {
 
 func (f *fakeClient) FindElectives() (*zhidao.ElectivesData, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.err != nil {
-		return nil, f.err
+		err := f.err
+		f.mu.Unlock()
+		return nil, err
 	}
+	if f.findBlock != nil {
+		findBlock := f.findBlock
+		f.mu.Unlock()
+		findBlock() // 锁外阻塞：模拟真实网络往返耗时，不持 fakeClient.mu
+		f.mu.Lock()
+	}
+	defer f.mu.Unlock()
 	// 深拷贝后返回：调用方在锁外遍历 Publishes，避免与 setAllOpened 并发写 InDateRange 触发数据竞争
 	cp := *f.data
 	cp.Publishes = make([]zhidao.Publish, len(f.data.Publishes))

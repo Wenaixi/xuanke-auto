@@ -371,8 +371,9 @@ function CodesTab({
       {/* 生成区 */}
       <div className="flex flex-col sm:flex-row items-end gap-3 p-3 rounded-[var(--radius-lg)] border border-neutral-900 glass">
         <div className="flex-1 flex flex-col gap-1.5">
-          <label className="text-xs text-neutral-400">生成数量（1-100）</label>
+          <label htmlFor="admin-code-count" className="text-xs text-neutral-400">生成数量（1-100）</label>
           <Input
+            id="admin-code-count"
             type="number"
             min={1}
             max={100}
@@ -382,8 +383,9 @@ function CodesTab({
           />
         </div>
         <div className="flex-1 flex flex-col gap-1.5">
-          <label className="text-xs text-neutral-400">每个可用次数</label>
+          <label htmlFor="admin-code-uses" className="text-xs text-neutral-400">每个可用次数</label>
           <Input
+            id="admin-code-uses"
             type="number"
             min={1}
             value={uses}
@@ -600,8 +602,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         </CardHeader>
         <CardContent className="pt-3 grid gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-neutral-400">接口地址</label>
+            <label htmlFor="admin-config-base-url" className="text-xs text-neutral-400">接口地址</label>
             <Input
+              id="admin-config-base-url"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder="https://api.siliconflow.cn/v1"
@@ -609,10 +612,11 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-neutral-400">
+            <label htmlFor="admin-config-api-key" className="text-xs text-neutral-400">
               密钥{loaded?.vision_api_key_masked ? `（当前 ${loaded.vision_api_key_masked}，留空不改）` : ""}
             </label>
             <Input
+              id="admin-config-api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -621,8 +625,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-neutral-400">模型</label>
+            <label htmlFor="admin-config-model" className="text-xs text-neutral-400">模型</label>
             <Input
+              id="admin-config-model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="Qwen/Qwen3-VL-30B-A3B-Instruct"
@@ -671,8 +676,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
             </p>
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-neutral-400">识别并发上限（默认 1，串行）</label>
+            <label htmlFor="admin-config-concurrency" className="text-xs text-neutral-400">识别并发上限（默认 1，串行）</label>
             <Input
+              id="admin-config-concurrency"
               type="number"
               min={1}
               max={16}

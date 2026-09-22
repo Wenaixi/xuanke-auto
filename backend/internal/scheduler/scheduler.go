@@ -844,13 +844,22 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// 只在下发非空 begin_times 时覆盖（新批次热更仍生效）。
 	// 写入必须在 s.mu 锁内（与 tick/openTimeForLocked 持锁读并发）——map 无锁并发
 	// 读写是 Go 数据竞争（runtime 可 throw），识别槽是调度器核心读路径（每 300ms tick）。
-	if len(data.BeginTimes) > 0 {
-		s.mu.Lock()
-		s.openTimeDetected[acct] = data.BeginTimes[0]
+	// M88-01 身份防线：本函数入口已取 client 指针，但网络往返（FindElectives 最长
+	// 15s）期间账号可能被删号 + 同名重建（新 *zhidao.Client 顶替）。回写段锁内必须
+	// 复核"当前注册表客户端仍是发起探测时的同一身份"（与 spawnChain 六分支
+	// sameClientFor 同族）——否则旧链会把过期快照写进重建账号的 acctData 条目、
+	// 或覆盖其 openTimeDetected 识别槽（年级串线/过期数据一帧可见，下个探测自愈）。
+	// 已删（ClientFor 不存在）或指针身份已变 → 整体放弃回写。
+	s.mu.Lock()
+	if !s.sameClientFor(acct, client) {
 		s.mu.Unlock()
+		log.Printf("[scheduler] 账号 %s 探测返回时身份已变或已删除，放弃写回快照", acct)
+		return data, nil
+	}
+	if len(data.BeginTimes) > 0 {
+		s.openTimeDetected[acct] = data.BeginTimes[0]
 		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}
-	s.mu.Lock()
 	if s.acctData == nil {
 		s.acctData = make(map[string]*zhidao.ElectivesData)
 		s.acctDataAt = make(map[string]time.Time)

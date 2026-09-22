@@ -1259,22 +1259,26 @@ func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 
 // TestWindowOpenSubmitsWithoutProbeReset 窗口开启后提交不依赖探测节流复位：
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
-// 原 openTime 为未来 1 小时——tick 提交守卫（零值守卫/未开点守卫）
-// 恒 return，提交循环根本无法抵达（首段断言恒等 pending 超时必红，恒绿假象的另一面"恒红"）。
-// 改为过去时刻：守卫放行提交路径，而探测仍被 lastProbe 节流挡住（不 resetProbe），
-// 真正验证"提交不依赖探测节流"。本次为修复失效契约的测试，非业务代码改动（无红灯需先见）。
+// 关键构造：open 取未来 5 秒（而非过去时刻）——tick 提交守卫
+// `!opened && !now.After(open)` 对过去 open 恒放行（黄金期兜底刻意语义），
+// 窗口未开（探测 InDateRange=false）时也会提交，首段 pending 断言即被 connection reset
+// 破坏（实测 90 次 4 FAIL 的抖动源）。未来 open + opened=false 使提交正确挂起；
+// setAllOpened 后手动 resetProbe 让下一 tick 探测立即读新数据置 opened=true，
+// 提交才开始——探测节流仍不挡提交（lastProbe 新近、分支 B 对未来 open 不触发）。
 func TestWindowOpenSubmitsWithoutProbeReset(t *testing.T) {
 	fc := newFakeClient(false)
 	fc.selectErr[61115] = errors.New("connection reset") // 提交失败（网络类，会走实时人数复核路径）
-	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Second), 10*time.Millisecond)
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(5*time.Second), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
 	defer s.Stop()
 
 	// 等首次探测完成（窗口未开，状态 pending，探测正常跑过一次）
 	waitStatusAcct(t, s, "acct1", 61115, "pending", 2*time.Second)
-	// 窗口开启：此时 lastProbe 仍是最新（未 resetProbe）——探测被 30s 节流挡住，但提交必须每 1 秒重试
+	// 窗口开启：手动复位探测节流（lastProbe 清零）让下一 tick 探测新数据置 opened，
+	// 提交此后经正常 1s 闸门重试——探测节流复位与否与提交解耦
 	setAllOpened(fc)
+	s.resetProbe()
 	waitStatusAcct(t, s, "acct1", 61115, "failed", 3*time.Second)
 
 	// 清除错误：下一次 1 秒重试应成功（全程不 resetProbe，纯粹靠提交闸门）

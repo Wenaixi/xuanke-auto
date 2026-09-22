@@ -754,16 +754,7 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
         <CardDescription className="text-xs text-neutral-500">每 5 秒自动刷新</CardDescription>
       </CardHeader>
       <CardContent className="pt-3">
-        {statsQuery.isError ? (
-          <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
-            <span>运行状态加载失败（网络异常或服务端不可达）</span>
-            <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-              重试
-            </button>
-          </div>
-        ) : !s ? (
-          <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
-        ) : (
+        {s ? (
           <div className="divide-y divide-neutral-900">
             {rows.map((r) => (
               <div key={r.label} className="py-2.5 flex items-center justify-between text-xs">
@@ -789,6 +780,15 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
               </span>
             </div>
           </div>
+        ) : statsQuery.isError ? (
+          <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
+            <span>运行状态加载失败（网络异常或服务端不可达）</span>
+            <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              重试
+            </button>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
         )}
       </CardContent>
     </Card>
@@ -919,7 +919,9 @@ function LogsTab({ account, sessionToken }: { account: Account; sessionToken: st
         </CardDescription>
       </CardHeader>
       <div className="p-4 max-h-[28rem] overflow-y-auto text-xs space-y-2">
-        {logs && logs.length > 0 ? (
+        {logsQuery.isLoading ? (
+          <div className="py-8 text-center text-xs text-neutral-600">加载中...</div>
+        ) : logs && logs.length > 0 ? (
           logs.map((l) => (
             <div key={l.id} className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-4 border-b border-neutral-900/60 pb-2 font-mono">
               <span className="text-neutral-600 text-[11px] shrink-0">{l.created_at}</span>

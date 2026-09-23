@@ -369,12 +369,12 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				s.syncing = false
 				if err != nil {
 					s.syncFailStreak++
-					s.lastSyncFailAt = time.Now() // 失败落地即记录，退避 30s
+					s.lastSyncFailAt = s.nowAlignedLocked() // 失败落地即记录，退避 30s（对齐钟，判读侧 :342 同基准——LOW-132-01 混用孤岛收敛）
 					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
 					// 时钟失败时刻留档——幽灵窗口判定只读
 					// syncFailStreak（≥3 且开放时间已过），本字段写而不读，与成功路径的
 					// 清零对称保留（失败/恢复时刻留档，便于未来按时间差精细调参）。
-					s.syncFailedWindow = time.Now()
+					s.syncFailedWindow = s.nowAlignedLocked() // 对齐钟同上（失败留档与 lastSyncFailAt 同基准）
 					// 到达 3 次后只把校准偏差复位（回退到本地时钟），
 					// 绝不在此清零 streak——旧实现同一临界区先 ++ 再清零，外部读取方
 					// （WindowClosed 持同一把锁）永远读不到 3（值域恒 {0,1,2}），时钟兜底

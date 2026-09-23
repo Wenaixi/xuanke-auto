@@ -1507,6 +1507,55 @@ func TestServerClockAlignment(t *testing.T) {
 	}
 }
 
+// TestClockSyncFailureBackoffUsesAlignedClock 时钟失败退避的时间基必须与判读侧一致
+// （LOW-132-01 契约打磨）：lastSyncFailAt 落库用对齐钟 nowAlignedLocked，而非本地钟
+// time.Now()——判读侧 maybeSyncClock:342 用 `now.Sub(lastSyncFailAt)`（now 为调用方
+// 传入的 nowAligned），若写入用本地钟则同一退避窗口出现 ~clockOffset 的基准混用孤岛。
+// 断言：预置 clockOffset=5s 后触发一次失败同步落地，lastSyncFailAt 应 ≈ nowAligned
+// （本地钟 +5s），而非本地钟。
+func TestClockSyncFailureBackoffUsesAlignedClock(t *testing.T) {
+	fc := newFakeClient(false)
+	fc.mu.Lock()
+	fc.syncErr = errors.New("网络故障")
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now(), time.Second)
+	s.SetClockOffsetForTest(5 * time.Second)
+
+	// 首发失败并等落地（与 TestClockSyncNoRetryWithinBackoff 同款等待契约）
+	s.maybeSyncClock(time.Now())
+	wait := time.Now().Add(3 * time.Second)
+	for {
+		s.mu.Lock()
+		busy := s.syncing
+		s.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(wait) {
+			t.Fatal("首次失败同步未在 3 秒内落地")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	s.mu.Lock()
+	failAt := s.lastSyncFailAt
+	alignedNow := s.nowAlignedLocked()
+	s.mu.Unlock()
+	if failAt.IsZero() {
+		t.Fatal("失败同步后 lastSyncFailAt 应已记录")
+	}
+	// 对齐钟写入 → failAt ≈ alignedNow 且快于本地钟约 5s；本地钟写入 → failAt ≈ time.Now()
+	if diff := alignedNow.Sub(failAt); diff < -500*time.Millisecond || diff > 500*time.Millisecond {
+		t.Fatalf("lastSyncFailAt 应与对齐钟一致（偏差 <500ms），实际差 %v", diff)
+	}
+	// 关键反证：混合基孤岛（写入本地/读对齐）会在此显形——failAt 若仍是
+	// time.Now()（本地钟）则相对本地钟 ≈0s；对齐钟写入则相对本地钟提前 ≈clockOffset(5s)。
+	// 判「未提前 ≥0.5s」即仍在用本地钟（>=0 说明 failAt 不晚于本地 now=本地钟写入）。
+	if localDiff := time.Since(failAt); localDiff > -500*time.Millisecond {
+		t.Fatalf("lastSyncFailAt 应约等于对齐钟（相对本地钟提前约 5s），实际相对本地钟 %v——写入侧仍用 time.Now()", localDiff)
+	}
+}
+
 // TestClockSyncNoRetryWithinBackoff 时钟对齐失败后必须有失败退避——
 // 失败期间每个 tick 绝不再重复发起 SyncServerTime（此前 lastSyncTime 恒零时
 // 快路径被绕过、每 300ms tick 都裸打同步，网络故障期轰炸）。

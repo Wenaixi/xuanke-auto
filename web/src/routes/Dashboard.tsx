@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect, useId } from "react"
+﻿import { memo, useMemo, useState, useEffect, useId } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
 import type { Account, CourseStatus, ElectivesData, LogEntry, SchedulerState } from "../types"
@@ -86,6 +86,35 @@ function CollapseSection({
     </div>
   )
 }
+
+// memo 化倒计时叶子：仅依赖四个数字字符串 props。宿主路由组件每秒 setNow 引发的
+// 重渲染到这里被 React bail out（props 引用未变）——整树 770 行 DOM 不再每秒重建，
+// 只有这 4 个数字文本节点重渲染（本文件顶部注释由「拆 memo 叶子组件潜在优化」转为
+// 落地实现，注释口径同步：不再声称"只重渲染倒计时一处"需拆分，已拆）。
+// eslint-disable-next-line react-refresh/only-export-components
+function CountdownMatrix({ days, hours, minutes, seconds }: { days: string; hours: string; minutes: string; seconds: string }) {
+  return (
+    <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
+      <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
+        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{days}</span>
+        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">天</span>
+      </div>
+      <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
+        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{hours}</span>
+        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">时</span>
+      </div>
+      <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
+        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{minutes}</span>
+        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">分</span>
+      </div>
+      <div className="rounded-[var(--radius-sm)] glass border border-neutral-700 glass-strong p-3 sm:p-5 flex flex-col items-center">
+        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{seconds}</span>
+        <span className="text-[11px] text-neutral-400 font-mono uppercase mt-1">秒</span>
+      </div>
+    </div>
+  )
+}
+const MemoCountdownMatrix = memo(CountdownMatrix)
 
 // relativeCountdown 折叠行内联时间摘要：主矩阵 useTickingCountdown 每秒 tick 驱动
 // 整页重渲染（lib effect 无条件 setInterval(1000)），折叠行渲染期直接算 Date.now()
@@ -175,10 +204,12 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   })
 
   // 删除整页每秒 setTick——倒计时收敛 useTickingCountdown 自 tick（Dashboard/Select
-  // 同实现）。注意：hook 在路由组件顶层调用，每秒 setNow 实际触发本路由组件整树
-  // 重渲染（React 语义不可绕过），DOM 差分成本可忽略；「只重渲染倒计时一处」需
-  // 拆 memo 叶子组件（潜在优化，非当前承诺）。日志/状态卡不再每秒全量重建，数组
-  // 改为 hooks 层派生常量，杜绝重复计算。
+  // 同实现）。hook 在路由组件顶层调用，每秒 setNow 必触发本路由组件重渲染（React
+  // 语义不可绕过）；每秒变化的 cd.* 已收敛到 MemoCountdownMatrix 叶子（组件自身
+  // props/state 无变化即 bail out，重渲染成本从整树降到单个叶子）。折叠行实时标签
+  // 也由这次 tick 驱动（见 relativeCountdown 注释），是叶子外仅有的 cd 派生位——
+  // 主矩阵叶子化后宿主重渲染虽仍发生但 diff 范围已显著收窄，日志/状态卡不再每秒
+  // 全量重建，数组改为 hooks 层派生常量，杜绝重复计算。
   const courses = state?.courses ?? []
   // 开放时间唯一事实源 = 平台 beginTimes 自动识别（不可配置，识别槽已含"识别过期"
   // 语义：窗口关闭/批次已过后识别值视为无效）；识别不到 = 未知（open_time_known=false），
@@ -360,41 +391,12 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {/* 四格等宽大字数字矩阵：纯黑白极简雕刻质感 */}
-                  <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
-                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
-                        {cd.days}
-                      </span>
-                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
-                        天
-                      </span>
-                    </div>
-                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
-                        {cd.hours}
-                      </span>
-                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
-                        时
-                      </span>
-                    </div>
-                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
-                        {cd.minutes}
-                      </span>
-                      <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">
-                        分
-                      </span>
-                    </div>
-                    <div className="rounded-[var(--radius-sm)] glass border border-neutral-700 glass-strong p-3 sm:p-5 flex flex-col items-center">
-                      <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">
-                        {cd.seconds}
-                      </span>
-                      <span className="text-[11px] text-neutral-400 font-mono uppercase mt-1">
-                        秒
-                      </span>
-                    </div>
-                  </div>
+                  {/* 四格等宽大字数字矩阵：纯黑白极简雕刻质感。整格抽成 memo 叶子——
+                      每秒 cd 变化的只有这 4 个数字，memo 让路由组件每秒 tick 不再重渲染
+                      770 行整树（React 语义：cd 归属路由宿主必重渲染宿主，但叶子 memo
+                      后宿主因 props/state 无变化而快速 bail out，重渲染成本从整树降到
+                      一个叶子）。 */}
+                  <MemoCountdownMatrix days={cd.days} hours={cd.hours} minutes={cd.minutes} seconds={cd.seconds} />
 
                   {/* 极简纯粹时间提示 */}
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs text-neutral-400 pt-3 border-t border-neutral-900 gap-2 font-mono">

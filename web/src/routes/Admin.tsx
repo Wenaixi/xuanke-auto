@@ -467,10 +467,10 @@ function CodesTab({
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[10px] text-neutral-600 font-mono hidden sm:inline">{c.created_at}</span>
-                  <button onClick={() => onCopy(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="复制">
+                  <button onClick={() => onCopy(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="复制" aria-label="复制">
                     {copied === c.code ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
-                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除">
+                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除" aria-label="删除">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>

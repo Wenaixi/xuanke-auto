@@ -777,7 +777,7 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 	if acct != "" && len(s.acctTargets[acct]) > 0 {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			snappedAt := s.acctDataAt[acct]
-			if !snappedAt.IsZero() && time.Since(snappedAt) <= snapshotTTL {
+			if !snappedAt.IsZero() && s.nowAlignedLocked().Sub(snappedAt) <= snapshotTTL {
 				return d, true
 			}
 		}
@@ -792,13 +792,13 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 			// "无目标账号回退全局帧"的"快、无网络开销"只对**从未有过专属帧**的纯浏览成立；
 			// 对曾有过专属帧但已过期的中间态，回退并不比刷新快，且数据是错年级）。
 			// 修复：过期专属帧 → 必须返回 false 触发刷新，绝不回退全局帧。
-			if time.Since(s.acctDataAt[acct]) <= snapshotTTL {
+			if s.nowAlignedLocked().Sub(s.acctDataAt[acct]) <= snapshotTTL {
 				return data, true
 			}
 			return nil, false
 		}
 	}
-	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+	if s.lastData == nil || s.nowAlignedLocked().Sub(s.lastDataAt) > snapshotTTL {
 		return nil, false
 	}
 	return s.lastData, true
@@ -878,7 +878,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.lastData == nil || time.Since(s.lastDataAt) > snapshotTTL {
+	if s.lastData == nil || s.nowAlignedLocked().Sub(s.lastDataAt) > snapshotTTL {
 		return nil, false
 	}
 	return s.lastData, true
@@ -1868,7 +1868,7 @@ func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason strin
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			data = d
-			fresh = s.acctDataAt[acct] != (time.Time{}) && time.Since(s.acctDataAt[acct]) <= snapshotTTL
+			fresh = s.acctDataAt[acct] != (time.Time{}) && s.nowAlignedLocked().Sub(s.acctDataAt[acct]) <= snapshotTTL
 		}
 	}
 	if data == nil || !fresh {

@@ -1507,6 +1507,33 @@ func TestServerClockAlignment(t *testing.T) {
 	}
 }
 
+// TestSnapshotTTLUsesAlignedClock 快照 TTL 判读侧必须与写入侧同用对齐钟
+// （R133-01，与 LOW-132-01 同族反向混用孤岛）：写入侧 acctDataAt 已用
+// nowAligned（:835/:864/:1116/:966），判读侧若用 time.Since（本地钟）则
+// 预置 clockOffset=5s 时节流窗/过期判定差出 5s。断言：快照写入已过 43s
+// （超过 40s TTL）时，对齐钟判读应正确判"已过期"触发刷新，而非本地钟把
+// 43-5=38s 误判为 fresh。
+func TestSnapshotTTLUsesAlignedClock(t *testing.T) {
+	fc := newFakeClient(false)
+	s := New(&fakeAccts{c: fc, perAccount: map[string]*fakeClient{"acct1": fc}}, &fakeStore{}, time.Now(), 10*time.Millisecond)
+	s.SetClockOffsetForTest(5 * time.Second)
+	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+
+	// 注入快照并把时间戳置为「43 秒前的对齐钟」（真实已过 TTL）
+	s.mu.Lock()
+	s.acctData["acct1"] = fc.data
+	s.acctDataAt["acct1"] = s.nowAlignedLocked().Add(-43 * time.Second)
+	s.lastData = fc.data
+	s.lastDataAt = s.acctDataAt["acct1"]
+	s.mu.Unlock()
+
+	// 判读侧应判"已过期"→ (nil,false) 触发刷新；旧实现 time.Since 本地钟读
+	// 38s ≤40s 误判 fresh
+	if _, ok := s.ElectivesSnapshotFor("acct1"); ok {
+		t.Fatal("快照已过 43s（>40s TTL）应按过期触发刷新，实际判 fresh——判读侧仍在用本地钟 time.Since")
+	}
+}
+
 // TestClockSyncFailureBackoffUsesAlignedClock 时钟失败退避的时间基必须与判读侧一致
 // （LOW-132-01 契约打磨）：lastSyncFailAt 落库用对齐钟 nowAlignedLocked，而非本地钟
 // time.Now()——判读侧 maybeSyncClock:342 用 `now.Sub(lastSyncFailAt)`（now 为调用方

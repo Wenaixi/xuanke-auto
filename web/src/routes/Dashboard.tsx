@@ -145,7 +145,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           : 3000,
   })
 
-  const { data: logs } = useQuery({
+  const { data: logs, isError: logsErr } = useQuery({
     queryKey: ["logs", sessionToken],
     queryFn: () => api<LogEntry[]>("/logs", { session: sessionToken }),
     // 澄清：logs 降频读组件闭包 state（/state 查询数据）即新鲜——
@@ -694,7 +694,17 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             </div>
 
             <div className="p-4 max-h-64 overflow-y-auto text-xs space-y-2">
-              {logs && logs.length > 0 ? (
+              {/* 失败/加载独立态：/logs 查询失败与加载期绝不伪装成"无日志"（OBSERVE-106-02）——
+              网络挂断/服务端不可达时应显加载失败提示而非 NO RECENT LOGS（调度日志静默隐身）。 */}
+              {logsErr ? (
+                <div className="py-8 text-center text-xs font-mono text-neutral-300">
+                  日志加载失败（网络异常或服务端不可达）
+                </div>
+              ) : !logs ? (
+                <div className="py-8 text-center text-neutral-600 text-xs font-mono">
+                  日志加载中...
+                </div>
+              ) : logs.length > 0 ? (
                 logs.map((l) => (
                   <div
                     key={l.id}

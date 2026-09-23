@@ -179,7 +179,7 @@ export default function Login({ onLogin }: Props) {
 
               {/* 错误提示框 */}
               {error && (
-                <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
+                <div role="alert" className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -270,7 +270,7 @@ export default function Login({ onLogin }: Props) {
                 </div>
 
                 {activateError && (
-                  <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
+                  <div role="alert" className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-white shrink-0" />
                     <span>{activateError}</span>
                   </div>

@@ -317,7 +317,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
 
         {/* 错误提示条 */}
         {!stateLoading && stateErr && isSessionError(stateErr) && (
-          <div className="rounded-[var(--radius-sm)] border border-neutral-800 glass-strong p-4 text-xs flex items-center justify-between text-neutral-300">
+          <div role="alert" className="rounded-[var(--radius-sm)] border border-neutral-800 glass-strong p-4 text-xs flex items-center justify-between text-neutral-300">
             <div className="flex items-center gap-2">
               <XCircle className="h-4 w-4 shrink-0 text-white" />
               <span>当前登录凭据已失效，请重新进行账户认证</span>

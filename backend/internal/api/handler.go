@@ -347,6 +347,11 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 		// 故障时退避恒从 30s 重来，平台锁号防线失效）。失效标记由 maybeRelogin 自身置位。
 		if errors.Is(err, zhidao.ErrUnauthorized) {
 			d.Sched.MaybeRelogin(acct)
+			// B110-01：手动失败分支补库内审计日志——与自动链失败必落 AppendLog 对称，
+			// 手动 token 失效同样要在 /api/logs 留痕（否则事后无法核对动作结果）。
+			if err := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); err != nil {
+				log.Printf("[api] 手动报名失效日志落库失败: %v", err)
+			}
 			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
 			return
 		}
@@ -354,8 +359,17 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 		// 文案——与 scheduler 自动链同款，避免"read tcp ..."生硬
 		// 网络错误误导用户（平台可能已成功处理这次报名）。
 		if zhidao.IsReadErr(err) {
+			// read 类「请求已发出结果未知」最需留痕（B110-01）——事后要能在
+			// /api/logs 核对动作到底成没成，零库行会让审计链断裂。
+			if aErr := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 报名请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
+				log.Printf("[api] 手动报名 read 失败日志落库失败: %v", aErr)
+			}
 			writeJSON(w, 1, nil, "报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
 			return
+		}
+		// 其余业务失败同样落库审计（B110-01 对称补齐）
+		if aErr := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 手动报名失败: "+err.Error(), false); aErr != nil {
+			log.Printf("[api] 手动报名失败日志落库失败: %v", aErr)
 		}
 		writeJSON(w, 1, nil, err.Error())
 		return
@@ -415,13 +429,25 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 		// 平台锁号防线失效），它只该用于"手动登录成功"的 issueSession 恢复路径。
 		if errors.Is(err, zhidao.ErrUnauthorized) {
 			d.Sched.MaybeRelogin(acct)
+			// B110-01：退选失败分支对称补库内审计日志（与报名路径、自动链失败同语义）
+			if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
+				log.Printf("[api] 手动退选失效日志落库失败: %v", aErr)
+			}
 			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
 			return
 		}
 		// 退选路径与报名路径对称区分 read 文案
 		if zhidao.IsReadErr(err) {
+			// read 类「请求已发出结果未知」最需留痕（B110-01）
+			if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 退选请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
+				log.Printf("[api] 手动退选 read 失败日志落库失败: %v", aErr)
+			}
 			writeJSON(w, 1, nil, "退选请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
 			return
+		}
+		// 其余业务失败同样落库审计（B110-01 对称补齐）
+		if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 手动退选失败: "+err.Error(), false); aErr != nil {
+			log.Printf("[api] 手动退选失败日志落库失败: %v", aErr)
 		}
 		writeJSON(w, 1, nil, err.Error())
 		return

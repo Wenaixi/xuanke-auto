@@ -1792,6 +1792,139 @@ func TestHandleElectivesSelectAndExit(t *testing.T) {
 	}
 }
 
+// TestManualElectiveFailureAppendsLog 手动报名/退选失败分支必须落库内审计日志
+// （B110-01）——与自动链失败必落 setStateLocked(failed) + AppendLog 对称：手动失败
+// 只 writeJSON 回显、零 AppendLog，尤其 read 类「请求已发出结果未知」场景最需留痕
+// 却零库行（事后无法在 /api/logs 核对动作到底成没成）。
+// 修复前此测试红（失败后 /api/logs 查不到该动作）；修复后绿。
+func TestManualElectiveFailureAppendsLog(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	// 填充快照（正常 mock），再切 mock 让报名/退选返回业务失败（code=1）
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+	d.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/selectElectivesClass"),
+			strings.HasSuffix(r.URL.Path, "/exitElectivesClass"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 1, "isOk": false, "msg": "业务失败"})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "currentYearTermList": []any{
+				map[string]any{"schoolYear": 2026, "schoolTerm": 1, "selected": true},
+			}})
+		}
+	})
+
+	// 手动报名失败
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("业务失败手动报名应返回业务错误: %d %v", code, j)
+	}
+	logs, err := d.store.LoadLogs("acct1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundSel := false
+	for _, l := range logs {
+		if l.Action == "select" && l.ClassID == 61115 && !l.IsOK {
+			foundSel = true
+			break
+		}
+	}
+	if !foundSel {
+		t.Fatal("手动报名失败后应落库失败审计日志（B110-01），实际零失败日志行")
+	}
+
+	// 手动退选失败
+	code, j = doJSONAuth(t, d.api, "POST", "/api/electives/select/exit", `{"class_id":61115}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("业务失败手动退选应返回业务错误: %d %v", code, j)
+	}
+	logs, err = d.store.LoadLogs("acct1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundExit := false
+	for _, l := range logs {
+		if l.Action == "exit" && l.ClassID == 61115 && !l.IsOK {
+			foundExit = true
+			break
+		}
+	}
+	if !foundExit {
+		t.Fatal("手动退选失败后应落库失败审计日志（B110-01），实际零失败日志行")
+	}
+}
+
+// TestManualElectiveReadErrAppendsLog 手动报名/退选 read 类错误（请求已发出、平台
+// 可能已处理）是最需留痕的失败场景——结果未知、事后要能在 /api/logs 核对——必须
+// 落库失败审计日志（B110-01 的 read 类分支）。
+// 修复前此测试红；修复后绿。
+func TestManualElectiveReadErrAppendsLog(t *testing.T) {
+	d := newTestDeps(t)
+	tok := authenticateDirect(t, d, "acct1")
+
+	if _, err := d.sched.ProbeForAccount("acct1"); err != nil {
+		t.Fatalf("填充快照失败: %v", err)
+	}
+	// mock 报名接口 FLUSH+Hijack 直断（真实 read 错误形态，复用 TestHandleElectivesSelectReadErrMessage 手法）
+	d.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/electives/select"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "currentYearTermList": []any{
+				map[string]any{"schoolYear": 2026, "schoolTerm": 1, "selected": true},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/findElectivesData"):
+			json.NewEncoder(w).Encode(map[string]any{"code": 0, "selectElectivesData": []any{
+				map[string]any{
+					"publishId": 3225, "publishName": "高二年体育", "inDateRange": true,
+					"canSelect": 1, "hasSelected": 0, "electivesClassList": []any{
+						map[string]any{
+							"id": 61115, "course_name": "健美操", "selected_count": 0,
+							"max_count": 36, "can_select": true, "btn_type": 2,
+						},
+					},
+				},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/selectElectivesClass"),
+			strings.HasSuffix(r.URL.Path, "/exitElectivesClass"):
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, _ := hj.Hijack()
+				conn.Close()
+			}
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"code": 1, "msg": "unknown " + r.URL.Path})
+		}
+	})
+
+	// 手动报名 read 错误 → 应落失败审计日志
+	code, j := doJSONAuth(t, d.api, "POST", "/api/electives/select", `{"class_id":61115,"course_name":"健美操"}`, tok)
+	if code != 200 || j["code"].(float64) != 1 {
+		t.Fatalf("read 错误手动报名应返回业务错误: %d %v", code, j)
+	}
+	logs, err := d.store.LoadLogs("acct1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, l := range logs {
+		if l.Action == "select" && l.ClassID == 61115 && !l.IsOK {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("手动报名 read 类失败后应落库失败审计日志（B110-01 read 类），实际零失败日志行")
+	}
+}
+
 // TestAdminDeleteAccountNoBodyOK DELETE /api/admin/accounts 无 body（标准 REST
 // 客户端 curl/Postman/脚本默认行为）必须可用——此前只给 codes 的 DELETE 放行空 body，
 // 账号删除同为"DESTROY + 空 body 合法"语义却被 requireJSONBody 门挡成 403。

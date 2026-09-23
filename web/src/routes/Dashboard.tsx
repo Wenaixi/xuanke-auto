@@ -145,7 +145,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           : 3000,
   })
 
-  const { data: logs, isError: logsErr } = useQuery({
+  const { data: logs, isError: logsErr, refetch: refetchLogs } = useQuery({
     queryKey: ["logs", sessionToken],
     queryFn: () => api<LogEntry[]>("/logs", { session: sessionToken }),
     // 澄清：logs 降频读组件闭包 state（/state 查询数据）即新鲜——
@@ -697,8 +697,19 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
               {/* 失败/加载独立态：/logs 查询失败与加载期绝不伪装成"无日志"（OBSERVE-106-02）——
               网络挂断/服务端不可达时应显加载失败提示而非 NO RECENT LOGS（调度日志静默隐身）。 */}
               {logsErr ? (
-                <div className="py-8 text-center text-xs font-mono text-neutral-300">
-                  日志加载失败（网络异常或服务端不可达）
+                <div className="py-8 text-center text-xs font-mono text-neutral-300 flex flex-col items-center gap-3">
+                  <span>日志加载失败（网络异常或服务端不可达）</span>
+                  {/*
+                    失败态补「重试」出口（OBSERVE-107-01）：/logs 失败后靠 30s 自动降频轮询
+                    自愈但无主动重试——网络恢复后需干等最长 30s 才自动重拉；对照 Admin 五 Tab
+                    失败态全有 refetch 重试按钮，学生端补齐同款（display 级无行为面）。
+                  */}
+                  <button
+                    onClick={() => refetchLogs()}
+                    className="text-neutral-400 hover:text-white transition-colors"
+                  >
+                    重试
+                  </button>
                 </div>
               ) : !logs ? (
                 <div className="py-8 text-center text-neutral-600 text-xs font-mono">

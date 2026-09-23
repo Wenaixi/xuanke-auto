@@ -71,11 +71,21 @@ func (d *Deps) secureEncrypt(v string) (string, error) {
 }
 
 // writeJSON 统一 JSON 响应：{"code":0,"data":...,"msg":""}
+// apiResponse 响应体显式 struct（替代 map[string]any 装箱）：
+// 编译期已知字段 → json 反射 struct（有序）而非 map 无序遍历，装箱从 3 次降到 0；
+// benchmark 实证 alloc 15→6/op、内存 720→192 B/op。字段恒输出（无 omitempty），
+// nil data 仍序列化为 null，与旧 map 行为逐字节兼容（见 writejson_bench_test.go）。
+type apiResponse struct {
+	Code int    `json:"code"`
+	Data any    `json:"data"`
+	Msg  string `json:"msg"`
+}
+
 // 项目长期约定：业务码放 body.code，HTTP 状态恒 200（前端契约只读 body）。保持此语义，
 // 故 writeJSON 自身不写 HTTP 状态码——只用于"业务失败仍 200"的正常路径。
 func writeJSON(w http.ResponseWriter, code int, data any, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
+	json.NewEncoder(w).Encode(apiResponse{Code: code, Data: data, Msg: msg})
 }
 
 // writeJSONStatus 与 writeJSON 同款响应体，且额外写真实 HTTP 状态码。
@@ -85,7 +95,7 @@ func writeJSON(w http.ResponseWriter, code int, data any, msg string) {
 func writeJSONStatus(w http.ResponseWriter, status, code int, data any, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{"code": code, "data": data, "msg": msg})
+	json.NewEncoder(w).Encode(apiResponse{Code: code, Data: data, Msg: msg})
 }
 
 // LoginRequest 登录请求体（教务账密，无部署口令——激活码已取代登录口令 gate）。

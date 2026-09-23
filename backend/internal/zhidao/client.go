@@ -443,7 +443,11 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 
 	resp, err := httpDo(c.http, req)
 	if err != nil {
-		return nil, err
+		// 连接层失败（dial/write connectex 等）时标准库 http.Client.Do 返回的
+		// *url.Error 文本原样回放完整请求 URL——本 URL 的 ?idToken= 参数即会话
+		// token 的权威载体，错误经包装链进入日志/库表/前端回显会整体泄露凭证。
+		// 统一在此剥 URL（保留底层判型语义），调用方无需各自处理。
+		return nil, sanitizeError(err)
 	}
 	data, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -554,6 +558,38 @@ func IsReadErr(err error) bool {
 // GetBody 重放完整 body（不双报）。read 错误不重试（见 httpDo），此路径不可达。
 func cloneReq(req *http.Request) *http.Request {
 	return req.Clone(req.Context())
+}
+
+// sanitizerErr 脱敏包装：改写 Error() 文本（剥掉含 token 的完整请求 URL），
+// Unwrap 下沉到底层未包装错误——isConnErrRetryable / IsReadErr 的 errors.As/Is
+// 穿透判型不受影响（判型只依赖底层 net.OpError/io.EOF/超时文案，不依赖 URL）。
+type sanitizerErr struct {
+	msg string
+	err error
+}
+
+func (e *sanitizerErr) Error() string { return e.msg }
+func (e *sanitizerErr) Unwrap() error { return e.err }
+
+// sanitizeError 脱敏网络层错误：标准库 http.Client.Do 返回的 *url.Error 文本
+// 原样回放完整请求 URL（doRequest 把会话 token 拼进 ?idToken= URL 参数通道），
+// 该错误经错误包装链进入磁盘日志/库内 task_log/前端回显时完整泄露会话凭证
+// （B101-01）。这里把 url.Error 文本改写为"Op 底层描述"（不含 URL），同时
+// 保留 Unwrap 链到底层错误——判型函数穿透不变。非 url.Error（业务错误/纯文本
+// 错误）原样透传绝不改写（错误文案契约不误伤）；captcha 等静态 URL 路径无
+// token 不需脱敏，只有 doRequest 的 URL 走 token 参数通道。
+func sanitizeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	if ue.Op == "" { // 标准库 url.Error 恒有 Op，此处仅防御
+		return &sanitizerErr{msg: ue.Err.Error(), err: ue.Err}
+	}
+	return &sanitizerErr{msg: ue.Op + " " + ue.Err.Error(), err: ue.Err}
 }
 
 // ReloginIfNeeded 若当前 token 已失效，用保存账密重新登录并换新 token。

@@ -830,13 +830,13 @@ function AccountsTab({
         <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
       ) : accountsQuery.data && accountsQuery.data.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full text-sm border-collapse" aria-label="账号列表">
             <thead>
               <tr className="border-b border-neutral-900">
-                <th className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">账号</th>
-                <th className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">目标课程</th>
-                <th className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">已选成功</th>
-                <th className="h-10 px-4 text-right align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">操作</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">账号</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">目标课程</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">已选成功</th>
+                <th scope="col" className="h-10 px-4 text-right align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">操作</th>
               </tr>
             </thead>
             <tbody>

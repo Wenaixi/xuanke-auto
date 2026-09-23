@@ -811,7 +811,7 @@ func (c *Client) ExitClass(classID int) (string, error) {
 }
 
 // CountEntry 实时人数（findElectivesStudentCount）。
-// 字段实证（对照 legacy/website-source 真实 select.js 轮询回调 + HAR）：响应仅确证
+// 字段实证（对照 archive/legacy/website-source 真实 select.js 轮询回调 + HAR）：响应仅确证
 // id/selectedCount/auditedCount 三键——真实前端只读这 3 个（`t.id` 匹配、`t.selectedCount`
 // 写 selected_count 列、`t.auditedCount` 写 audited_count 列），全文件 0 处消费 maxCount，
 // 两 HAR 也无该接口请求/响应样本。maxCount 按"平台未下发"判定：JSON 静默忽略恒 0。

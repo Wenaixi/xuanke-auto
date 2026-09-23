@@ -1123,7 +1123,7 @@ Expected: 全 PASS
 cd backend
 # 删旧库（不兼容旧数据）
 Remove-Item data/xuanke.db, data/.master_key -Force -ErrorAction SilentlyContinue
-$env:XUANKE_ADMIN_TOKEN = "test-placeholder"
+$env:XUANKE_ADMIN_TOKEN = "<测试占位口令>"
 go run . &
 ```
 

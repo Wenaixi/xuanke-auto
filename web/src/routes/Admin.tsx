@@ -183,13 +183,19 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
           </TabsList>
 
           <TabsContent value="codes">
-            <CodesTab account={account} sessionToken={sessionToken} onCopy={copy} copied={copied} />
+            <CodesTab
+              account={account}
+              sessionToken={sessionToken}
+              onCopy={copy}
+              copied={copied}
+              activeTab={activeTab}
+            />
           </TabsContent>
           <TabsContent value="config">
             <ConfigTab account={account} sessionToken={sessionToken} />
           </TabsContent>
           <TabsContent value="stats">
-            <StatsTab account={account} sessionToken={sessionToken} />
+            <StatsTab account={account} sessionToken={sessionToken} activeTab={activeTab} />
           </TabsContent>
           <TabsContent value="accounts">
             <AccountsTab
@@ -197,10 +203,11 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
               sessionToken={sessionToken}
               onSelectAccount={onSelectAccount}
               onAskDelete={(acct) => setPendingDelete(acct)}
+              activeTab={activeTab}
             />
           </TabsContent>
           <TabsContent value="logs">
-            <LogsTab account={account} sessionToken={sessionToken} />
+            <LogsTab account={account} sessionToken={sessionToken} activeTab={activeTab} />
           </TabsContent>
         </Tabs>
 
@@ -294,11 +301,13 @@ function CodesTab({
   sessionToken,
   onCopy,
   copied,
+  activeTab,
 }: {
   account: Account
   sessionToken: string
   onCopy: (c: string) => void
   copied: string
+  activeTab: string
 }) {
   const { toast } = useToast()
   const [count, setCount] = useState(5)
@@ -310,13 +319,13 @@ function CodesTab({
   // 后端报"不存在"假失败），与选课大厅手动操作 actionLoading 同款结构
   const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set())
 
-  // queryKey 必须含 account——管理员会话令牌在切换目标账号后复用
-  // 同一浏览器令牌，若缓存只按令牌分键，另一账号的轮询数据会覆盖本账号视图。
-  // （会话级服务端数据本就按 sessionAccount 过滤，本地缓存键必须跟随同一维度。）
+  // 激活码列表轮询门控：本 Tab 激活时才轮询（5s），切走即停摆——管理页
+  // 停留期间只有当前 Tab 的查询在跑，减少后端无谓轮询带宽（与 accounts
+  // 10s / 学生端 window_closed 降频同族） 。切换瞬间停摆不丢缓存，切回恢复。
   const codesQuery = useQuery({
     queryKey: ["admin-codes", account, sessionToken],
     queryFn: () => api<ActivationCode[]>("/admin/codes", { session: sessionToken }),
-    refetchInterval: 5000,
+    refetchInterval: activeTab === "codes" ? 5000 : false,
   })
 
   const generate = async () => {
@@ -750,11 +759,13 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
 
 // ---- 运行状态 ----
 
-function StatsTab({ account, sessionToken }: { account: Account; sessionToken: string }) {
+function StatsTab({ account, sessionToken, activeTab }: { account: Account; sessionToken: string; activeTab: string }) {
   const statsQuery = useQuery({
     queryKey: ["admin-stats", account, sessionToken],
     queryFn: () => api<AdminStats>("/admin/stats", { session: sessionToken }),
-    refetchInterval: 5000,
+    // 运行状态 Tab 激活时才轮询（5s），切走停摆——管理停留期间只有当前 Tab 在跑。
+    // window_closed 后本 Tab 三态展示转为静态真相，停摆无信息损失。
+    refetchInterval: activeTab === "stats" ? 5000 : false,
   })
   const s = statsQuery.data
 
@@ -849,16 +860,20 @@ function AccountsTab({
   sessionToken,
   onSelectAccount,
   onAskDelete,
+  activeTab,
 }: {
   account: Account
   sessionToken: string
   onSelectAccount?: (acct: string) => void
   onAskDelete: (acct: string) => void
+  activeTab: string
 }) {
   const accountsQuery = useQuery({
     queryKey: ["admin-accounts", account, sessionToken],
     queryFn: () => api<AdminAccount[]>("/admin/accounts", { session: sessionToken }),
-    refetchInterval: 10000,
+    // 账号管理 Tab 激活时才轮询（10s），切走停摆——账号列表含目标数组，后台持续
+    // 刷新无意义（无变更动作时数据恒定）。
+    refetchInterval: activeTab === "accounts" ? 10000 : false,
   })
 
   return (
@@ -949,11 +964,12 @@ function AccountsTab({
 
 // ---- 日志总览 ----
 
-function LogsTab({ account, sessionToken }: { account: Account; sessionToken: string }) {
+function LogsTab({ account, sessionToken, activeTab }: { account: Account; sessionToken: string; activeTab: string }) {
   const logsQuery = useQuery({
     queryKey: ["admin-logs", account, sessionToken],
     queryFn: () => api<AdminLog[]>("/admin/logs?limit=200", { session: sessionToken }),
-    refetchInterval: 5000,
+    // 日志总览 Tab 激活时才轮询（5s），切走停摆——避免滚动日志在后台持续刷新浪费带宽。
+    refetchInterval: activeTab === "logs" ? 5000 : false,
   })
   const logs = logsQuery.data
 

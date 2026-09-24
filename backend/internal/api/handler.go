@@ -928,7 +928,10 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "读取成功记录失败: "+sErr.Error())
 		return
 	}
-	allLogs, lErr := d.Store.LoadAllLogs(1000)
+	// 日志总数改 COUNT（不加载行）——此前 LoadAllLogs(1000) 全量拉行只为 len(allLogs)，
+	// 5s 轮询下每次白读 1000 行逐行反序列化（task_log 无限增长，量越大浪费越狠）。
+	// COUNT(*) 表级 O(1) 零行加载，语义与 LoadAllLogs 同口径（新日志/超窗一致）。
+	logsCount, lErr := d.Store.CountAllLogs()
 	if lErr != nil {
 		writeJSON(w, 1, nil, "读取日志失败: "+lErr.Error())
 		return
@@ -973,8 +976,6 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	// 不用本地时钟直判——平台开放时间与本地配置若有偏差，管理员不会误判。
 	// WindowOpened 返回布尔快照（不再返回裸指针，已根除指针悬空竞态）。
 	windowOpened := d.Sched.WindowOpened()
-	// 全账号日志总数（LoadAllLogs 含全部账号）
-	logsCount := len(allLogs)
 	// 识别引擎与并发上限（管理员后台展示当前生效值）。
 	// 真值=配置生效值——runtime 默认 ddddocr（config.CaptchaEngineDefault），
 	// 空串不可能出现（runtime.New 恒注入非空），兜底统一 ddddocr，杜绝"stats 显示 vision

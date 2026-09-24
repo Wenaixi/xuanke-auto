@@ -438,6 +438,18 @@ func (s *Store) LoadAllLogs(limit int) ([]LogEntry, error) {
 	return out, rows.Err()
 }
 
+// CountAllLogs 日志总数（COUNT，不加载行）。
+// /admin/stats 只需 log_count 计数——此前全量 LoadAllLogs(1000) 逐行反序列化只为
+// 数个数，5s 轮询下每次白读 1000 行。COUNT(*) 走 SQLite 表级 O(1)（主键索引无关），
+// 零行加载零反序列化。与 LoadAllLogs 同口径：同一时刻两查询对新日志/超窗日志判定一致。
+func (s *Store) CountAllLogs() (int, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM task_log").Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // AdminAccount 账号管理条目：账号名 + 目标 + 已成功课程。
 type AdminAccount struct {
 	Account string             `json:"account"`

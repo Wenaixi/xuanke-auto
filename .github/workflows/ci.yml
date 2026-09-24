@@ -88,9 +88,65 @@ jobs:
           go-version: 'stable'
           cache-dependency-path: 'backend/go.sum'
 
+      # onnxruntime dll 不入 git，构建时下载 + cache（同平台二次构建免下载）
+      - name: Cache onnxruntime dll (windows-amd64)
+        uses: actions/cache@v4
+        with:
+          path: backend/internal/zhidao/assets/onnxruntime_win_amd64.dll
+          key: onnx-win-amd64-v1.25.0-${{ runner.os }}
+
+      - name: Download onnxruntime dll (windows-amd64)
+        shell: pwsh
+        run: |
+          cd backend
+          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_amd64.dll)) {
+            curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-x64-1.25.0.zip
+            tar -xf ort.zip
+            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_amd64.dll
+            Remove-Item ort.zip, onnxruntime-win-x64-1.25.0 -Recurse -Force
+          }
+
       - name: Verify Windows Single-Binary with Embedded ddddocr (CGO=1)
         shell: pwsh
         run: |
           cd backend
           $env:CGO_ENABLED = '1'
           go build -v -ldflags="-s -w -H windowsgui" -o xuanke-ci-check.exe .
+
+  # ============ Windows ARM64：验证内嵌原生 ddddocr（CGO=1）arm64 可编译 ============
+  ci-windows-arm64:
+    name: Windows ARM64 CGO Build Check
+    runs-on: windows-11-arm        # 原生 ARM64 runner；不可用则改用 windows-latest + zig 交叉
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+          cache-dependency-path: 'backend/go.sum'
+
+      - name: Cache onnxruntime dll (windows-arm64)
+        uses: actions/cache@v4
+        with:
+          path: backend/internal/zhidao/assets/onnxruntime_win_arm64.dll
+          key: onnx-win-arm64-v1.25.0-${{ runner.os }}
+
+      - name: Download onnxruntime dll (windows-arm64)
+        shell: pwsh
+        run: |
+          cd backend
+          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_arm64.dll)) {
+            curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-arm64-1.25.0.zip
+            tar -xf ort.zip
+            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_arm64.dll
+            Remove-Item ort.zip, onnxruntime-win-arm64-1.25.0 -Recurse -Force
+          }
+
+      - name: Verify Windows ARM64 Single-Binary with Embedded ddddocr (CGO=1)
+        shell: pwsh
+        run: |
+          cd backend
+          $env:CGO_ENABLED = '1'
+          go build -v -ldflags="-s -w -H windowsgui" -o xuanke-ci-check-arm64.exe .

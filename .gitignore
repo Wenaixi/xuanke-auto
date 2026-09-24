@@ -1,9 +1,8 @@
 # ============= 归档区 =============
-# 逆向脚本与抓包（legacy/）与历轮审查文档（review-rounds/）为本地专有物，不入库
-# （根 CLAUDE.md 记忆库是唯一契约来源，同样本地专有）；仅 superpowers/（开发计划
-# 与性能规格）参与版本管理。archive/ 下其余内容一律忽略。
+# 逆向基线（legacy/）、历轮审查文档（review-rounds/）、开发计划与性能规格
+# （superpowers/）均为本地专有物，不入库（根 CLAUDE.md 记忆库是唯一契约来源，
+# 同样本地专有）。archive/ 下全部内容忽略，需入库的归档物再单独加豁免行。
 archive/*
-!archive/superpowers/
 
 # ============= 构建产物与本地脚本 =============
 # 发布 exe（根目录）、开发/测试 exe（backend/）全忽略

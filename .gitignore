@@ -24,9 +24,11 @@ backend/probe.exe
 backend/logintest.exe
 
 # ps1/sh/bat 本地操作脚本不入库
+# 例外：backend/scripts/fetch-onnxruntime.sh 是 CI/本地构建必需的下载脚本，需入库
 *.ps1
 *.bat
 *.sh
+!backend/scripts/fetch-onnxruntime.sh
 
 # ============= 数据与密钥（绝不入库） =============
 # 数据库与 WAL

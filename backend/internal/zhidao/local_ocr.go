@@ -15,7 +15,8 @@ import (
 // 运行原理：调用本机 Python 环境中的 ddddocr 包完成识别（子进程一次调用）。
 // 该引擎不需要任何 API 密钥，识别完全发生在本地，隐私与速度俱佳；
 // 单 exe 交付策略：ddddocr 依赖本机 Python（+pip install ddddocr），
-// 若本机无 Python/ddddocr，系统自动回退到 Vision 引擎，管理员可在后台显式二选一。
+// 若本机无 Python/ddddocr，是否回退到 Vision 由管理员后台的"引擎兜底"开关决定
+// （默认关闭，两引擎严格互不回退；解析决策见 api 包 resolveCaptchaRecognizer）。
 type LocalDdddOcrRecognizer struct {
 	// pythonExe 指定的 Python 解释器路径；为空时用系统 PATH 的 "python"。
 	pythonExe string

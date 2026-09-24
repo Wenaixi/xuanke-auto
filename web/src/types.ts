@@ -102,6 +102,9 @@ export interface AdminConfig {
   vision_api_key_masked: string
   vision_model: string
   captcha_engine: string
+  // 识别引擎兜底开关（默认 false）：关闭时 ddddocr 与 Vision 严格互不回退，
+  // 开启后本机 ddddocr 不可用回退 Vision、Vision 无密钥回退本机 ddddocr。
+  captcha_fallback: boolean
   captcha_concurrency: number
 }
 
@@ -122,6 +125,9 @@ export interface AdminStats {
   vision_model: string
   vision_base_url: string
   captcha_engine?: string
+  // 实际生效引擎（兜底解析结果，与配置值分列）：
+  // 兜底关闭后"配置 ddddocr 而本机无引擎"会让两者不一致，管理后台靠它展示运行真相。
+  captcha_active_engine?: string
   captcha_concurrency?: number
   open_time_set?: boolean
   // 各账号教务 token 有效性（账号名 -> 是否有效），缺省视作全部有效

@@ -754,6 +754,7 @@ type AdminConfigView struct {
 	VisionAPIKey       string `json:"vision_api_key_masked"`
 	VisionModel        string `json:"vision_model"`
 	CaptchaEngine      string `json:"captcha_engine"`
+	CaptchaFallback    bool   `json:"captcha_fallback"`
 	CaptchaConcurrency int    `json:"captcha_concurrency"`
 }
 
@@ -773,6 +774,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
 			VisionModel:        cfg.VisionModel,
 			CaptchaEngine:      cfg.CaptchaEngine,
+			CaptchaFallback:    cfg.CaptchaFallback,
 			CaptchaConcurrency: cfg.CaptchaConcurrency,
 		}, "")
 	case http.MethodPut:
@@ -782,6 +784,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionAPIKey       *string `json:"vision_api_key"`
 			VisionModel        *string `json:"vision_model"`
 			CaptchaEngine      *string `json:"captcha_engine"`
+			CaptchaFallback    *bool   `json:"captcha_fallback"`
 			CaptchaConcurrency *int    `json:"captcha_concurrency"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -822,6 +825,10 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				c.CaptchaEngine = *req.CaptchaEngine
 				changed = append(changed, "captcha_engine")
 			}
+			if req.CaptchaFallback != nil {
+				c.CaptchaFallback = *req.CaptchaFallback
+				changed = append(changed, "captcha_fallback")
+			}
 			if req.CaptchaConcurrency != nil {
 				c.CaptchaConcurrency = *req.CaptchaConcurrency
 				changed = append(changed, "captcha_concurrency")
@@ -842,6 +849,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			"vision_key":          visionKey,
 			"vision_model":        cfg.VisionModel,
 			"captcha_engine":      cfg.CaptchaEngine,
+			"captcha_fallback":    strconv.FormatBool(cfg.CaptchaFallback),
 			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
 		}); sErr != nil {
 			// 落库失败绝不静默——配置已内存生效，但重启即回退。
@@ -870,6 +878,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
 			VisionModel:        cfg.VisionModel,
 			CaptchaEngine:      cfg.CaptchaEngine,
+			CaptchaFallback:    cfg.CaptchaFallback,
 			CaptchaConcurrency: cfg.CaptchaConcurrency,
 		}, "配置已更新并生效")
 	default:
@@ -974,6 +983,14 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if eng == "" {
 		eng = "ddddocr"
 	}
+	// 实际生效引擎（captcha_active_engine）：兜底开关默认关闭后，"配置 ddddocr 而本机
+	// 无引擎"会让实际引擎为空——只报配置值会让管理员以为识别正常，登录却一直失败。
+	// 解析发生在启动/配置热更新时（applyCaptchaRecognizerFor），此处读其落地结果；
+	// 尚未解析（进程启动早期）时回退配置值，绝不空展示。
+	activeEng := CaptchaActiveEngine()
+	if activeEng == "" {
+		activeEng = eng
+	}
 	// 各账号教务 token 有效性汇总（管理员后台一眼看到哪些账号 token 失效/恢复中）。
 	// 用调度器对外方法逐一查询（含 relogining 半态），不直接读内部 map。
 	tokValid := map[string]bool{}
@@ -987,17 +1004,18 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		// window_closed 与学生端 /state 同源（WindowClosed 三判据单源 windowClosedLocked）：
 		// 前端管理后台三态展示（待命中/已开放/已关闭）靠此字段区分，缺失时窗口关闭后
 		// 后台仍显"待命中"误导管理员。
-		"window_closed":       d.Sched.WindowClosed(),
-		"account_count":       len(accounts),
-		"targets_count":       targetsCount,
-		"success_count":       len(success),
-		"log_count":           logsCount,
-		"vision_model":        cfg.VisionModel,
-		"vision_base_url":     cfg.VisionBaseURL,
-		"captcha_engine":      eng,
-		"captcha_concurrency": cfg.CaptchaConcurrency,
-		"token_valid":         tokValid,
-		"open_time_set":       !open.IsZero(),
+		"window_closed":         d.Sched.WindowClosed(),
+		"account_count":         len(accounts),
+		"targets_count":         targetsCount,
+		"success_count":         len(success),
+		"log_count":             logsCount,
+		"vision_model":          cfg.VisionModel,
+		"vision_base_url":       cfg.VisionBaseURL,
+		"captcha_engine":        eng,
+		"captcha_active_engine": activeEng,
+		"captcha_concurrency":   cfg.CaptchaConcurrency,
+		"token_valid":           tokValid,
+		"open_time_set":         !open.IsZero(),
 	}, "")
 }
 

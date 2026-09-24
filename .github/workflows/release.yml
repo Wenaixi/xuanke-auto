@@ -72,6 +72,7 @@ XUANKE_ACTIVATION=on
 
 # 4. 可选：验证码识别引擎（vision=默认云识别需填 SF_API_KEY；ddddocr=内置原生离线识别，免 Python 免密钥）
 XUANKE_CAPTCHA_ENGINE=ddddocr
+# 识别引擎兜底开关——默认关闭（ddddocr 与 vision 严格互不回退）；需双向兜底请在管理员后台开启
 
 # 5. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
 # XUANKE_PORT=3091
@@ -166,6 +167,7 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
           XUANKE_ACTIVATION=on
 
           # 4. 可选项：验证码识别引擎（vision=云识别推荐；ddddocr=需宿主机安装 Python + ddddocr）
+          #    识别引擎兜底开关默认关闭（两引擎严格互不回退）；需双向兜底请在管理员后台开启
           XUANKE_CAPTCHA_ENGINE=vision
 
           # 5. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）

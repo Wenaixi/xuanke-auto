@@ -81,4 +81,6 @@ func TestCaptchaEngineDefaultDdddocr(t *testing.T) {
 	if got := CaptchaEngineDefault(); got != "ddddocr" {
 		t.Fatalf("显式 ddddocr 应返回 ddddocr，实际 %q", got)
 	}
+	// 兜底开关是运行时可配置项（管理员后台热配置并落库），配置层不读 env——
+	// 留注释防止后来人误加 XUANKE_CAPTCHA_FALLBACK env 读取（开关唯一事实源=落库配置）。
 }

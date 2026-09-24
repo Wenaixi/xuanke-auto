@@ -495,6 +495,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
   const [engine, setEngine] = useState("vision")
+  const [fallback, setFallback] = useState(false)
   const [concurrency, setConcurrency] = useState(1)
   const [activationOn, setActivationOn] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -514,6 +515,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       setBaseUrl(loaded.vision_base_url)
       setModel(loaded.vision_model)
       setEngine(loaded.captcha_engine || "vision")
+      // 兜底开关保守回退：缺键（旧后端）时视为关闭（默认安全语义=互不回退），
+      // 绝不把 undefined 当 true 意外开启引擎兜底。
+      setFallback(loaded.captcha_fallback === true)
       setConcurrency(loaded.captcha_concurrency || 1)
       setActivationOn(loaded.activation_enabled)
     }
@@ -533,6 +537,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         vision_base_url: baseUrl.trim(),
         vision_model: model.trim(),
         captcha_engine: engine,
+        captcha_fallback: fallback,
         captcha_concurrency: Math.max(1, concurrency || 1),
       }
       // 留空 = 不改动 key（脱敏回显无法完整回填）
@@ -671,9 +676,35 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
             </div>
             <p className="text-[11px] text-neutral-600 mt-0.5">
               {engine === "ddddocr"
-                ? "切换后将校验本机 Python + ddddocr 环境，缺失自动回退 Vision"
-                : "需在后台填写硅基流动接口地址、密钥与模型"}
+                ? "使用本机内置/本机 Python ddddocr（免 API 密钥）；本机缺失时将按下方开关决定是否回退"
+                : "需在后台填写硅基流动接口地址、密钥与模型；密钥未填时按下方开关决定是否回退"}
             </p>
+          </div>
+          <div className="flex items-center justify-between rounded-[var(--radius-sm)] border border-neutral-900 glass px-3 py-2.5">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-neutral-300">引擎兜底</span>
+              <span className="text-[11px] text-neutral-600">
+                {fallback
+                  ? "已开启：本机 ddddocr 不可用回退云端 Vision；Vision 无密钥回退本机 ddddocr"
+                  : "已关闭：两种引擎严格互不回退，配置的引擎不可用即识别不可用（默认）"}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={fallback}
+              aria-label="识别引擎兜底开关"
+              onClick={() => setFallback(!fallback)}
+              className={`w-11 h-6 rounded-full border transition-colors relative focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 shrink-0 ${
+                fallback ? "bg-white border-white" : "glass-input border-neutral-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full transition-all ${
+                  fallback ? "left-[22px] bg-black" : "left-0.5 bg-neutral-500"
+                }`}
+              />
+            </button>
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="admin-config-concurrency" className="text-xs text-neutral-400">识别并发上限（默认 1，串行）</label>
@@ -744,7 +775,17 @@ function StatsTab({ account, sessionToken }: { account: Account; sessionToken: s
         { label: "预选目标", value: String(s.targets_count) },
         { label: "已选成功", value: String(s.success_count) },
         { label: "日志条数", value: String(s.log_count) },
-        { label: "识别引擎", value: s.captcha_engine === "ddddocr" ? "本地 ddddocr" : "硅基流动 Vision" },
+        // 识别引擎展示"实际生效值"：兜底解析结果可能与配置值不同
+        // （兜底关闭后配置 ddddocr 而本机无引擎 → 实际 none，登录必然失败），
+        // 只报配置值会让管理员误以为识别正常。captcha_active_engine 缺键时
+        // 回退配置值展示（兼容旧后端），绝不空展示。其他值（none）一律归"不可用"。
+        {
+          label: "识别引擎",
+          value: (() => {
+            const e = s.captcha_active_engine ?? s.captcha_engine ?? ""
+            return e === "ddddocr" ? "本地 ddddocr" : e === "vision" ? "硅基流动 Vision" : "不可用（无可用引擎）"
+          })(),
+        },
         { label: "识别并发", value: String(s.captcha_concurrency ?? 1) },
         { label: "识别模型", value: s.vision_model || "（未配置）" },
       ]

@@ -102,6 +102,9 @@ func main() {
 			if v, ok := kv["captcha_engine"]; ok {
 				c.CaptchaEngine = v
 			}
+			if v, ok := kv["captcha_fallback"]; ok {
+				c.CaptchaFallback = v == "true"
+			}
 			if v, ok := kv["captcha_concurrency"]; ok {
 				if n, err := strconv.Atoi(v); err == nil && n > 0 {
 					c.CaptchaConcurrency = n

@@ -16,6 +16,11 @@ type Config struct {
 	VisionModel string
 	// CaptchaEngine 验证码识别引擎（"vision"=硅基流动 Vision；"ddddocr"=本地 ddddocr）。
 	CaptchaEngine string
+	// CaptchaFallback 引擎兜底开关（默认关闭）。
+	// 关闭时两引擎严格互不回退：配置的引擎不可用即视为"识别不可用"，绝不静默换引擎
+	// （静默兜底会让管理员以为跑的是本地 ddddocr，实际每次登录都在打云端并计费）。
+	// 开启后双向兜底：ddddocr 本机不可用 → Vision；Vision 无密钥 → 本机 ddddocr。
+	CaptchaFallback bool
 	// CaptchaConcurrency 验证码识别并发上限（默认 1，串行识别防平台熔断）。
 	CaptchaConcurrency int
 }

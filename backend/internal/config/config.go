@@ -101,8 +101,9 @@ func loadDotEnv(path string) {
 // CaptchaEngineDefault 默认验证码识别引擎。
 // 默认 ddddocr 本地识别（免 API 密钥、无外网依赖，双击 exe 开箱即用）；需云识别
 // 时显式设 XUANKE_CAPTCHA_ENGINE=vision 并填 SF_API_KEY（默认改 ddddocr）。
-// 说明：ddddocr 引擎可用性依赖本机 Python + ddddocr 包（或内嵌模型），未装时
-// 登录会报识别引擎不可用——管理员可在后台热切换回 vision。
+// 说明：ddddocr 引擎可用性依赖本机 Python + ddddocr 包（或内嵌模型）。默认不回退：
+// 配置的引擎不可用即识别不可用；需双向兜底请在管理员后台开启"引擎兜底"开关。
+// 开关本身由管理员后台热配置并落库（runtime.Config.CaptchaFallback），这里不读 env。
 func CaptchaEngineDefault() string {
 	if v := os.Getenv("XUANKE_CAPTCHA_ENGINE"); v == "vision" || v == "ddddocr" {
 		return v
@@ -149,6 +150,7 @@ XUANKE_ADMIN_TOKEN=` + admin + `
 SF_API_KEY=
 # 识别引擎（ddddocr=默认，本地免密钥无外网；vision=硅基流动云识别，需填 SF_API_KEY）
 XUANKE_CAPTCHA_ENGINE=ddddocr
+# 识别引擎兜底开关（默认不回退：ddddocr 与 vision 严格互不兜底；如需双向兜底请在管理员后台开启）
 
 # 激活码机制开关：on=启用激活码（分发用）；默认关闭（off），本地双击 exe 账号登录直接进入系统
 XUANKE_ACTIVATION=off

@@ -640,7 +640,7 @@ func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 	}
 	// 内存已生效：运行时配置中心已是新地址
 	if got := d.rt.Get().VisionBaseURL; got != "https://fail.example.com/v1" {
-		t.Fatalf("内存配置应已生效: %v", got)
+		t.Fatalf("内存配置已生效: %v", got)
 	}
 	// 下游热下发未跳过：再次热改（仍失败）后登录，验证码识别应打到新地址并失败——
 	// 证明 SetVision/识别引擎切换在落库失败路径也被执行
@@ -652,6 +652,16 @@ func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 	code, j = doJSON(t, d.api, "POST", "/api/login", `{"account":"acct2","password":"pwd"}`)
 	if msg, _ := j["msg"].(string); !strings.Contains(msg, "invalid2.example.com") {
 		t.Fatalf("下游 Vision 热下发被跳过（登录应打到新地址）: %v", j)
+	}
+
+	// 引擎兜底开关同属热配置：落库失败时内存仍即时生效（与 Vision 地址同一精度）
+	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
+		`{"captcha_fallback":true}`, adminTok)
+	if j["code"].(float64) != 500 {
+		t.Fatalf("落库失败下改兜底开关仍应 500: %v", j)
+	}
+	if !d.rt.Get().CaptchaFallback {
+		t.Fatal("落库失败下兜底开关必须内存即时生效（下游热下发不跳过）")
 	}
 }
 

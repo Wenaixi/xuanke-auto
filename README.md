@@ -43,25 +43,26 @@ cd backend && CGO_ENABLED=1 go build -o xuanke.exe .
 ## 三、开发
 
 ```bash
+# 前后端分离开发（热重载）
 cd backend && go run .     # 后端 :3091
 cd web && npm run dev      # 前端 :5173（/api 代理到 3091）
 ```
 
-```bash
-cd backend && go test -race ./...   # 后端全量测试（含竞态检测）
-cd web && npm run build             # 前端类型检查 + 构建
-cd web && npm run guard             # 五个防回归守卫断言（CI 也跑）
-```
+> **验证已在 CI 全托管**：push 到 master/main 或 PR 触发 `.github/workflows/ci.yml` 自动跑后端全量测试 + 前端构建 + 全平台编译（Windows x64/arm64、Linux、macOS）。本地**无需安装 Go/C 编译器**，也不要手动 `go build`/`go test`，以 CI 结果为准。
+>
+> 仅当你确实要本地构建/联调时：
+> 1. 先跑 `bash backend/scripts/fetch-onnxruntime.sh windows amd64` 下载内嵌识别引擎库（已 gitignore；幂等）
+> 2. 再 `cd backend && CGO_ENABLED=1 go build ./...`（Windows 需 MinGW gcc；否则直接依赖 CI）
 
 ## 四、发布
 
-交叉编译与打包流程见 `.github/workflows/release.yml`（Windows x64 GUI / 控制台、Linux x64、macOS 双架构）。Windows 原生内嵌 ddddocr 必须 CGO=1 构建，Linux/macOS 走 CGO=0 纯 Go 交叉编译。
+打 tag（`v*`）触发 `.github/workflows/release.yml` 自动出包并建 Release：Windows x64 / **Windows ARM64**（GUI + 控制台）、Linux x64、macOS 双架构。Windows 原生内嵌 ddddocr 必须 CGO=1 构建，Linux/macOS 走 CGO=0 纯 Go 交叉编译。识别引擎库（onnxruntime）不入 git，由 CI 构建时下载 + 缓存（微软官方 v1.25.0，与 go.sum 对齐）。
 
 ## 五、测试与质量门
 
-- 后端：`go test -race ./...`。改 tick 守卫 / 探测时序前先跑 `TestWindowOpenSubmitsWithoutProbeReset` 与 `TestAdminStatsWindowOpenedUsesScheduler`。
+- 后端：`go test -race ./...`（CI 已跑）。改 tick 守卫 / 探测时序前先跑 `TestWindowOpenSubmitsWithoutProbeReset` 与 `TestAdminStatsWindowOpenedUsesScheduler`。
 - 前端：以 `npm run build` 为准（项目根 `tsc --noEmit` 是 references 空壳，不报错）。
-- CI（`.github/workflows/ci.yml`）：push 到 master/main 或 PR 自动跑两端构建与测试。
+- CI（`.github/workflows/ci.yml`）：push 到 master/main 或 PR 自动跑两端构建与测试（含 Windows ARM64 交叉编译验证）。
 
 ## 六、安全与数据
 

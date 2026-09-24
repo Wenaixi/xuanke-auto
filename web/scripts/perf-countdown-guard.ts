@@ -36,5 +36,18 @@ const rawCdUse = (dash.match(/^[^/].*\bcd\.(days|hours|minutes|seconds)\b[^/]*$/
 ).length
 check(`路由组件顶层无裸 cd.* 消费（当前 ${rawCdUse} 处，应为 0）`, rawCdUse === 0)
 
+// --- Select 页横幅 ----------
+// Dashboard 主矩阵叶子化后，钩子的裸消费落在 Select.tsx 横幅（5 处 cd.* 内联）。
+// 该页每秒 tick 同样重渲染整树（1254 行），与 Dashboard 同款问题——扩展守卫断言
+// Select 也存在 memo 化叶子（CountdownLeaf）且路由组件顶层无裸 cd.days/hours/minutes/seconds
+// （叶子调用处的 props 传参是叶子边界本身，不算裸消费——过滤含 Cd/Leaf 的行）。
+const route = readFileSync(join(root, "src/routes/Select.tsx"), "utf8")
+const hasSelectLeaf = /function\s+CountdownLeaf\s*\(/.test(route) && /MemoCountdownLeaf = memo\(CountdownLeaf\)/.test(route)
+check("Select 内存在 memo 化倒计时叶子 CountdownLeaf", hasSelectLeaf)
+const rawCdUseSelect = (route.match(/^[^/].*\bcd\.(days|hours|minutes|seconds)\b[^/]*$/gm) ?? []).filter(
+  (line) => !/CountdownLeaf|CdLeaf|props|leaf|=\{(cd\.|isExpired\})/i.test(line)
+).length
+check(`Select 路由组件顶层无裸 cd.* 消费（当前 ${rawCdUseSelect} 处，应为 0）`, rawCdUseSelect === 0)
+
 console.log(failed ? "\nperf-countdown-guard 断言失败" : "\nperf-countdown-guard 断言全绿")
 process.exit(failed ? 1 : 0)

@@ -17,7 +17,11 @@ import type { Account, Sessions } from "./types"
 import { isCurrentAdminSession } from "./lib/adminAuth"
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 0 } },
+  // staleTime: 3s——只吸收「切页/切账号后组件重建对同一 cached key 的立即重复请求」面
+  //（Dashboard↔Select 共用 electives/state key，staleTime:0 时切回立即重取）。
+  // 轮询 refetchInterval 不受 staleTime 影响（每拍仍强制 revalidate），实时名额不牺牲；
+  // 手动 invalidateQueries（选课后 flush 目标）依旧强制重取。>3s 往返本就该刷新。
+  defaultOptions: { queries: { retry: 1, staleTime: 3000 } },
 })
 
 // 本地会话映射存取：账号名 -> 服务端签发令牌（多账号互不干扰）

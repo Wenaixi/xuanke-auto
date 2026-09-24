@@ -39,6 +39,24 @@ jobs:
           go-version: 'stable'
           cache-dependency-path: 'backend/go.sum'
 
+      # onnxruntime dll 不入 git，构建时下载 + cache（同平台二次构建免下载）
+      - name: Cache onnxruntime dll (windows-amd64)
+        uses: actions/cache@v4
+        with:
+          path: backend/internal/zhidao/assets/onnxruntime_win_amd64.dll
+          key: onnx-win-amd64-v1.25.0-${{ runner.os }}
+
+      - name: Download onnxruntime dll (windows-amd64)
+        shell: pwsh
+        run: |
+          cd backend
+          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_amd64.dll)) {
+            curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-x64-1.25.0.zip
+            tar -xf ort.zip
+            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_amd64.dll
+            Remove-Item ort.zip, onnxruntime-win-x64-1.25.0 -Recurse -Force
+          }
+
       - name: Build Windows GUI (CGO=1, native embedded ddddocr)
         shell: pwsh
         run: |
@@ -99,6 +117,111 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
+          path: dist-artifacts/
+
+  # ============ Windows ARM64：内置原生 ddddocr 单二进制（CGO=1） ============
+  build-windows-arm64:
+    name: Build Windows ARM64 (Embedded ddddocr)
+    runs-on: windows-11-arm        # 原生 ARM64 runner；不可用则改用 windows-latest + zig 交叉
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Build Frontend Web App
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+          cache-dependency-path: 'backend/go.sum'
+
+      - name: Cache onnxruntime dll (windows-arm64)
+        uses: actions/cache@v4
+        with:
+          path: backend/internal/zhidao/assets/onnxruntime_win_arm64.dll
+          key: onnx-win-arm64-v1.25.0-${{ runner.os }}
+
+      - name: Download onnxruntime dll (windows-arm64)
+        shell: pwsh
+        run: |
+          cd backend
+          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_arm64.dll)) {
+            curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-arm64-1.25.0.zip
+            tar -xf ort.zip
+            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_arm64.dll
+            Remove-Item ort.zip, onnxruntime-win-arm64-1.25.0 -Recurse -Force
+          }
+
+      - name: Build Windows ARM64 GUI (CGO=1, native embedded ddddocr)
+        shell: pwsh
+        run: |
+          cd backend
+          $env:CGO_ENABLED = '1'
+          go build -ldflags="-s -w -H windowsgui" -o ../dist-release/xuanke-windows-arm64.exe .
+
+      - name: Build Windows ARM64 Console (CGO=1, native embedded ddddocr)
+        shell: pwsh
+        run: |
+          cd backend
+          $env:CGO_ENABLED = '1'
+          go build -ldflags="-s -w" -o ../dist-release/xuanke-windows-arm64-console.exe .
+
+      - name: Package Windows ARM64 Archives
+        shell: pwsh
+        run: |
+          cd dist-release
+          $TAG = "$env:GITHUB_REF_NAME"
+          # 配置说明模板（与 amd64 相同）
+          @'
+# 抢课系统数据配置文件模板（生产部署时请放入 data/.env）
+# 1. 必填项：管理员访问口令（用于进入管理后台、生成与分发激活码）
+XUANKE_ADMIN_TOKEN=your_secure_admin_token_here
+
+# 2. 可选：硅基流动 Vision API Key（教务登录验证码识别；Windows 内置原生 ddddocr 引擎无需填写即可离线识别）
+# SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# 3. 可选：激活码机制开关（on=启用；off=完全关闭，教务账密登录直接进入）
+XUANKE_ACTIVATION=on
+
+# 4. 可选：验证码识别引擎（vision=默认云识别需填 SF_API_KEY；ddddocr=内置原生离线识别，免 Python 免密钥）
+XUANKE_CAPTCHA_ENGINE=ddddocr
+# 识别引擎兜底开关——默认关闭（ddddocr 与 vision 严格互不回退）；需双向兜底请在管理员后台开启
+
+# 5. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
+# XUANKE_PORT=3091
+# XUANKE_DB=data/xuanke.db
+'@ | Set-Content -Encoding utf8 .env.example
+
+          New-Item -ItemType Directory -Force win-arm-pkg | Out-Null
+          Copy-Item xuanke-windows-arm64.exe win-arm-pkg/xuanke.exe
+          Copy-Item .env.example win-arm-pkg/.env.example
+          Compress-Archive -Path win-arm-pkg/* -DestinationPath "xuanke-${TAG}-windows-arm64.zip" -Force
+
+          New-Item -ItemType Directory -Force win-arm-console-pkg | Out-Null
+          Copy-Item xuanke-windows-arm64-console.exe win-arm-console-pkg/xuanke.exe
+          Copy-Item .env.example win-arm-console-pkg/.env.example
+          Compress-Archive -Path win-arm-console-pkg/* -DestinationPath "xuanke-${TAG}-windows-arm64-console.zip" -Force
+
+          New-Item -ItemType Directory -Force ../dist-artifacts | Out-Null
+          Move-Item "xuanke-${TAG}-windows-arm64*.zip" ../dist-artifacts/
+
+      - name: Upload Windows ARM64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-binaries
           path: dist-artifacts/
 
   # ============ Linux / macOS：纯 Go 交叉编译（CGO=0，stub 回退 Python/Vision） ============
@@ -209,12 +332,18 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
   release:
     name: Assemble and Publish Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-unix]
+    needs: [build-windows, build-windows-arm64, build-unix]
     steps:
       - name: Download Windows Binaries
         uses: actions/download-artifact@v4
         with:
           name: windows-binaries
+          path: dist-release/
+
+      - name: Download Windows ARM64 Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-arm64-binaries
           path: dist-release/
 
       - name: Download Unix Binaries

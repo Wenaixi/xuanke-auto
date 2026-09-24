@@ -336,7 +336,7 @@ func fetchCaptchaImage(sess *http.Client, ua string, baseURL string) ([]byte, er
 		return nil, err
 	}
 	defer resp.Body.Close()
-	img, err := io.ReadAll(resp.Body)
+	img, err := readBody(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +372,7 @@ func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification 
 		return "", fmt.Errorf("提交登录请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBody(resp)
 	if err != nil {
 		return "", fmt.Errorf("读取登录响应失败: %w", err)
 	}

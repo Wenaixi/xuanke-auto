@@ -37,4 +37,4 @@ npm run lint         # oxlint 快速 lint
 ## 规范
 
 - 前端回归以 `npm run build` 为准（项目根 `tsc --noEmit` 是 references 空壳，不报错，必须 `tsc -b`）。
-- 涉及与后端交互的数据契约（如 /state、/electives、/admin/* 响应字段），改动时两端同步，参考后端 `handler.go` 与 `archive/review-rounds/` 中的决策契约。
+- 涉及与后端交互的数据契约（如 /state、/electives、/admin/* 响应字段），改动时两端同步，以 `README.md` 与后端 `handler.go` 为准。

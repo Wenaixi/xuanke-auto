@@ -4,7 +4,7 @@
 
 ## 前置阅读
 
-- 设计与决策契约沉淀在 `archive/review-rounds/`（历轮审查定案）与 `archive/legacy/`（zhidao 平台逆向基线）。其中"真实网站源码对照基线"是平台契约的最高事实源，改动平台相关代码前必须先对照。
+- 仓库内文档：`README.md`（上手指南）、`SECURITY.md`（敏感信息红线）、`CODE_OF_CONDUCT.md`（行为准则）。
 
 ## 工作流程
 
@@ -18,7 +18,7 @@
    ```
    - 后端回归注意：改 tick 守卫或探测时序前，先跑 `go test -run 'TestWindowOpenSubmitsWithoutProbeReset|TestAdminStatsWindowOpenedUsesScheduler'`。
    - 前端回归以 `npm run build` 为准（项目根 `tsc --noEmit` 是 references 空壳，不报错）。
-4. **提交规范**：代码注释只写"为什么 / 契约 / 陷阱"，不要出现"第 N 轮""B18-XX"式轮次前缀（决策历史统一归入 `archive/review-rounds/` 审查文档）。
+4. **提交规范**：代码注释只写"为什么 / 契约 / 陷阱"，不要出现"第 N 轮""B18-XX"式轮次前缀（决策历史由维护者本地归档，不入仓库）。
 
 ## 写测试
 
@@ -36,7 +36,7 @@
 ## 提交 PR
 
 - 描述清"改了什么、为什么、怎么验证"。
-- 涉及平台契约（zhidao.fj.cn 选课接口）的改动，先对照 `archive/legacy/` 里的真实抓包与逆向基线（"真实网站源码对照基线"），并在 PR 里说明与真实站点行为的对应关系。
+- 涉及平台契约（zhidao.fj.cn 选课接口）的改动，请在 PR 里说明与真实站点行为的对应关系（契约基线由维护者本地归档，不入仓库）。
 - 保持 PR 小且聚焦，一个 PR 一件事。
 
 ## 行为准则

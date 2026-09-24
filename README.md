@@ -67,6 +67,4 @@ cd web && npm run guard             # 五个防回归守卫断言（CI 也跑）
 
 - 敏感配置只进 `data/.env`（已被忽略），代码内无硬编码密钥；日志只打 token/密码前 8 位。
 - 凭据 AES-256-GCM 加密落库；`data/` 整目录（db + .env + .master_key）随部署一起备份迁移。
-- 提交前对照 `SECURITY.md` 红线清单；涉及平台契约（zhidao.fj.cn）的改动先对照 `archive/legacy/` 逆向基线。
-
-设计与决策契约沉淀在历轮审查文档（`archive/review-rounds/`）与平台逆向基线（`archive/legacy/`）。
+- 提交前对照 `SECURITY.md` 红线清单与 `CONTRIBUTING.md` 校验要求（涉及平台契约的改动须说明与真实站点行为的对应关系）。

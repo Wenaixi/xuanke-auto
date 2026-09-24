@@ -4,7 +4,7 @@
 方法论：**先立 P0 基线红绿灯 → 每优化独立 commit（commit 带前后数据）→ 复测对比 → 退步 revert**。
 全部数据来自 `-benchmem -count=3` 同机实测；基准夹具带 shape 自检（`TestParseElectivesBenchShape` 断言 3 发布 82 门课），跨轮可复现。
 
-## 已落地 10 项（每项独立 commit，可单条 `git revert`）
+## 已落地 12 项（每项独立 commit，可单条 `git revert`）
 
 | # | commit | 模块 | 优化 | 数据（改前 → 改后） |
 |---|--------|------|------|------------------------|
@@ -17,7 +17,8 @@
 | 7 | `0e81afb` | web | 路由级懒加载（Select/Admin 拆独立 chunk） | **登录首屏 422.57→363.15kB（-14%）**；嵌入 exe 兼容（SpaHandler fs.Stat） |
 | 8 | `d3eb54a` | web | lazy-route-guard 守卫锁 P-4 不回归 | 改回静态 import → 红灯实证 |
 | 9 | `0b16cd1` | ci | npm run guard 一键五守卫接入 CI | 守卫红灯即 CI 失败 |
-| 10 | `df3bb4c` | store | /admin/stats 日志计数改 COUNT（LoadAllLogs 只取 len 漏洞） | **COUNT 10.2µs/568B/18 allocs vs 1000 行 1058µs/551KB/13042 allocs → 耗时 -99.0% 等** |
+| 11 | `df3bb4c` | store | /admin/stats 日志计数改 COUNT（LoadAllLogs 只取 len 漏洞） | **COUNT 10.2µs/568B/18 allocs vs 1000 行 1058µs/551KB/13042 allocs → 耗时 -99.0% 等** |
+| 12 | `225cbf9` | web | react-query staleTime 0→3s（吸收切页重建立即重复请求） | Dashboard↔Select 共用 key 切页往返 <3s 不重复请求；轮询 refetchInterval 每拍强制 revalidate 不变 |
 
 ## 裁定不动的（量化留档，YAGNI）
 
@@ -29,6 +30,9 @@
 - **handleAdminConfig GET**：内存热配置 + 8 字段 struct，零 DB 读，无热点
 - **前端主 bundle**：Select/Admin 拆走后 363kB 大头为 React vendor + TanStack Query + Radix 跨路由共享，不可再拆
 - **路由 lazy 的 gzip 合计 +3.5%**：chunk 边界 vendor 元数据重复，换取首屏与并行加载双赢
+- **gzip 响应压缩（第 2.5 轮）**：本地回环部署传输非瓶颈（363KB < 0.4ms、22KB 轮询 API），公网/CDN 化才值得加
+- **refetchOnWindowFocus（第 2.5 轮）**：staleTime 3s 已吸收 <3s focus 重取，离开 >3s 正是需要刷新时——已最优
+- **SQLite 连接配置（第 2.5 轮）**：WAL + busy_timeout(5000) + SetMaxOpenConns(1) 已配置；读写串行最坏 <1ms 可忽略
 
 ## 撤返回退点
 
@@ -44,6 +48,7 @@
 | lazy 守卫（8） | `git revert d3eb54a` |
 | CI 守卫（9） | `git revert 0b16cd1` |
 | COUNT 优化（10） | `git revert df3bb4c` |
+| staleTime 3s（11） | `git revert 225cbf9` |
 
 ## 基准复现
 

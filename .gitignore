@@ -1,19 +1,16 @@
 # ============= 归档区（Python 老版逆向产物，不再参与开发） =============
 # 逆向脚本与抓包全部归档到 archive/legacy/（原根目录 legacy/ 于 2026-09-23 并入 archive）
 # 逆向契约的真实取证物保留在哪、以什么形式保留，见 CLAUDE.md「真实网站源码对照
-# 基线」（该基线引用的 HAR 大样本在用户本地 data/ 归档，git 里不重复保管）
+# 基线」（该基线引用的 HAR 大样本在用户本地 data/ 归档，git 里不重复保管）。
+# archive/ 下其余内容一律忽略（重构临时草稿等）；新增归档物放 archive/<分类>/
+# 即自动被跟踪。
 archive/*
 !archive/review-rounds/
 !archive/superpowers/
 !archive/legacy/
 
-# ps1/sh/bat 本地操作脚本不入库
-*.ps1
-*.bat
-*.sh
-
-# ============= Go 构建产物 =============
-# 发布 exe（根目录），开发/测试 exe（backend/）全忽略
+# ============= 构建产物与本地脚本 =============
+# 发布 exe（根目录）、开发/测试 exe（backend/）全忽略
 *.exe
 backend/xuanke.exe
 backend/xuanke-dev.exe
@@ -22,10 +19,19 @@ backend/xuanke-e2e.exe~
 
 # 发布打包产物目录（手动交叉编译/CI 下载物）
 dist-release/
+backend/dist-release/
 
-# Go 构建缓存
+# Go 构建缓存与测试产物
 *.test
 *.out
+backend/bench.exe
+backend/probe.exe
+backend/logintest.exe
+
+# ps1/sh/bat 本地操作脚本不入库
+*.ps1
+*.bat
+*.sh
 
 # ============= 数据与密钥（绝不入库） =============
 # 数据库与 WAL
@@ -33,14 +39,30 @@ dist-release/
 *.db-wal
 *.db-shm
 *.db.bak
+*.sqlite
+*.sqlite3
 
 # 加密主密钥（与 db 一起备份迁移，禁止进 git）
 .master_key
+*.pem
+*.crt
+*.key
 
 # 数据目录整体忽略
 # 注意：backend/data 是指向根目录 data 的软连接（Junction），一并忽略
 data/
 backend/data/
+backend/internal/config/data/
+
+# 环境变量文件（真实密钥只允许出现在本地 data/.env，见 CLAUDE.md 部署章节）
+.env
+.env.*
+!.env.example
+
+# 通用凭据文件兜底
+.credentials
+.netrc
+.well-known/security.txt
 
 # ============= Node / 前端构建 =============
 node_modules/
@@ -54,43 +76,31 @@ server.log
 server.err.log
 backend/server-dev.out.log
 backend/server-dev.err.log
+web/vite-dev.out.log
+web/vite-dev.err.log
 
 # ============= 系统与缓存 =============
 __pycache__/
 *.pyc
-.omc/
 .DS_Store
 Thumbs.db
 *.sw?
 .idea/
 .vscode/
 
-# ============= 运行时残留 =============
+# ============= 会话与本地状态 =============
+# 运行时状态（.omc/state/、.omc/handoffs/、.omc/plans/ 等可忽略操作工件）
+.omc/
+.claude/
+
 # 临时/草稿产物
 _rd_*.md
 backup-*.db
 tmp/
 artifacts/
 
-# ============= 会话与本地状态 =============
-.claude/
-
-# ============= 会话与本地状态 =============
-.claude/
-docs/
-
 # ============= 项目核心记忆库（本地专有，不入库） =============
 # CLAUDE.md 是项目核心记忆库（全局指令要求维护），主人决定它本地专有、不参与
 # 版本管理——避免每次大规模重构的提交噪音、也避免记忆库内容随仓库外流。若将来
 # 要恢复入库：先删掉下面这一行，然后 git add CLAUDE.md。
 CLAUDE.md
-
-# ============= 归档区（历史审查文档） =============
-# 4-38 轮全模块审查文档已归档到 archive/review-rounds/、早期计划与规格归档到
-# archive/superpowers/（git mv 保留历史、参与版本管理）；逆向老版归档在
-# archive/legacy/（见本文件头部）。archive/ 下其余内容一律忽略（重构临时草稿
-# 等）；新增归档物放 archive/<分类>/ 即自动被跟踪。
-archive/*
-!archive/review-rounds/
-!archive/superpowers/
-!archive/legacy/

@@ -24,18 +24,21 @@ cd backend && CGO_ENABLED=1 go build -o xuanke.exe .
 
 ## 二、配置（data/.env）
 
-首次运行自动生成模板到可执行文件同目录 `data/.env`，真实环境变量优先、文件兜底：
+首次运行自动生成模板到可执行文件同目录 `data/.env`，真实环境变量优先、文件兜底。模板见仓库根 `.env.example`：
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | XUANKE_ADMIN_TOKEN | 随机生成 | 管理口令（必填；缺失拒绝启动） |
 | XUANKE_ADMIN_NAME | admin | 管理员登录账号名 |
-| SF_API_KEY | 空 | 硅基流动 Vision 密钥（登录验证码识别；ddddocr 引擎免密钥） |
 | XUANKE_CAPTCHA_ENGINE | ddddocr | 识别引擎（ddddocr=本地离线免密钥；vision=云识别需填 SF_API_KEY） |
+| SF_API_KEY | 空 | 硅基流动 Vision 密钥（仅 vision 引擎需要） |
 | XUANKE_ACTIVATION | off | 激活码机制开关（on=启用激活码；默认 off 登录直接进入系统） |
 | XUANKE_PORT | 3091 | HTTP 端口 |
 | XUANKE_DB | data/xuanke.db | SQLite 路径 |
 | XUANKE_MASTER_KEY | 自动生成 | 数据加密主密钥（生成于 data/.master_key，需与 db 一起备份） |
+| XUANKE_TRUSTED_PROXY | off | 可信反代下信 X-Forwarded-For 做 IP 限流（默认关，防伪造） |
+
+> 开放时间不在此列：由平台 `beginTimes` 自动识别，不可配置（配置层不注入默认值）。
 
 ## 三、开发
 
@@ -47,6 +50,23 @@ cd web && npm run dev      # 前端 :5173（/api 代理到 3091）
 ```bash
 cd backend && go test -race ./...   # 后端全量测试（含竞态检测）
 cd web && npm run build             # 前端类型检查 + 构建
+cd web && npm run guard             # 五个防回归守卫断言（CI 也跑）
 ```
 
-详细设计与实现见根目录 `CLAUDE.md`。
+## 四、发布
+
+交叉编译与打包流程见 `.github/workflows/release.yml`（Windows x64 GUI / 控制台、Linux x64、macOS 双架构）。Windows 原生内嵌 ddddocr 必须 CGO=1 构建，Linux/macOS 走 CGO=0 纯 Go 交叉编译。
+
+## 五、测试与质量门
+
+- 后端：`go test -race ./...`。改 tick 守卫 / 探测时序前先跑 `TestWindowOpenSubmitsWithoutProbeReset` 与 `TestAdminStatsWindowOpenedUsesScheduler`。
+- 前端：以 `npm run build` 为准（项目根 `tsc --noEmit` 是 references 空壳，不报错）。
+- CI（`.github/workflows/ci.yml`）：push 到 master/main 或 PR 自动跑两端构建与测试。
+
+## 六、安全与数据
+
+- 敏感配置只进 `data/.env`（已被忽略），代码内无硬编码密钥；日志只打 token/密码前 8 位。
+- 凭据 AES-256-GCM 加密落库；`data/` 整目录（db + .env + .master_key）随部署一起备份迁移。
+- 提交前对照 `SECURITY.md` 红线清单；涉及平台契约（zhidao.fj.cn）的改动先对照 `archive/legacy/` 逆向基线。
+
+设计与决策契约沉淀在历轮审查文档（`archive/review-rounds/`）与平台逆向基线（`archive/legacy/`）。

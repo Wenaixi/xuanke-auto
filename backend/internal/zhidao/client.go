@@ -658,6 +658,11 @@ func (c *Client) YearTerms() ([]YearTerm, error) {
 }
 
 // Class 课程/选修班。
+// 字段契约：仅保留前后端真实消费的字段（全库 grep 实证零消费的
+// LessonsDate/ApplyDate/PlanCount/AuditedCount 已剔除——平台仍下发但 Go json 解析
+// 直接丢弃，快照常驻内存与 /electives 序列化体同步瘦身；未来需要时按 HAR 恢复）。
+// 平台字段名（真实 select.js）：class_room_name / lessons_date / apply_date /
+// plan_count / audited_count 均标 `json:"-"` 或剔除——剔除即不进结构，解码不保留。
 type Class struct {
 	ID              int    `json:"id"`
 	PublishID       int    `json:"publish_id"`
@@ -665,16 +670,12 @@ type Class struct {
 	ClassName       string `json:"class_name"`
 	TeacherNameList string `json:"teacher_name_list"`
 	ClassroomName   string `json:"class_room_name"`
-	LessonsDate     string `json:"lessons_date"`
 	SelectedCount   int    `json:"selected_count"`
-	AuditedCount    int    `json:"audited_count"`
 	MaxCount        int    `json:"max_count"`
-	PlanCount       int    `json:"plan_count"`
 	CanSelect       bool   `json:"can_select"`
 	BtnType         int    `json:"btn_type"`
 	BtnText         string `json:"btn_text"`
 	Title           string `json:"title"`
-	ApplyDate       string `json:"apply_date"`
 }
 
 // Publish 选课发布。

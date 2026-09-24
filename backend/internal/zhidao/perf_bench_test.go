@@ -17,8 +17,9 @@ import (
 // 非优化引入的回归——计数以 count=3 的中位数为准。
 
 // benchElectivesJSON 生成接近真实规模的 findElectivesData 响应体。
-// 真实平台当前激活学期为 3 个发布、约 82 门课（体育 3 + 校本1 40 + 校本2 39），
-// 单门课 16 字段。规模对齐后 benchmark 的 B/op 才有工程意义。
+// 真实平台当前激活学期为 3 个发布、约 82 门课（体育 3 + 校本1 40 + 校本2 39）。
+// 夹具字段与产品 zhidao.Class 严格对齐（12 消费字段，LessonsDate/ApplyDate/PlanCount/
+// AuditedCount 已随产品剔除）——夹具与产品同构，基准的 B/op 才有工程意义。
 func benchElectivesJSON() []byte {
 	type cls struct {
 		ID              int    `json:"id"`
@@ -26,16 +27,12 @@ func benchElectivesJSON() []byte {
 		ClassName       string `json:"class_name"`
 		TeacherNameList string `json:"teacher_name_list"`
 		ClassroomName   string `json:"class_room_name"`
-		LessonsDate     string `json:"lessons_date"`
 		SelectedCount   int    `json:"selected_count"`
-		AuditedCount    int    `json:"audited_count"`
 		MaxCount        int    `json:"max_count"`
-		PlanCount       int    `json:"plan_count"`
 		CanSelect       bool   `json:"can_select"`
 		BtnType         int    `json:"btn_type"`
 		BtnText         string `json:"btn_text"`
 		Title           string `json:"title"`
-		ApplyDate       string `json:"apply_date"`
 	}
 	type pub struct {
 		PublishID   int    `json:"publishId"`
@@ -62,16 +59,12 @@ func benchElectivesJSON() []byte {
 				ClassName:       fmt.Sprintf("教学班%d", id),
 				TeacherNameList: "张三,李四",
 				ClassroomName:   "教学楼A101",
-				LessonsDate:     "周三第3-4节",
 				SelectedCount:   17,
-				AuditedCount:    17,
 				MaxCount:        36,
-				PlanCount:       36,
 				CanSelect:       true,
 				BtnType:         2,
 				BtnText:         "报名",
 				Title:           "",
-				ApplyDate:       "2026-09-13 09:00:00",
 			})
 		}
 		pubs = append(pubs, pub{

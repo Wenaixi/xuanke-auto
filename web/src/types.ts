@@ -1,4 +1,6 @@
-﻿// 与后端 API JSON 对应的类型定义
+﻿// 与后端 API JSON 对应的类型定义。字段与后端 zhidao.Class 严格对齐：
+// lessons_date/apply_date/plan_count/audited_count 前后端均零消费，已剔除
+//（后端 json "-" 剔除后响应体不再下发，类型同步瘦身——绝不声明永不消费的幻影字段）。
 
 export interface ClassItem {
   id: number
@@ -7,16 +9,12 @@ export interface ClassItem {
   class_name: string
   teacher_name_list: string
   class_room_name: string
-  lessons_date: string
   selected_count: number
-  audited_count: number
   max_count: number
-  plan_count: number
   can_select: boolean
   btn_type: number
   btn_text: string
   title: string
-  apply_date: string
 }
 
 export interface Publish {

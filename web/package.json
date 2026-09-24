@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "guard": "node --import jiti/register scripts/perf-countdown-guard.ts && node --import jiti/register scripts/target-guard-check.ts && node --import jiti/register scripts/admin-auth-check.ts && node --import jiti/register scripts/unauthorized-check.ts && node --import jiti/register scripts/lazy-route-guard.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",

@@ -1,9 +1,16 @@
-﻿import { useEffect, useMemo, useState } from "react"
+﻿import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
-import Select from "./routes/Select"
-import Admin from "./routes/Admin"
+// 性能专项 P-4：Select/Admin 改为路由级懒加载（React.lazy + Suspense）。
+// 单 bundle 422.57kB 中这两路由占大头；拆成独立 chunk 后登录首屏只加载主站
+// （Login + Dashboard + 共享 vendor），进入选课大厅/管理页才按需拉取对应 chunk。
+// 嵌入单 exe 形态兼容：vite chunk 落 dist 随 //go:embed all:dist 进 exe，SpaHandler
+// 按 fs.Stat 文件存在直接 200 服务（非 /api 不回落 index.html），懒 chunk 完全可寻址。
+// 黄金期风险防护：chunk 本地缓存（同源内嵌 ~ms 级）+ Suspense showDelay 缓冲，
+// 用户选课动作发生在主站已加载后，切页一次拉取后 chunk 常驻内存不再重复加载。
+const Select = lazy(() => import("./routes/Select"))
+const Admin = lazy(() => import("./routes/Admin"))
 import { ToastProvider } from "./components/ui/Toast"
 import { logout as apiLogout, UNAUTHORIZED_EVENT } from "./api/client"
 import type { Account, Sessions } from "./types"
@@ -288,6 +295,7 @@ export default function App() {
           <div className="canvas-bg-mask" />
         </div>
         <main className="app-content">
+          <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-neutral-500 text-xs">加载中…</div>}>
           {sessionToken ? (
             targetAccount ? (
               <Select
@@ -346,6 +354,7 @@ export default function App() {
           ) : (
             <Login onLogin={login} />
           )}
+          </Suspense>
         </main>
       </ToastProvider>
     </QueryClientProvider>

@@ -1,4 +1,4 @@
-//go:build windows && cgo
+//go:build windows && arm64 && cgo
 
 package zhidao
 
@@ -18,17 +18,12 @@ var embeddedModel []byte
 //go:embed assets/charsets_old.json
 var embeddedCharsets []byte
 
-//go:embed assets/onnxruntime.dll
+//go:embed assets/onnxruntime_win_arm64.dll
 var embeddedDll []byte
 
-// NativeDdddOcrRecognizer 真正的单二进制内置 ddddocr 识别引擎（纯 Go + ONNX 原生嵌入）。
-//
-// 运行原理：
-//  1. 模型（common_old.onnx，13MB）、字符集（charsets_old.json，56KB）和 ONNX Runtime（onnxruntime.dll，16MB）
-//     均通过 //go:embed 原生编译进单个 exe 二进制内部；
-//  2. 运行时若本地不存在，以 0.05 秒自动从内存释放到可执行目录旁或系统临时目录中；
-//  3. 使用 Microsoft ONNX Runtime C++ 引擎直接在 Go 进程中执行内存推理，单次识别仅需 5~10 毫秒；
-//  4. 宿主机完全不需要安装 Python，彻底实现真正的开箱即用与单文件便携交付！
+// NativeDdddOcrRecognizer 单二进制内置 ddddocr 识别引擎（Windows ARM64 版）。
+// 与 amd64 版同构，仅内嵌的 ONNX Runtime 为官方 win-arm64 库
+// （onnxruntime_win_arm64.dll，需构建时经 scripts/fetch-onnxruntime.sh 下载到 assets/）。
 type NativeDdddOcrRecognizer struct {
 	mu     sync.Mutex
 	ocr    *ddddocr.DdddOcr
@@ -50,13 +45,13 @@ func (r *NativeDdddOcrRecognizer) ensureInit() error {
 			return
 		}
 
-		dllPath := filepath.Join(dir, "onnxruntime.dll")
+		dllPath := filepath.Join(dir, "onnxruntime_win_arm64.dll")
 		modelPath := filepath.Join(dir, "common_old.onnx")
 		charsetsPath := filepath.Join(dir, "charsets_old.json")
 
 		// 释出动态库与模型（若已存在且大小一致则跳过，避免每次重启重复写入）
 		if err := dumpIfDiff(dllPath, embeddedDll); err != nil {
-			r.err = fmt.Errorf("释出 onnxruntime.dll 失败: %w", err)
+			r.err = fmt.Errorf("释出 onnxruntime_win_arm64.dll 失败: %w", err)
 			return
 		}
 		if err := dumpIfDiff(modelPath, embeddedModel); err != nil {
@@ -67,16 +62,10 @@ func (r *NativeDdddOcrRecognizer) ensureInit() error {
 			r.err = fmt.Errorf("释出 charsets_old.json 失败: %w", err)
 			return
 		}
-		// modelPath/charsetsPath 必须与释出文件名一致：官方 OCR 模式按
-		// ModelDir 下固定名 common_old.onnx / charsets_old.json 查找。
 
 		ddddocr.SetOnnxRuntimePath(dllPath)
-		// 关键：必须走官方 OCR 模式（ModelDir），绝不走自定义模型路径
-		// （ImportOnnxPath+CharsetsPath）——移植库的自定义模型分支用 ImageNet 归一化
-		// (x-0.456)/0.224 预处理，与官方内置模型训练时的 (x-0.5)/0.5 不一致，同一张
-		// 英数字验证码识别结果完全错误（实测 cap1: 官方 'sjmh' vs 自定义 'S43'），
-		// 登录链路验证码提交必被拒。官方 OCR 模式从 ModelDir 读取 common_old.onnx
-		// 与 charsets_old.json，预处理与 Python 原版逐字段一致。
+		// 必须走官方 OCR 模式（ModelDir）：自定义模型分支用 ImageNet 归一化
+		// (x-0.456)/0.224，与官方内置模型 (x-0.5)/0.5 不一致，识别结果错误。
 		opts := ddddocr.Options{
 			Ocr:      true,
 			ModelDir: dir,
@@ -121,7 +110,7 @@ func (r *NativeDdddOcrRecognizer) Recognize(img []byte) (string, error) {
 	})
 }
 
-// NativeDdddOcrAvailable 检查是否支持原生内置识别（只要内嵌切片有数据，Windows 环境即 100% 可用）。
+// NativeDdddOcrAvailable 检查是否支持原生内置识别（内嵌切片有数据即 100% 可用）。
 func NativeDdddOcrAvailable() bool {
 	return len(embeddedDll) > 0 && len(embeddedModel) > 0 && len(embeddedCharsets) > 0
 }

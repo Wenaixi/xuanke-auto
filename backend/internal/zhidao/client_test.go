@@ -534,3 +534,28 @@ func TestParseElectives(t *testing.T) {
 		t.Fatalf("课程解析错误: %+v", p.Classes)
 	}
 }
+
+// TestParseElectivesDerivesClassFull 满员派生字段 class_full 单一记忆点：
+// 名额未公布（max_count=0）、未满、满员三种形态的响应解析后 ClassFull 必须
+// 分别 false/false/true——前端 5 处 + 后端 5 处手写判据收敛为后端单点下发。
+func TestParseElectivesDerivesClassFull(t *testing.T) {
+	body := []byte(`{"code":0,"selectElectivesData":[{"publishId":1,"electivesClassList":[
+		{"id":1,"max_count":0,"selected_count":5},
+		{"id":2,"max_count":10,"selected_count":3},
+		{"id":3,"max_count":10,"selected_count":10}
+	]}]}`)
+	ed, err := parseElectives(body)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(ed.Publishes) != 1 || len(ed.Publishes[0].Classes) != 3 {
+		t.Fatalf("发布/课程数量不符: %+v", ed)
+	}
+	got := map[int]bool{}
+	for _, c := range ed.Publishes[0].Classes {
+		got[c.ID] = c.ClassFull
+	}
+	if got[1] || got[2] || !got[3] {
+		t.Fatalf("ClassFull 派生错误（1 未公布=false, 2 未满=false, 3 满员=true）: %+v", got)
+	}
+}

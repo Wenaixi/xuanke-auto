@@ -573,9 +573,14 @@ type Class struct {
 	ClassName       string `json:"class_name"`
 	TeacherNameList string `json:"teacher_name_list"`
 	ClassroomName   string `json:"class_room_name"`
-	SelectedCount   int    `json:"selected_count"`
-	MaxCount        int    `json:"max_count"`
-	CanSelect       bool   `json:"can_select"`
+	SelectedCount int    `json:"selected_count"`
+	MaxCount      int    `json:"max_count"`
+	// ClassFull 满员派生字段（单一记忆点）：= MaxCount>0 && SelectedCount>=MaxCount。
+	// 真实 select.js 实证 maxCount 判据不存在（CountEntry 注释），真满员判定以本字段
+	// 为唯一来源——前端 isFull/筛选/排序/徽章与后端 classFullInSnapshot 的 10 处
+	// 手写同式判据统一收敛为读本字段（架构深化 C），0=名额未公布绝不误判满员。
+	ClassFull     bool   `json:"class_full"`
+	CanSelect     bool   `json:"can_select"`
 	BtnType         int    `json:"btn_type"`
 	BtnText         string `json:"btn_text"`
 	Title           string `json:"title"`
@@ -668,6 +673,11 @@ func parseElectives(body []byte) (*ElectivesData, error) {
 	}
 	out := &ElectivesData{BeginTimes: raw.BeginTimes}
 	for _, p := range raw.SelectElectivesData {
+		// class_full 单一记忆点：派生判据只在解析端算一次（架构深化 C），
+		// 调度器与前端一律读本字段，不再各自手写 MaxCount>0 && SelectedCount>=MaxCount。
+		for i := range p.Classes {
+			p.Classes[i].ClassFull = p.Classes[i].MaxCount > 0 && p.Classes[i].SelectedCount >= p.Classes[i].MaxCount
+		}
 		out.Publishes = append(out.Publishes, Publish{
 			PublishID:   p.PublishID,
 			PublishName: p.PublishName,

@@ -106,8 +106,14 @@ func withConcurrency(fn func() (string, error)) (string, error) {
 	return fn()
 }
 
-// recognizeCaptcha 调用 OpenAI 兼容视觉 API 识别验证码图片，返回识别的字符。
-// 使用独立 http.Client，避免与主客户端的 token 请求互相影响。
+// recognizeCaptcha 验证码识别统一 seam：所有识别引擎（Vision / 本机 ddddocr /
+// 原生 ONNX）共用同一段输出后处理——归一剔除非英数字字符 + 长度门禁 3~5。
+// 归一与门禁必须坐落在 seam 而非某个 adapter 内部：charsets_old.json 字符集
+// 共 8210 项、其中 8148 项为汉字/西里尔等非英数字，且 SetRanges 全仓未启用，
+// CTC 解码对全字符集 argmax——本机引擎完全可能吐出含噪文本。若判据只在
+// Vision 一家，本机引擎的噪声会原样流进登录表单（login.go submitLogin 的
+// form.Set("captcha")），平台必拒且 3 次重试全废。门禁失败返回 error，
+// 由 login.go 的 err != nil 分支刷新验证码重试。
 func recognizeCaptcha(cfg VisionConfig, img []byte) (string, error) {
 	// 空识别器：未配置时直接报错（Vision 缺 key / ddddocr 未初始化）
 	if cfg.recognizer == nil {
@@ -116,10 +122,22 @@ func recognizeCaptcha(cfg VisionConfig, img []byte) (string, error) {
 		}
 		return "", fmt.Errorf("验证码识别器未初始化")
 	}
-	return cfg.recognizer.Recognize(img)
+	raw, err := cfg.recognizer.Recognize(img)
+	if err != nil {
+		return "", err
+	}
+	norm := normalizeCaptchaText(raw)
+	if len(norm) < 3 || len(norm) > 5 {
+		// 不把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
+		// 多租户/NAT 共享出口场景尤甚）——只回传字符数，调试痕迹留在进程日志。
+		log.Printf("[zhidao] 识别字符数 %d 不匹配平台 3~5 位（引擎 %T，原文已脱敏不回传）", len(norm), cfg.recognizer)
+		return "", fmt.Errorf("识别长度为 %d，不匹配平台 3~5 位字符", len(norm))
+	}
+	return norm, nil
 }
 
-// recognizeViaVision OpenAI 兼容视觉 API 识别核心实现（recognizeCaptcha 的底层实际调用）。
+// recognizeViaVision OpenAI 兼容视觉 API 识别核心实现（VisionRecognizer 的底层调用）；
+// 本函数只返回原始识别文本，归一在 seam 完成。
 func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 	if cfg.APIKey == "" {
 		return "", fmt.Errorf("未配置视觉 API Key")
@@ -192,21 +210,12 @@ type VisionRecognizer struct {
 	cfg VisionConfig
 }
 
-// Recognize 实现 CaptchaRecognizer 接口（带并发限流 + 结果规范化）。
+// Recognize 实现 CaptchaRecognizer 接口（带并发限流）。
+// 归一与 3~5 长度门禁已上提至 seam recognizeCaptcha（:109）统一施加，
+// 本方法只负责取原始识别文本——避免同一段判据跑两遍、长度告警日志重复。
 func (v *VisionRecognizer) Recognize(img []byte) (string, error) {
 	return withConcurrency(func() (string, error) {
-		raw, err := recognizeViaVision(v.cfg, img)
-		if err != nil {
-			return "", err
-		}
-		norm := normalizeCaptchaText(raw)
-		if len(norm) < 3 || len(norm) > 5 {
-			// 不再把净化前的识别原文拼进错误（原文回传客户端是信息外泄面，
-			// 多租户/NAT 共享出口场景尤甚）——只回传字符数，调试痕迹留在进程日志。
-			log.Printf("[zhidao] Vision 识别字符数 %d 不匹配平台 3~5 位（原文已脱敏不回传）", len(norm))
-			return "", fmt.Errorf("识别长度为 %d，不匹配平台 3~5 位字符", len(norm))
-		}
-		return norm, nil
+		return recognizeViaVision(v.cfg, img)
 	})
 }
 

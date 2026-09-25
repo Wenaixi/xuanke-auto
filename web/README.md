@@ -12,18 +12,19 @@ npm run dev          # 本地开发（Vite 代理 /api 到后端 :3091）
 ## 质检与构建
 
 ```bash
-npx tsc --noEmit     # TypeScript 类型检查
-npm run build        # tsc 类型检查 + Vite 生产构建（产物输出到 backend/web/dist）
+npx tsc --noEmit     # TypeScript 类型检查（仅开发用，非质量门）
+npm run build        # tsc -b + Vite 生产构建（产物输出到 backend/web/dist）——质量门
 npm run guard        # 五个防回归守卫断言（性能/目标保存/管理态/401/懒加载契约）
 npm run lint         # oxlint 快速 lint
 ```
 
-构建产物通过 Go 原生 `//go:embed` 嵌入后端单二进制，最终用户无需安装 Node.js。
+构建产物通过 Go 原生 `//go:embed` 嵌入后端单二进制，最终用户无需安装 Node.js。CI（`ci.yml`）每次 push/PR 都会跑 `build` + `guard`，本地可跳过（以 CI 为准）。
 
 ## 目录
 
-- `src/routes/`：路由页面（Login / Select 选课大厅 / Admin 管理后台，懒加载）
+- `src/routes/`：路由页面（Login / Select 选课大厅 / Dashboard / Admin 管理后台，路由级懒加载）
 - `src/components/`：共享组件（含性能敏感的 `CountdownLeaf` 倒计时叶子）
+- `src/lib/`：业务逻辑（`adminAuth` 管理态、`targetGuard` 目标保存守卫、`useTickingCountdown` 倒计时）
 - `scripts/`：防回归守卫脚本（`npm run guard` 执行，CI 也跑）
 - `public/bg.jpg`：水墨背景图
 
@@ -38,3 +39,4 @@ npm run lint         # oxlint 快速 lint
 
 - 前端回归以 `npm run build` 为准（项目根 `tsc --noEmit` 是 references 空壳，不报错，必须 `tsc -b`）。
 - 涉及与后端交互的数据契约（如 /state、/electives、/admin/* 响应字段），改动时两端同步，以 `README.md` 与后端 `handler.go` 为准。
+- UI 设计语言：纯黑白极简 + 瑞士国际排版（见根 `CLAUDE.md`「UI 设计系统规范」）；新增界面保持同风格，不用彩色/emoji/大圆角阴影。

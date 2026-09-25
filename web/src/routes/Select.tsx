@@ -1,7 +1,7 @@
 ﻿import { memo, useMemo, useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, selectElective, exitElective } from "../api/client"
-import type { Account, ClassItem, ElectivesData, Target, SchedulerState, Publish } from "../types"
+import type { Account, ClassItem, ElectivesData, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"
@@ -10,7 +10,8 @@ import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
-import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave } from "../lib/targetGuard"
+import { cleanStaleSelected, selectedHasStalePublish } from "../lib/targetGuard"
+import { useTargetSave } from "../lib/useTargetSave"
 import {
   ArrowLeft,
   ArrowDownWideNarrow,
@@ -192,25 +193,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // rev>0 守卫保护的"用户清空目标后轮询旧 courses 再次回填撤销清空"语义
   // 在这里由"只合并一次"延续：用户改动后的轮询不再重放回显（见下方回显 effect）。
   const echoedRef = useRef(false)
-  // 回显完成状态（state 而非 ref）：防抖 effect 依赖必须能感知"回显流程完成"以驱动
-  // 重跑——ref 变化不触发 effect。仅由回显 effect 置位一次，作为守卫拦下改动的自愈
-  // 信号（见防抖回调内的回显未完成守卫与 echo effect 的空 courses 分支）。
-  const [echoDone, setEchoDone] = useState(false)
   // 用户真实改动计数：驱动自动保存的 400ms 防抖；回显数据不经过它，故不会触发无意义保存。
   // 注意：修复后它只归 pick()/清空操作自增——轮询拉回的 publishes 变化绝不触发保存。
   const [rev, setRev] = useState(0)
-  // 镜像 ref：handleBack/flushTargets 是渲染闭包捕获的 async 函数，等待循环期间
-  // 用户新改动触发重渲染不会更新闭包里的 selected/rev 快照——flush 在消费时刻
-  // 必须读 ref 拿最新状态，否则旧快照会把等待期间的新改动覆盖删除。
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
-  const revRef = useRef(rev)
-  revRef.current = rev
-  // /state 到达状态镜像：防抖 effect 依赖不含 stateData（轮询刷新不得重置 400ms 窗口），
-  // 回调闭包捕获的 stateData 恒为 effect 创建时的旧值——回显未完成守卫必须读 ref
-  // 拿"首帧是否已到达"的最新判断（首帧未到 = 后端旧目标尚未经回显合并进 selected）。
-  const stateDataRef = useRef(stateData)
-  stateDataRef.current = stateData
   const [search, setSearch] = useState("")
   const [onlyAvailable, setOnlyAvailable] = useState(false)
   const [sortTightest, setSortTightest] = useState(false)
@@ -223,14 +208,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
   // 重建实例（selected/echoedRef/rev 全复位），此处守卫只兜底"未来改为不重置挂载"的
   // 意外回归：account 变化时同步复位回显/编辑态，绝不让旧账号残留目标污染新账号
   // （401 被动吊销自动切剩余账号时，旧账号 selected 会被防抖 PUT 整包覆盖掉新账号目标）。
-  // 声明于 echoedRef/rev/setRev/setEchoDone 之后（本文件顶部状态区），TDZ 不触发。
+  // 声明于 echoedRef/rev/setRev 之后（本文件顶部状态区），TDZ 不触发。
   const [accountKey, setAccountKey] = useState(account)
   if (accountKey !== account) {
     setAccountKey(account)
     setSelected({})
     setRev(0)
     echoedRef.current = false
-    setEchoDone(false)
   }
 
   // 本地每秒刷新倒计时：收敛到 lib/useTickingCountdown 自 tick 组件。
@@ -268,9 +252,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     if (courses.length === 0) {
       // /state 首帧到达且确证后端无旧目标（courses 空）：echoed 完成——否则全程无旧
       // 目标的账号用户改动会被防抖回显守卫永久拦下（置脏无自愈信号）。清空语义/全
-      // 清空守卫不受影响（echoDone 只做放行信号，不写 selected）。
+      // 清空守卫不受影响（echoDone 布尔只做放行信号，不写 selected）。
       echoedRef.current = true
-      setEchoDone(true)
       return
     }
     // effect 声明于 `const publishes` 之前（TDZ），必须用已声明的 data 自行推导，
@@ -327,7 +310,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       })
     }
     echoedRef.current = true
-    setEchoDone(true)
+    // 回显完成信号（echoDone）已由 useTargetSave 内纯数据判据重建
+    //（stateData 到达 && courses 字段存在）——/state 到达驱动防抖 effect 重跑自愈，
+    // 语义与旧 setEchoDone(true) 等价（见 hook 防抖 effect 依赖注释）。
   }, [stateData, data, rev, selected, toast])
 
   const publishes = data?.publishes ?? []
@@ -405,386 +390,19 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     setRev((r) => r + 1) // 标记选课改动，触发自动保存防抖
   }
 
-  // 自动保存：选课一变（仅用户点击），400ms 防抖后整包 PUT 到后端；成功静默，失败仅提示
-  // 保存串行化——飞行中的 PUT 完成后立即补发一次最新快照，绝不出现
-  // "旧 PUT 后到覆盖新数据"的乱序丢失；内存 target 与后端最终一致。
-  // body 必须包成后端 TargetsRequest 期望的 {"targets":[...]} 对象——
-  // 此前发裸数组 100% 解码失败（后端 json 解码进 struct 直接报错），目标永远存不进库。
-  const lastJson = useRef("")
-  const targetRef = useRef<Target[]>([])
-  const savingRef = useRef(false)
-  const dirtyRef = useRef(false)
-  // 已卸载标记——组件卸载后（返回控制台）绝不再发起新的网络请求
-  // 或重发退避。此前卸载 cleanup 只清"当时挂着"的退避 timer，flush 补发失败后再
-  // scheduleRetry 挂的新 timer 无人清理 → 组件卸载后 2/4/8/16/16s 最多 5 次孤儿请求，
-  // 每次失败都全局 toast 轰炸已回到 Dashboard 的用户。卸载后重试也毫无意义（目标
-  // 后端已有、改动已尽力）——直接停手。
-  const unmountedRef = useRef(false)
-  // 失败重发状态——attempt 累计连续失败次数、timer 为退避重发定时器。
-  // 成功或用户产生新改动都会清零；连续失败 5 次停手，等下一次改动重新驱动。
-  const retryState = useRef({ attempt: 0, timer: null as ReturnType<typeof setTimeout> | null })
-  // 卸载清理：中断仍在排队的退避重发定时器，防止 onDone 返回后副作用残留
-  // 挂载时复位 unmountedRef——StrictMode 开发态会对组件执行
-  // mount→unmount→remount 两遍，原实现只有置 true 的 cleanup、二次挂载时已卸载标记
-  // 恒真，saveNow/scheduleRetry 全部短路，目标改动静默丢失且无任何报错。重挂载后
-  // 复位到 false，本轮会话保存链路恢复正常；真正卸载时 cleanup 依旧置位停手（卸载后防孤儿重试契约不变）。
-  useEffect(
-    () => {
-      unmountedRef.current = false
-      return () => {
-        unmountedRef.current = true
-        if (retryState.current.timer) clearTimeout(retryState.current.timer)
-      }
-    },
-    []
-  )
-  const resetRetry = () => {
-    if (retryState.current.timer) clearTimeout(retryState.current.timer)
-    retryState.current.timer = null
-    retryState.current.attempt = 0
-  }
-  // 守卫拦下（数据缺席/发布重建/联查空/漂移）是安全拦截：目标安全、后端旧目标未被
-  // 抹除，且守卫命中不置 dirtyRef——终局 toast 只对"真实保存失败"（dirtyRef，仅
-  // saveNow catch 与飞行中标记补发会置）触发，守卫场景自然不弹，绝无"目标保存失败"
-  // 误导归因（rev>0 亦然）。
-  const pendingUnsaved = () =>
-    dirtyRef.current || savingRef.current || retryState.current.timer !== null
-  const scheduleRetry = () => {
-    const attempt = retryState.current.attempt
-    if (attempt >= 5) return // 连续失败 5 次后停止自动重发（等用户改动触发新一轮）
-    const delay = Math.min(2 ** attempt, 16) * 2000 // 指数退避：2s / 4s / 8s / 16s / 16s
-    retryState.current.attempt = attempt + 1
-    retryState.current.timer = setTimeout(() => {
-      retryState.current.timer = null
-      void saveNow()
-    }, delay)
-  }
-  const saveNow = async () => {
-    if (unmountedRef.current) return // 已卸载（返回控制台）：不再发起/继续重试
-    savingRef.current = true
-    try {
-      const targets = targetRef.current
-      const json = JSON.stringify(targets)
-      if (json === lastJson.current) return // 回显等非用户改动：跳过重复保存
-      await api("/targets?account=" + encodeURIComponent(account), {
-        method: "PUT",
-        body: JSON.stringify({ targets }),
-        session: sessionToken,
-      })
-      if (unmountedRef.current) return // 卸载后成功也不落 lastJson（避免干扰后续）
-      lastJson.current = json
-      resetRetry() // 保存成功：清掉退避重发状态
-    } catch (e: any) {
-      // 卸载后失败也绝不 toast——与"卸载后不轰炸"意图对齐
-      if (unmountedRef.current) return
-      toast({
-        title: "目标保存失败",
-        description: e.message || "通信异常，请重试",
-        variant: "destructive",
-      })
-      // 失败保留 dirty（内存目标仍未持久化），并安排带退避的重发——
-      //网络抖动/瞬时故障下不再退化为"尽力而为"，直至成功或用户新改动接管。
-      dirtyRef.current = true
-      scheduleRetry()
-    } finally {
-      savingRef.current = false
-      if (unmountedRef.current) return // 已卸载：不再补发
-      // 保存期间用户又改了目标（且非失败重试态）：立即补发一次最新快照，
-      // 避免旧 PUT 后到覆盖新数据。失败重发走上面的退避定时器，不在此紧循环。
-      if (dirtyRef.current && retryState.current.attempt === 0) {
-        dirtyRef.current = false
-        void saveNow()
-      }
-    }
-  }
-  // 退出前立即保存挂起的目标改动：返回按钮的防抖窗口（<400ms）内最后一次点选
-  // 或重发退避排队中的改动，不在此刻落库就永失。复用 lastJson 去重 +
-  // savingRef/dirtyRef 串行化，绝不与飞行中的 PUT 乱序覆盖。
-  // 无用户改动（rev===0）时绝不整包覆盖——回显数据本就是后端
-  // 目标的镜像、无需回写；而进页数据未就绪时 selected/publishes 为空，此时 PUT
-  // {"targets":[]} 会把后端已有目标整包抹除（窗口关闭后 publishes 恒空时必现）。
-  // 清空全部目标仍是用户改动（rev>0），仍正确落库。
-  // rev>0 但 publishes 已空（窗口开启瞬间平台短暂清空 / 关闭后
-  // 恒空）时也不能整包覆盖——targets 由 [publishes × selected] 联查构建，任一为空则
-  // targets=[] 是一个"假清空"，会把已落库目标永久抹除。守卫"发布缺席 + 已有选中
-  // 目标"=数据缺席绝非用户意图；只有 selected 全空（用户明确清空全部）才合法 PUT []。
-  // 此守卫的渲染期常量判据会被防抖/flush 回调在 400ms 后读旧闭包
-  // 值；判据已全部移入消费时刻（见 flushTargets 与防抖回调内的
-  // "selectedCount>0 却构建出空集 = 假清空"守卫），渲染期常量已无引用，删除。
-  const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
-    const ids = new Set(pubs.map((p) => p.publish_id))
-    // 空 targets 时 every 恒真——空集防御已由各消费点的
-    // "联查产物为空 + 已有选中 = 假清空"守卫覆盖（防抖回调 + flushTargets 双闸）。
-    return targets.every((t) => ids.has(t.publish_id))
-  }
-  const flushTargets = () => {
-    // 消费时刻读 ref：handleBack 等待循环内用户新改动后，渲染闭包的 rev/selected
-    // 是旧快照，必须取 ref 里的最新值——否则等待窗口内新增的课程被忽略。
-    const latestSelected = selectedRef.current
-    const latestRev = revRef.current
-    const latestSelectedCount = Object.values(latestSelected).reduce(
-      (n, arr) => n + arr.length,
-      0
-    )
-    if (latestRev === 0) return
-    // 回显未完成守卫：与防抖回调同款判据（见防抖回调内"回显未完成守卫"）——/state 首帧
-    // 未到达（stateData===undefined）或首帧携带旧目标（courses 非空）时，后端旧目标
-    // 尚未经回显 effect 合并进 selected，此刻 flush 拿"只含用户新改动"的 selected
-    // 整包 PUT 会把后端旧目标覆盖删除（"加一门"变"替换全部"）。handleBack 的 5s
-    // 等待只保证"等待期间合并完成"——/state 首帧持续失败超时后，守卫在这里兜住：
-    // 置脏跳过、不 PUT，脏块保留在内存 selected（守卫不置 dirtyRef——终局绝不误报
-    // 保存失败），下次进入/刷新/回显完成后再落库
-    // （安全方向：绝不静默丢改动）。判据为纯数据（shouldDeferSave 不依赖 echoedRef）：
-    // /state 数据到达触发防抖 effect 重跑自愈，唯一解锁不求刷新。
-    // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下
-    // 编辑不闷死（selected 已含后端旧目标，整包 PUT 与后端一致），未回显仍推迟。
-    if (shouldDeferSave(stateDataRef.current, latestSelectedCount > 0, echoedRef.current)) {
-      return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
-    }
-    // 与防抖回调同款消费时刻守卫（同意图，判据从渲染期
-    // publishesMissing 升级为最新 publishesRef）——"发布缺席 + 已有选中"= 数据缺席
-    // 绝非用户清空意图，保留脏绝不 PUT [] 假清空；selectedCount 偏保守安全。
-    if (publishesRef.current.length === 0 && latestSelectedCount > 0) {
-      return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    // 发布集合整体重建后 selected 仍残留旧 publish_id 的非空条目——build()
-    // 只遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
-    // 后端已保存的旧目标（数据丢失）。前置守卫判有过期条目即置脏跳过；空数组键 =
-    // 用户主动清空（清空语义绝不复活），不判过期。与回显 effect 的 currentIds 过滤同判据。
-    // 命中给明确提示——守卫本身正确（保数据 > 可保存），但旧残留 key 的
-    // 对应 Tab 已消失、用户无法通过界面清除，若全程静默保存链就被锁死（黄金期改
-    // 目标永不落库且无任何反馈）。发布重建路径已在回显 effect 随建随清（首选出路），
-    // 此处 toast 兜底"清理未覆盖到的旧残留"，并把恢复路径指给用户（刷新后重新选择）。
-    if (selectedHasStalePublish(latestSelected, publishesRef.current)) {
-      if (!unmountedRef.current) {
-        toast({
-          title: "发布已更新",
-          description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
-          variant: "warning",
-        })
-      }
-      return
-    }
-    const targets: Target[] = []
-    for (const p of publishesRef.current) {
-      const list = latestSelected[p.publish_id] ?? []
-      list.forEach((cls, i) => {
-        targets.push({
-          publish_id: p.publish_id,
-          class_id: cls.id,
-          course_name: cls.course_name,
-          priority: i,
-        })
-      })
-    }
-    // 统一"用户有勾选但联查产物为空 = 假清空"守卫——目标集由
-    // [publishes × selected] 联查构建，任一为空即 targets=[]。判据是渲染期
-    // publishesMissing（回调时读旧闭包）；every 校验对空 targets 恒真。
-    // 这里在消费时刻校验"selectedCount>0 却构建出空集"：数据缺席/错位绝非用户清空
-    // 意图，保留脏跳过；selectedCount 只随用户改动所在渲染更新，只会偏保守绝不放过。
-    if (targets.length === 0 && latestSelectedCount > 0) {
-      return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    // 发布集合在"渲染→回调"窗口内重建（id 漂移）时，targets 的 publish_id 已
-    // 不属于当前发布集 → 这份快照是错位假清空，绝不 PUT，置脏等下次正确联查再落库。
-    if (!targetsUseCurrentPublishes(targets, publishesRef.current)) {
-      return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    targetRef.current = targets
-    if (savingRef.current) {
-      dirtyRef.current = true // 保存进行中：标记脏，让飞行中的 PUT 完成后补发本次快照
-      return
-    }
-    void saveNow()
-  }
-  // 返回控制台前必须把"在飞 PUT 的补发窗口"关掉——直接 onDone
-  // 会同步卸载：若点击返回时上一条目标保存仍在飞行（savingRef=true）而用户又改动过
-  // 目标，flushTargets 只置脏就返回；飞行 PUT 完成后 finally 发现已卸载（契约）
-  // 跳过补发，最后一批改动静默丢失。修复：先 flush，再等飞行中 PUT 结束（其 finally
-  // 会在卸载前自动补发最新快照），直到保存链静止才真正卸载。守卫拦下的假清空脏块
-  // （publishes 恒空）不在此列——那是防抖/flush 消费时刻双闸的刻意安全方向，
-  // 等无可等，绝不强行假清空。api 20s 超时兜底，返回按钮绝不无限挂起。
-  const handleBack = async () => {
-    // 消费时刻读 selectedRef 算"当前是否留有选中"（handleBack 无渲染闭包可直接用）：
-    // shouldDeferSave 第二参数——首帧携带旧目标但用户已全清空（hasSelected=false）时
-    // 放行立即保存，绝不等 5s 又当"待回显"打回（见 handleBack 下方注释的守卫语义）。
-    const hasSelectedNow = () =>
-      Object.values(selectedRef.current).reduce((n, arr) => n + arr.length, 0) > 0
-    // 回显合并先行：/state 首帧晚于用户首次点击到达时（stateData 仍为 undefined），
-    // 后端旧目标尚未经回显 effect 合并进 selected——此刻直接 flush 会用当前 selected
-    // （只含用户新改动）整包 PUT 覆盖删掉后端旧目标（"添加一门"变"替换全部"）。
-    // 只有回显合并完成（/state 已到且 courses 为空，即确证后端无旧目标）或首帧携带
-    // 旧目标已合并完毕才可立即开始保存；等待期间回显 effect 把旧目标补进 selected，
-    // flush 自然全量提交。判据与防抖/flush 同源（shouldDeferSave 纯数据判据，不依赖
-    // echoedRef）——保持数据处于"回显完成"语义才结束等待。
-    // 关键：等待只在"用户实际有改动"（revRef>0）时才需要——纯浏览（rev===0，SELECTED 0）
-    // 时 flush 本就在"无用户改动即跳过"处直接跳过、零覆盖风险，绝无理由等首帧。
-    // 5s 兜底：/state 持续失败时合并永不发生，等无可等继续——flush 内假清空守卫仍拦截
-    // 发布缺席的覆盖（安全方向）。注意 5s 等待只在"首帧未到"（stateData===undefined）
-    // 或首帧确实携带旧目标（courses 非空）时才会发生——courses 为空（窗口已关/无目标）
-    // 时回显 effect 已置位 echoedRef、条件不成立，点击返回立即放行。
-    // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下
-    // handleBack 等待立即放行（selected 已含后端旧目标、整包 PUT 与后端一致），
-    // 未回显仍等 5s 兜底。
-    if (revRef.current > 0 && shouldDeferSave(stateDataRef.current, hasSelectedNow(), echoedRef.current)) {
-      const deadline = Date.now() + 5000
-      // 轮询间隔 50ms：回显合并是 React 状态更新+渲染（一帧约 16ms），50ms 足够感知
-      // 完成且不抢调度；10ms 会让 5s 窗口内连开约 500 个定时器空转主线程。
-      // 数据判据：/state 到达且 courses 空即视为回显完成（courses 空=确证后端无旧目标，
-      // 回显 effect 空分支已置 echoedRef）。首帧持续失败时等满 5s 兜底继续（安全方向）。
-      // 第三参数 echoedRef.current——已回显完成的稳态下等待立即结束（不回显
-      // 永等 courses 非空）、未回显等满 5s 兜底（/state 持续失败时合并永不发生）。
-      while (shouldDeferSave(stateDataRef.current, hasSelectedNow(), echoedRef.current) && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50))
-      }
-      // 等合并 effect 的 setSelected 渲染提交落地，selectedRef 同步到含旧目标的合并结果
-      await new Promise((r) => setTimeout(r, 0))
-    }
-    for (let i = 0; i < 3; i++) {
-      // 首帧未到等满 5s 后，若回显合并仍未发生（/state 持续失败），继续 flush
-      // 是唯一合法路径——flush 内的假清空守卫（发布缺席 + 已有选中）仍拦截覆盖；若
-      // /state 已经成功但 courses 非空，回显 effect 必然已合并完成，5s 内 echoedRef 已
-      // 置位，条件不成立。本循环 flush 消费最新 ref 快照。
-      flushTargets()
-      // flush 已消费本轮最新 ref 快照，但 break 前必须等 React 下一帧落地——
-      // 若等待窗口刚有用户改动（pick 的 setRev → effect 挂 400ms 防抖 timer，异步）
-      // 此刻还没触发，onDone 同步卸载会清掉 timer，改动静默丢失。等一帧后复查
-      // revRef：与本轮 flush 消费的一致才真正静止；又变了就多等一轮 flush 收敛。
-      const flushedRev = revRef.current
-      if (!dirtyRef.current && !savingRef.current) {
-        await new Promise((r) => setTimeout(r, 0))
-        if (revRef.current === flushedRev) break
-        continue // 更晚的改动涌进来：多等一轮防抖/flush 收敛再卸载
-      }
-      // 保存链"待定工作"不只在飞 PUT——退避重试 timer 排队中
-      // （scheduleRetry 已挂 2/4/8/16s）同样表示内存与后端分叉、改动未落库。此前只等
-      // savingRef，退避 timer 在飞时被误判"已静止"→ 三轮后无条件 onDone 卸载、
-      // cleanup clearTimeout 取消排队重试 → 最后一批改动静默丢失且无任何提示
-      // （比"飞行 PUT 补发"少覆盖了失败重试路径）。此处等待 timer 触发后
-      // saveNow 的 finally 自接补发链收敛；持续失败则超时兜底，绝不无限挂起。
-      const pendingSaving = () => savingRef.current || retryState.current.timer !== null
-      if (pendingSaving()) {
-        const deadline = Date.now() + 21000
-        while (pendingSaving() && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 30))
-        }
-        continue // 收敛（或超时）后下一轮再 flush，拿最新目标再真实发一次保存
-      }
-      // 脏块被守卫拦下（等无可等）：下轮再试即放行
-    }
-    // 终局提示：仅当"用户真实改动过（rev>0）且保存链有真实失败"才提示。判据
-    // pendingUnsaved() 三信号（dirtyRef 真实失败/savingRef 在飞/timer 退避排队）为
-    // "确实未落库"；守卫拦下的假清空脏块是安全拦截（守卫不置 dirtyRef）绝不误报；
-    // rev=0（纯浏览/无改动）绝不报"改动未落库"。同 title 去重合并机制防轰炸。
-    if (revRef.current > 0 && pendingUnsaved()) {
-      toast({
-        title: "目标保存失败",
-        description: "改动未落库，返回后将以服务端保存的目标为准",
-        variant: "destructive",
-      })
-    }
-    onDone()
-  }
-  // 退出前 flush 已由"无用户改动即跳过"收敛（见 flushTargets），
-  // 防抖 effect 仍只由 rev 驱动（与零值守卫同款守卫）——轮询/回显/窗口收缩绝不触发保存。
-  // 附加 hasPublishes 布尔信号——开窗瞬间平台清空 publishes（假清空守卫拦下置脏）后发布恢复，只有 rev 驱动的话 effect 不重跑、无新 timer，
-  // 置脏的改动永不落库（"等发布恢复再落库"的注释承诺从未实现）。hasPublishes 从 false→
-  // true 时 effect 重跑 → 新 400ms timer → 消费时刻守卫通过 → 正常保存。publishes 非空期间
-  // 轮询刷新布尔值不变、effect 不重跑，绝不把 400ms 防抖窗口无限重置。
-  const hasPublishes = (data?.publishes?.length ?? 0) > 0
-  const publishesRef = useRef<readonly Publish[]>(publishes)
-  publishesRef.current = publishes
-  useEffect(() => {
-    if (rev === 0) return
-    // 用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
-    resetRetry()
-    const build = (): Target[] => {
-      const targets: Target[] = []
-      for (const p of publishesRef.current) {
-        const list = selected[p.publish_id] ?? []
-        list.forEach((cls, i) => {
-          targets.push({
-            publish_id: p.publish_id,
-            class_id: cls.id,
-            course_name: cls.course_name,
-            priority: i,
-          })
-        })
-      }
-      return targets
-    }
-    const timer = setTimeout(async () => {
-      // 回显未完成守卫：/state 首帧尚未到达或首个回显携带旧目标（courses 非空）时，
-      // 防抖回调不能拿"只含用户新改动"的 selected 整包 PUT 覆盖后端旧目标（"添加一门"
-      // 变"替换全部"）。渲染期的 stateData 是 effect 创建时的旧闭包，必须读 ref 判
-      // "首帧是否已到/是否存在旧目标"——首帧未到或有旧目标 → 置脏等回显合并（合并
-      // 触发 selected 变化 → effect 重跑 → 新 timer 携带完整目标落库，自愈）；courses
-      // 为空 = 确证后端无旧目标，直接放行。
-      // 判据为纯数据（shouldDeferSave 不依赖 echoedRef）：防抖 effect 只在 selected
-      // 变化时重跑——若守卫依赖"由 /state 首帧置位的 echoedRef"，/state 持续失败期间
-      // 守卫命中置脏后 selected 无变化（setSelected 返回同引用被 React bailout）→
-      // 订阅永不重入、保存链死锁至整页刷新；改由 stateData 驱动后，/state 数据到达
-      // 触发 effect 重跑 → 新 timer → 守卫通过 → 落库自愈。
-      // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下
-      // 防抖保存不闷死（selected 已含后端旧目标、整包 PUT 与后端一致），未回显仍置脏
-      // 等回显合并自愈。
-      if (shouldDeferSave(stateDataRef.current, selectedCount > 0, echoedRef.current)) {
-        return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
-      }
-      // 防抖回调在 400ms 后执行，读到的是渲染期旧闭包
-      // （publishesMissing 恒为本次渲染推算值）。若这期间发布集被清空（开窗瞬间平台
-      // 清空 / 窗口关闭），旧守卫失效且 targetsUseCurrentPublishes 对空 targets 恒真，
-      // build() 拿空 publishesRef 产出 [] 即"假清空"照常 PUT 抹掉后端目标。
-      // 于是在消费时刻用最新 publishesRef 判"发布缺席 + 已有选中"——数据缺席绝非用户
-      // 意图，跳过本次保存保留脏（等发布恢复/下次改动再落库）；selectedCount 只可能
-      // 偏保守（用户已清空时为假阳守卫，安全方向），绝不会放过真实假清空。
-      if (publishesRef.current.length === 0 && selectedCount > 0) {
-        return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      // 防抖消费时刻同款前置守卫——发布集合整体重建后 selected 残留旧 publish_id
-      // 非空条目时，build() 只产出新发布课程，整包 PUT 覆盖删除后端已保存的旧目标。
-      // 判定置于构建之前（残留旧发布时根本不该产出可 PUT 的目标）；空数组键 =
-      // 用户主动清空该发布（清空语义绝不复活），不判过期。
-      // 命中给明确提示（防抖回调可能迟于卸载执行，卸载后绝不弹 toast 轰炸）。
-      if (selectedHasStalePublish(selected, publishesRef.current)) {
-        if (!unmountedRef.current) {
-          toast({
-            title: "发布已更新",
-            description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
-            variant: "warning",
-          })
-        }
-        return
-      }
-      const next = build()
-      // 防抖消费时刻同款"联查产物为空 = 假清空"守卫——every
-      // 校验对空 targets 恒真，必须独立判"selectedCount>0 却产出空集"。仅在
-      // 发布全缺席（构建来源为空的极限情况）时，selectedCount 可能滞后于本次清空
-      // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
-      if (next.length === 0 && selectedCount > 0) {
-        return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      // 防抖消费时刻同样过"发布 id 全数校验"——publishesMissing 是渲染期旧值，只在
-      // load 时一次，防抖回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
-      if (!targetsUseCurrentPublishes(next, publishesRef.current)) {
-        return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      targetRef.current = next
-      if (savingRef.current) {
-        dirtyRef.current = true // 保存进行中：标记脏，完成后补发
-        return
-      }
-      void saveNow()
-    }, 400)
-    return () => clearTimeout(timer)
-    // echoDone：回显完成驱动 effect 重跑——场景 B（后端确证无旧目标，courses 空）
-    // 回显 effect 只置 echoedRef/echoDone、不改 selected，若无此依赖置脏的改动永不
-    // 重试落库；非空合并场景由 selected 变化驱动（双路并保）。回显只完成一次，不会
-    // 重置 400ms 防抖窗口。
-    // stateData：/state 数据到达触发 effect 重跑自愈——守卫（shouldDeferSave）命中的
-    // 改动置脏跳过时 selected 无变化（React bailout 不重跑），/state 首帧/刷新到达后
-    // 依赖 stateData 的重跑挂新 timer、守卫通过即落库（唯一解锁不求整页刷新）。
-  }, [rev, selected, sessionToken, toast, hasPublishes, echoDone, stateData])
+  // 目标自动保存收权 useTargetSave（C3-2）：保存链（镜像 ref/串行化/退避/守卫/防抖/
+  // handleBack 收敛）全部移入 hook，本组件瘦回渲染职责。echoedRef 仍归回显 effect
+  //（渲染态职责），hook 只读它做守卫第三参。
+  const save = useTargetSave({
+    account,
+    sessionToken,
+    selected,
+    rev,
+    publishes,
+    stateData,
+    echoedRef,
+    toast,
+  })
 
   const selectedCount = Object.values(selected).reduce((n, arr) => n + arr.length, 0)
 
@@ -835,8 +453,8 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 // 直接 onDone 会卸载组件、400ms 防抖 timer 被清理，最后一次点选
                 // 到返回间隔 <400ms 时整批目标永不 PUT。
                 // 改为等待保存链静止的异步句柄——flush 后若
-                // 在飞 PUT 完成会经 finally 自动补发（见 handleBack），全部落定才卸载。
-                void handleBack()
+                // 在飞 PUT 完成会经 finally 自动补发（见 hook 内 handleBack），全部落定才卸载。
+                void save.handleBack(onDone)
               }}
               className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
             >

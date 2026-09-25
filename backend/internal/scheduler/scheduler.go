@@ -615,11 +615,15 @@ func (s *Scheduler) RestoreDone(done map[string][]int) {
 	s.rebuildCoursesLocked()
 }
 
-// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录（顺序修正）：
-// 必须**先于** SetTargetsForAccount 循环调用——后者（用户重设目标恢复路径）会
-// `delete(s.refused, acct)` + `DeleteRefused(acct)` 清空该账号退选，若先循环再注入，
-// 注入的标记被恢复路径覆盖、持久化行也被删（退选被重启顺序抵消）。
-// main.go 已改为"先 LoadRefused+RestoreRefused，再逐账号 SetTargetsForAccount"。
+// RestoreRefused 注入重启前已手动退选的 (账号, 课程) 记录。
+// 实际调用序在 server.go:157-160：LoadRefused + RestoreRefused 排在逐账号
+// LoadTargets + RestoreTargets 循环（server.go:142-154）**之后**。
+// 保持此序的理由：RestoreTargets 零触碰 refused（它与 SetTargetsForAccount 的
+// 唯一区别正是不清 refused，见 CLAUDE.md 决策 6），故后跑的目标恢复既不会
+// 覆盖已注入的内存标记、也不会调 DeleteRefused 删库行。
+// 维护须知：绝不可改用 SetTargetsForAccount 走恢复——后者会
+// delete(s.refused, acct) + DeleteRefused(acct) 清空该账号退选，把注入的
+// 标记与持久化行一并删掉（退选被重启顺序静默抵消）。
 func (s *Scheduler) RestoreRefused(refused map[string][]int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1651,22 +1655,6 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			return
 		}
 	}()
-}
-
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return classifyPlatformError(err) == errRateLimit
-}
-
-// isWindowClosedError 平台在选课窗口关闭后对报名请求的返回特征（code=1 且提示已关闭/未开启）。
-// 与"课程满员"同样不可再报，调度器按满员记录避免窗口关闭后无限轰炸报名接口。
-func isWindowClosedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return classifyPlatformError(err) == errWindowClosed
 }
 
 func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time) bool {

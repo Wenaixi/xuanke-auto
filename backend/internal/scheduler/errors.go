@@ -2,9 +2,6 @@ package scheduler
 
 import (
 	"errors"
-	"io"
-	"log"
-	"net"
 	"strings"
 
 	"xuanke-auto/backend/internal/zhidao"
@@ -50,8 +47,3 @@ func classifyPlatformError(err error) platformErrorKind {
 	return errOther
 }
 
-// 保留旧的 isRateLimitError/isWindowClosedError 调用点迁移提示——
-// 删除前 grep 确认零残留；spawnChain 分支已先切换为 classifyPlatformError（C4-1 Step 5）。
-var _ = log.Printf
-var _ = io.EOF // errors.go 保留 zhidao 依赖（classify 使用），防误删 import
-var _ = net.OpError{}

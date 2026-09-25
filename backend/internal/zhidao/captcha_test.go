@@ -146,3 +146,57 @@ func TestSetCaptchaConcurrencyConcurrent(t *testing.T) {
 		t.Fatal("SetCaptchaConcurrency 在高并发热调时发生死锁！")
 	}
 }
+
+// 假 adapter：返回含汉字/空格/符号的原始识别文本，模拟本机 ddddocr 的 CTC
+// 全字符集 argmax 输出（charsets_old.json 8210 项中 8148 项非英数字）。
+type noisyRecognizer struct{ raw string }
+
+func (n noisyRecognizer) Recognize([]byte) (string, error) { return n.raw, nil }
+
+func TestRecognizeCaptchaSeamNormalizesAllAdapters(t *testing.T) {
+	// 用例设计判据：raw 归一后的期望长度必须落在 3~5，否则与 seam 的长度门禁
+	// 冲突——本表全部断言"归一后通过门禁并返回归一文本"。剔除噪声的用例要
+	// 预留足够有效字符："a掀b2" 归一为 "ab2"（3 位）过门禁；"a掀b" 归一为
+	// "ab"（2 位）会被门禁拦下，属 RejectsBadLength 的场景，不可放进本表。
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"纯英数字原样透传", "a1b2", "a1b2"},
+		{"含空格归一", " ab cd ", "abcd"},
+		{"含汉字剔除", "a掀b2", "ab2"},
+		{"含西里尔剔除", "aИb2c", "ab2c"},
+		{"多点噪声剔除", "掀a掀Иb2c", "ab2c"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := VisionConfig{BaseURL: "http://unused", APIKey: "k", recognizer: noisyRecognizer{raw: c.raw}}
+			got, err := recognizeCaptcha(cfg, []byte("img"))
+			if err != nil {
+				t.Fatalf("期望归一后通过门禁，got err %v", err)
+			}
+			if got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRecognizeCaptchaSeamRejectsBadLength(t *testing.T) {
+	// 归一后长度不在 3~5 → seam 报错，让 login 刷新验证码重试。
+	// 覆盖四种来源：本来就短、噪声剔除后变短、全噪声、过长。
+	for _, c := range []struct{ name, raw string }{
+		{"本来就短", "ab"},
+		{"噪声剔除后不足三位", "a掀b"},
+		{"全噪声无有效字符", "掀И"},
+		{"过长", "abcdef"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := VisionConfig{BaseURL: "http://unused", APIKey: "k", recognizer: noisyRecognizer{raw: c.raw}}
+			if _, err := recognizeCaptcha(cfg, []byte("img")); err == nil {
+				t.Fatalf("原始 %q 归一后长度越界，期望 seam 报错", c.raw)
+			}
+		})
+	}
+}

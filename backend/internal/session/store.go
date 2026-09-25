@@ -187,7 +187,10 @@ func (s *Store) IsAdmin(token string) bool {
 	return sess.Admin
 }
 
-// IsAdminToken 校验令牌是否有效且为管理员会话（requireAdminSession 用）。
+// IsAdminToken 校验令牌有效且为管理员会话（与 IsAdmin 同语义）。
+// 生产调用方是 api 层的 allowAccountOverride（判定 ?account= 穿透权限）；
+// requireAdminSession 走的是 IsAdmin。两者实现除末行外相同，保留两个名字
+// 是因为"是否可穿透"与"是否可进管理页"是两种不同的提问语义。
 func (s *Store) IsAdminToken(token string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -83,11 +83,11 @@ export async function api<T>(
       // 吊销时事件风暴翻倍）——r.status===401 前置已广播，此处跳过 body 层重复广播；
       // 旧式「HTTP 200 + body 401」形态仍由本分支覆盖，三种形态各单次广播。
       if (r.status !== 401) {
-        let account = ""
-        if (path.includes("account=")) {
-          const match = path.match(/[?&]account=([^&]+)/)
-          if (match) account = decodeURIComponent(match[1])
-        }
+        // 账号解析复用已导出的纯函数（:16-22）——此前此处内联一份逐字相同的正则
+        // 拷贝，而 scripts/unauthorized-check.ts 的断言只打导出那份，导致"测试面 ≠
+        // 生产面"：改内联段测试不红，改导出段生产不变。归一后守卫脚本真正守住
+        // 两条 401 广播路径。
+        const account = extractAccountFromPath(path)
         window.dispatchEvent(
           new CustomEvent(UNAUTHORIZED_EVENT, { detail: { account, session } })
         )

@@ -250,16 +250,10 @@ func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与目标写
 	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在目标写路径整体拒绝，
 	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
-	if d.allowAccountOverride(r) {
-		if q := r.URL.Query().Get("account"); q != "" {
-			if !d.accountExists(q) {
-				writeJSON(w, 1, nil, "账号不存在，无法查看课程")
-				return
-			}
-			acct = q
-		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
-			acct = targetAccts[0]
-		}
+	// 透传解析收权 resolveAccountForSession（C2）：fallback="core"（无透传回落核心账号）。
+	acct, handled := d.resolveAccountForSession(w, r, "core", "账号不存在，无法查看课程")
+	if handled {
+		return
 	}
 	if acct != "" && !d.IsAdminAccountName(acct) {
 		if data, ok := d.Sched.ElectivesSnapshotFor(acct); ok {
@@ -300,14 +294,10 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	// 缺口：幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable
 	// 放行 → ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案。凭据表 = "确实登录过"
 	// 的更强真理源（同课程读判据），查无此账号 → 明确拒绝，绝不让操作假装到达平台。
-	if d.allowAccountOverride(r) {
-		if q := r.URL.Query().Get("account"); q != "" {
-			if !d.accountExists(q) {
-				writeJSON(w, 1, nil, "账号不存在，无法执行报名操作")
-				return
-			}
-			acct = q
-		}
+	// 透传解析收权 resolveAccountForSession（C2）：fallback="self"（不回落，后文守卫兜底）。
+	acct, handled := d.resolveAccountForSession(w, r, "self", "账号不存在，无法执行报名操作")
+	if handled {
+		return
 	}
 	if acct == "" || d.IsAdminAccountName(acct) {
 		writeJSON(w, 1, nil, "请指定有效学生账号")
@@ -392,14 +382,10 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	// 与 handleElectiveSelect 同款凭据表校验，退选路径对称补齐。
-	if d.allowAccountOverride(r) {
-		if q := r.URL.Query().Get("account"); q != "" {
-			if !d.accountExists(q) {
-				writeJSON(w, 1, nil, "账号不存在，无法执行退选操作")
-				return
-			}
-			acct = q
-		}
+	// 透传解析收权 resolveAccountForSession（C2）：fallback="self"（不回落，后文守卫兜底）。
+	acct, handled := d.resolveAccountForSession(w, r, "self", "账号不存在，无法执行退选操作")
+	if handled {
+		return
 	}
 	if acct == "" || d.IsAdminAccountName(acct) {
 		writeJSON(w, 1, nil, "请指定有效学生账号")
@@ -478,47 +464,13 @@ const maxTargetsPerAccount = 100
 
 // handleSetTargets 设置目标课程并持久化（账号来自会话绑定；仅管理员会话可跨账号）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
-	acct := sessionAccount(r)
-	if d.allowAccountOverride(r) {
-		// 与 handleElectives/handleState 对齐——管理员会话不带 ?account=
-		// 时取"首个有目标的核心账号"兜底，绝不让目标落入管理员账号孤儿行（已清
-		// "任意串透传"孤儿行形态，此处是同族缺口：未传参时 acct 停在管理员名）。否则
-		// SetTargetsForAccount(admin, ts) 写进 store.targets 无主行（重启 LoadTargetsForAccount
-		// 幽灵复活）+ 污染 AccountsWithTargets 首账号选择（排序后 admin 可能成"核心账号"）。
-		// 学生账号（非管理员名）会话永远有自己的绑定额定账号，不受影响。
-		if q := r.URL.Query().Get("account"); q != "" {
-			// 透传目标账号必须真实存在（凭据表有记录）——
-			// 否则 SetTargetsForAccount 把目标写进孤儿行（store.targets 无主数据），
-			// 重启恢复 LoadTargetsForAccount 读回 → 目标幽灵复活；调度器按 targets 遍历时
-			// 该账号 ClientFor 返回不存在 → 目标永不执行、静默失败。凭据表由所有登录
-			// 路径写（LoginByPassword/issueSession），是"确实登录过"的更强真理源——
-			// 仅用 accounts 表（SaveAccountName 只在完整登录 issueSession 写）会误伤
-			// 用 authenticateDirect 直连建立会话的已登录账号。
-			creds, err := d.Store.LoadCredentials()
-			if err != nil {
-				writeJSON(w, 1, nil, "读取凭据失败: "+err.Error())
-				return
-			}
-			found := false
-			for _, c := range creds {
-				if c.Account == q {
-					found = true
-					break
-				}
-			}
-			if !found {
-				writeJSON(w, 1, nil, "账号不存在，无法设置目标")
-				return
-			}
-			acct = q
-		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
-			// 无透传时对齐核心账号（与 handleElectives/handleState 同款兜底）
-			acct = targetAccts[0]
-		} else {
-			// 无透传且无任何有目标账号：毫不可写入管理员账号 → 整体拒绝（管理员自己不是学生）
-			writeJSON(w, 1, nil, "请指定要设置目标的学生账号（?account=）")
-			return
-		}
+	// 透传解析收权 resolveAccountForSession（C2）：fallback="reject"——目标只该属于
+	// 学生账号；管理员未指定学生账号（且无任何有目标账号可兜底）→ 整体拒绝，
+	// 绝不把目标写入管理员账号孤儿行（决策：与 handleElectives/handleState 的
+	// "对齐核心账号"不同，目标是写入操作，无法确定归属时宁可拒绝绝不张冠李戴）。
+	acct, handled := d.resolveAccountForSession(w, r, "reject", "账号不存在，无法设置目标")
+	if handled {
+		return
 	}
 	var req TargetsRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -572,16 +524,10 @@ func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	// StateForAccount(ghost) 返回空 Courses + token_valid=true 假象，管理员无法分辨
 	// "账号不存在"与"账号没目标"（修掉的"全局帧假装成功"的轻量版）。凭据表
 	// 查无此账号 → 明确拒绝；与手动操作/课程读的?account= 契约全局对齐。
-	if d.allowAccountOverride(r) {
-		if q := r.URL.Query().Get("account"); q != "" {
-			if !d.accountExists(q) {
-				writeJSON(w, 1, nil, "账号不存在，无法读取状态")
-				return
-			}
-			acct = q
-		} else if targetAccts := d.Sched.AccountsWithTargets(); len(targetAccts) > 0 {
-			acct = targetAccts[0]
-		}
+	// 透传解析收权 resolveAccountForSession（C2）：fallback="core"（无透传回落核心账号）。
+	acct, handled := d.resolveAccountForSession(w, r, "core", "账号不存在，无法读取状态")
+	if handled {
+		return
 	}
 	st := d.Sched.StateForAccount(acct)
 	writeJSON(w, 0, st, "")
@@ -1124,6 +1070,44 @@ func sessionToken(r *http.Request) string {
 // 仅管理员会话（会话身份 Admin:true）可穿透，普通会话一律只操作自己绑定账号。
 func (d *Deps) allowAccountOverride(r *http.Request) bool {
 	return d.Sessions.IsAdminToken(sessionToken(r))
+}
+
+// resolveAccountForSession 账号透传解析单源（C2 收权：替代 handleElectives/handleElectiveSelect/
+// handleElectiveExit/handleState/handleSetTargets 五处内联复制）。核实确认：旧五处行为基本一致、
+// 文案各异，本函数统一实现 + 参数化差异，收权后逐字等价。
+// 四族语义：
+//   - 普通会话：忽略 ?account=（allowAccountOverride 仅管理员 true），返回会话绑定账号；
+//   - 管理员 + ?account=<真实账号>：透传该账号；凭据表查无 → 整体拒绝（notFoundMsg 为各点文案）；
+//   - 管理员无 ?account=：按 fallback 语义——
+//       "core"（electives/state）：回落首个有目标的核心账号；无核心 → 返回会话账号(admin)，
+//            由调用点后文守卫兜底（electives 落全局帧 / state 返回空状态）；
+//       "reject"（targets）：无核心账号 → 整体拒绝（绝不写管理员账号孤儿行，决策：目标只属学生）；
+//       "self"（select/exit）：不回落，返回会话账号(admin)，由后文 IsAdminAccountName 守卫兜底
+//         （旧实现 select/exit 本就无回落分支，行为保持）。
+// 返回 handled=true 表示已写拒绝响应，调用方直接 return。
+func (d *Deps) resolveAccountForSession(w http.ResponseWriter, r *http.Request, fallback, notFoundMsg string) (acct string, handled bool) {
+	acct = sessionAccount(r)
+	if !d.allowAccountOverride(r) {
+		return acct, false
+	}
+	if q := r.URL.Query().Get("account"); q != "" {
+		if !d.accountExists(q) {
+			writeJSON(w, 1, nil, notFoundMsg)
+			return "", true
+		}
+		return q, false
+	}
+	if fallback == "core" || fallback == "reject" {
+		if ts := d.Sched.AccountsWithTargets(); len(ts) > 0 {
+			return ts[0], false
+		}
+		if fallback == "reject" {
+			writeJSON(w, 1, nil, "请指定要设置目标的学生账号（?account=）")
+			return "", true
+		}
+	}
+	// "self" 或 "core"（无核心账号）：停在会话账号（admin），由调用点后文守卫兜底
+	return acct, false
 }
 
 // accountExists 校验账号在凭据表真实存在（LoadCredentials 逐账号比对）。

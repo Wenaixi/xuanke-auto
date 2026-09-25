@@ -1,0 +1,4 @@
+// 根 Gradle 构建脚本：声明 Android 插件版本（apply false 只声明不应用）。
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}

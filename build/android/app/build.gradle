@@ -1,0 +1,28 @@
+// 至道选课 Android APK Gradle 配置。
+// 与 backend/platform_android.go + java/ 壳配套：Go 引擎编译为 libxuanke.so
+// （arm64-v8a）放入 jniLibs，Java 壳 System.loadLibrary 加载。
+
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.xuanke.android'
+    compileSdk 35
+    // minSdk 26（Android 8.0）：前台服务通知渠道 + 抢课窗口期常驻的最低线
+    defaultConfig {
+        applicationId "com.xuanke.android"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "0.2.0"
+        ndk {
+            // 只发 arm64-v8a（覆盖 99% 真机；emulator x86 不发布，侧载仅 arm64）
+            abiFilters 'arm64-v8a'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug // 侧载：debug 签名可安装
+        }
+    }
+}

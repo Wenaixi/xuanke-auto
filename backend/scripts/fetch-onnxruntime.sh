@@ -33,14 +33,23 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "[fetch-onnxruntime] 下载 $URL"
 curl -fsSL "$URL" -o "$TMP/pkg"
-# tar -C 目标目录必须已存在（unzip -d 会自建，tar 不会）——先把解包目录建好
+# 解包目录必须提前建好（tar -C 不自建，unzip -d 会自建）
 mkdir -p "$TMP/x"
 if [[ "$PKG" == *.zip || "$PKG" == *.aar ]]; then
   unzip -o -q "$TMP/pkg" -d "$TMP/x"
 else
   tar -xzf "$TMP/pkg" -C "$TMP/x"
 fi
-cp "$TMP/x/$INNER" "$ASSETS_DIR/$OUT"
+# 各平台包顶层目录不一（tgz/zip 带 onnxruntime-<os>-<ver>/ 层，aar 直接是 jni/），
+# 不硬编码路径：按文件名定位。linux/mac 包内 .so/.dylib 是符号链接，-type f -o -type l 都要，
+# cp -L 跟随链接复制真实文件（Windows zip 内是普通文件，不受影响）。
+FNAME="$(basename "$INNER")"
+FOUND="$(find "$TMP/x" \( -type f -o -type l \) -name "$FNAME" | head -1)"
+if [ -z "$FOUND" ]; then
+  echo "[fetch-onnxruntime] 未在包内找到 $FNAME" >&2
+  exit 1
+fi
+cp -L "$FOUND" "$ASSETS_DIR/$OUT"
 
 # 体积粗校验（>10MB 视为非空库；精确 sha256 由 CI/后续加固）
 if [ "$(stat -c%s "$ASSETS_DIR/$OUT" 2>/dev/null || stat -f%z "$ASSETS_DIR/$OUT")" -lt 10000000 ]; then

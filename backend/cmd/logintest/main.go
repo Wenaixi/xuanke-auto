@@ -107,45 +107,22 @@ func init() {
 	}
 }
 
-// resolveLoginTestEngine 登录测试工具本地的引擎解析（与主程序 resolveCaptchaRecognizer 同构，
-// 但独立实现避免把 api 包牵进 cmd 依赖）：ddddocr → 原生尝试 → 本机 Python → 兜底；
-// vision → 有密钥直接用 → 兜底回退 ddddocr。返回 nil 表示无可用引擎。
+// resolveLoginTestEngine 登录测试工具本地的引擎解析——C5 下沉后改调
+// zhidao.ResolveCaptchaEngine 单源（与主程序 resolveCaptchaRecognizer 共享决策逻辑，
+// 不再独立复制；配置通道仍走本工具自己的 env/默认值，决策逻辑单源）。
+// 返回 nil 表示无可用引擎。
 func resolveLoginTestEngine(vision zhidao.VisionConfig, fallback bool) zhidao.CaptchaRecognizer {
-	local := func() zhidao.CaptchaRecognizer {
-		if zhidao.NativeDdddOcrAvailable() {
-			if r := zhidao.NewNativeDdddOcrRecognizer(); r != nil {
-				fmt.Println("识别引擎：内置原生 ddddocr（免 Python / 免 API 密钥）")
-				return r
-			}
-		}
-		if zhidao.LocalDdddOcrAvailable("") {
-			fmt.Println("识别引擎：本地 Python ddddocr")
-			return zhidao.NewLocalDdddOcrRecognizer("")
-		}
+	r := zhidao.ResolveCaptchaEngine(zhidao.EngineConfig{
+		VisionBaseURL:   vision.BaseURL,
+		VisionAPIKey:    vision.APIKey,
+		VisionModel:     vision.Model,
+		CaptchaEngine:   config.CaptchaEngineDefault(),
+		CaptchaFallback: fallback,
+	}, zhidao.NativeDdddOcrAvailable, func() bool { return zhidao.LocalDdddOcrAvailable("") })
+	if r.Recognizer == nil {
+		fmt.Println(r.Note)
 		return nil
 	}
-	if config.CaptchaEngineDefault() == "vision" {
-		if vision.APIKey != "" {
-			fmt.Println("识别引擎：OpenAI 兼容视觉 API 云识别")
-			return zhidao.NewVisionRecognizer(vision)
-		}
-		if fallback {
-			if r := local(); r != nil {
-				fmt.Println("（配置为 Vision 但无密钥，按兜底开关回退 ddddocr）")
-				return r
-			}
-		}
-		fmt.Println("识别不可用：配置为 Vision 但无 API 密钥，且本机无 ddddocr 可回退")
-		return nil
-	}
-	// 配置为 ddddocr
-	if r := local(); r != nil {
-		return r
-	}
-	if fallback && vision.APIKey != "" {
-		fmt.Println("识别引擎：配置为 ddddocr 但本机无引擎，按兜底开关回退 Vision")
-		return zhidao.NewVisionRecognizer(vision)
-	}
-	fmt.Println("识别不可用：配置为 ddddocr 但引擎缺失（未开启兜底或 Vision 无密钥）")
-	return nil
+	fmt.Println(r.Note)
+	return r.Recognizer
 }

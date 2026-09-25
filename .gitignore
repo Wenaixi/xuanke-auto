@@ -67,6 +67,12 @@ web/node_modules/
 web/dist/
 backend/web/dist/
 
+# ============= 全平台 onnxruntime 动态库（构建时经 fetch-onnxruntime.sh 下载） =============
+# 仅入库模型（common_old.onnx / charsets_old.json）；各平台 onnxruntime 库 16MB×N 不入 git
+backend/internal/zhidao/assets/libonnxruntime_*.so
+backend/internal/zhidao/assets/libonnxruntime_*.dylib
+backend/internal/zhidao/assets/onnxruntime_win_*.dll
+
 # ============= 运行日志 =============
 *.log
 server.log

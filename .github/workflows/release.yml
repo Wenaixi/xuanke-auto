@@ -394,10 +394,10 @@ jobs:
           cache-dependency-path: 'backend/go.sum'
 
       # Android SDK/NDK + JDK（Wails v3 ANDROID.md 同款依赖：API 35 + NDK 26.3 + JDK 21）
-      - name: Install Android SDK/NDK + JDK
+      - name: Install Android SDK/NDK + JDK + Gradle
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openjdk-21-jdk unzip
+          sudo apt-get install -y --no-install-recommends openjdk-21-jdk unzip gradle
           # cmdline-tools（sdkmanager 所在）
           mkdir -p /opt/android-sdk/cmdline-tools
           curl -fsSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip

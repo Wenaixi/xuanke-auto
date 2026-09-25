@@ -126,6 +126,32 @@ export function useTargetSave(opts: {
     }
   }
 
+
+  // 目标集由 [发布 × 已选课程] 联查构建——两个消费点（flushTargets 与防抖 effect）
+  // 的唯一差异是 selected 的数据源：前者读消费时刻的 ref 镜像 latestSelected，
+  // 后者读渲染闭包快照 selected（CLAUDE.md 契约 12：async 闭包捕获悖论，
+  // 消费时刻必须读镜像）。故 selected 由调用方传入，函数内部绝不自行取数。
+  // sel 的结构类型逐字沿用 opts.selected（:18），不换用 types.ts 的 ClassItem
+  // ——两处写法漂移正是本函数要消灭的那类重复。
+  const buildTargets = (
+    pubs: readonly Publish[],
+    sel: Record<number, { id: number; publish_id: number; course_name: string }[]>
+  ): Target[] => {
+    const targets: Target[] = []
+    for (const p of pubs) {
+      const list = sel[p.publish_id] ?? []
+      list.forEach((cls, i) => {
+        targets.push({
+          publish_id: p.publish_id,
+          class_id: cls.id,
+          course_name: cls.course_name,
+          priority: i,
+        })
+      })
+    }
+    return targets
+  }
+
   // 目标集由 [publishes × selected] 联查构建——任一为空即 targets=[] 是"假清空"。
   // 校验目标 publish_id 全属当前发布集（防"渲染→回调"窗口内发布重建的错位假清空）。
   const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
@@ -175,18 +201,7 @@ export function useTargetSave(opts: {
       }
       return
     }
-    const targets: Target[] = []
-    for (const p of publishesRef.current) {
-      const list = latestSelected[p.publish_id] ?? []
-      list.forEach((cls, i) => {
-        targets.push({
-          publish_id: p.publish_id,
-          class_id: cls.id,
-          course_name: cls.course_name,
-          priority: i,
-        })
-      })
-    }
+    const targets = buildTargets(publishesRef.current, latestSelected)
     // "用户有勾选但联查产物为空 = 假清空"——selectedCount 只随用户改动所在渲染更新，
     // 只会偏保守绝不放过真实假清空。
     if (targets.length === 0 && latestSelectedCount > 0) {
@@ -280,21 +295,6 @@ export function useTargetSave(opts: {
     if (rev === 0) return
     // 用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
     resetRetry()
-    const build = (): Target[] => {
-      const targets: Target[] = []
-      for (const p of publishesRef.current) {
-        const list = selected[p.publish_id] ?? []
-        list.forEach((cls, i) => {
-          targets.push({
-            publish_id: p.publish_id,
-            class_id: cls.id,
-            course_name: cls.course_name,
-            priority: i,
-          })
-        })
-      }
-      return targets
-    }
     const timer = setTimeout(async () => {
       // 回显未完成守卫：判据为纯数据（shouldDeferSave 不依赖 echoedRef）——
       // /state 数据到达触发 effect 重跑自愈，唯一解锁不求整页刷新。
@@ -321,7 +321,7 @@ export function useTargetSave(opts: {
         }
         return
       }
-      const next = build()
+      const next = buildTargets(publishesRef.current, selected)
       // "联查产物为空 = 假清空"——every 校验对空 targets 恒真，必须独立判
       // "selectedCount>0 却产出空集"。仅在发布全缺席的极限情况 selectedCount 可能滞后，
       // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。

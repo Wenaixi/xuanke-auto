@@ -3,11 +3,11 @@
 package main
 
 // Android 壳入口（Go c-shared 库）：Java System.loadLibrary("xuanke") 加载后，
-// JNI_OnLoad（见 jni_bridge.go 的 C 实现）先注册 native 方法，再调本文件导出的
+// JNI_OnLoad（见 jni_android.c）先注册 native 方法，再调本文件导出的
 // XuankeSetDataDir / XuankeStart / XuankeStop。
 //
 // cgo 前言限制：含 //export 的文件，其前言会被 cgo 复制到两份 C 输出文件，
-// 故此处**只能放声明、绝不能放定义**（定义统一放 jni_bridge.go 的 JNI_OnLoad）。
+// 故此处**只能放声明、绝不能放定义**（定义统一放 jni_android.c 的 JNI_OnLoad）。
 // 这里甚至不需要任何 extern 声明——//export 本身就会生成同名 C 导出符号。
 
 import "C"

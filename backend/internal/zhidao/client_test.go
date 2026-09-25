@@ -287,7 +287,7 @@ func TestSetVisionRebuildsWhenCurrentIsVisionOrNil(t *testing.T) {
 func TestReloginIfNeeded(t *testing.T) {
 	var reloginCalls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 验证码识别（硅基流动 mock）
+		// 验证码识别（OpenAI 兼容视觉 API mock）
 		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{

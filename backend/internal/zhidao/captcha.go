@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// CaptchaRecognizer 验证码识别引擎统一接口：ddddocr 本地 / 硅基流动 Vision 二选一。
+// CaptchaRecognizer 验证码识别引擎统一接口：ddddocr 本地 / OpenAI 兼容视觉 API 二选一。
 type CaptchaRecognizer interface {
 	Recognize(img []byte) (string, error)
 }
@@ -106,23 +106,23 @@ func withConcurrency(fn func() (string, error)) (string, error) {
 	return fn()
 }
 
-// recognizeCaptcha 调用硅基流动 Vision 模型识别验证码图片，返回识别的字符。
+// recognizeCaptcha 调用 OpenAI 兼容视觉 API 识别验证码图片，返回识别的字符。
 // 使用独立 http.Client，避免与主客户端的 token 请求互相影响。
 func recognizeCaptcha(cfg VisionConfig, img []byte) (string, error) {
 	// 空识别器：未配置时直接报错（Vision 缺 key / ddddocr 未初始化）
 	if cfg.recognizer == nil {
 		if cfg.APIKey == "" {
-			return "", fmt.Errorf("未配置验证码识别引擎：既无 Vision API Key 也未启用本地 ddddocr")
+			return "", fmt.Errorf("未配置验证码识别引擎：既无视觉 API Key 也未启用本地 ddddocr")
 		}
 		return "", fmt.Errorf("验证码识别器未初始化")
 	}
 	return cfg.recognizer.Recognize(img)
 }
 
-// recognizeViaVision 硅基流动 Vision 识别核心实现（recognizeCaptcha 的底层实际调用）。
+// recognizeViaVision OpenAI 兼容视觉 API 识别核心实现（recognizeCaptcha 的底层实际调用）。
 func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 	if cfg.APIKey == "" {
-		return "", fmt.Errorf("未配置硅基流动 API Key")
+		return "", fmt.Errorf("未配置视觉 API Key")
 	}
 	b64 := base64.StdEncoding.EncodeToString(img)
 	payload := map[string]any{
@@ -169,7 +169,7 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("硅基流动接口 HTTP %d: %s", resp.StatusCode, string(data[:min(len(data), 200)]))
+		return "", fmt.Errorf("视觉 API 接口 HTTP %d: %s", resp.StatusCode, string(data[:min(len(data), 200)]))
 	}
 	var j struct {
 		Choices []struct {
@@ -179,15 +179,15 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &j); err != nil {
-		return "", fmt.Errorf("硅基流动响应解析失败: %w", err)
+		return "", fmt.Errorf("视觉 API 响应解析失败: %w", err)
 	}
 	if len(j.Choices) == 0 {
-		return "", fmt.Errorf("硅基流动响应无 choices")
+		return "", fmt.Errorf("视觉 API 响应无 choices")
 	}
 	return strings.TrimSpace(j.Choices[0].Message.Content), nil
 }
 
-// VisionRecognizer 硅基流动 Vision 识别引擎（实现 CaptchaRecognizer 接口）。
+// VisionRecognizer OpenAI 兼容视觉 API 识别引擎（实现 CaptchaRecognizer 接口）。
 type VisionRecognizer struct {
 	cfg VisionConfig
 }

@@ -38,7 +38,7 @@ var sharedTransport = &http.Transport{
 // http.DefaultClient 无超时无自愈，真实平台 RST/FIN 时挂起至内核超时分钟级）。
 func SharedTransport() *http.Transport { return sharedTransport }
 
-// VisionConfig 硅基流动 Vision 验证码识别配置。
+// VisionConfig OpenAI 兼容视觉 API 验证码识别配置。
 type VisionConfig struct {
 	BaseURL string
 	APIKey  string

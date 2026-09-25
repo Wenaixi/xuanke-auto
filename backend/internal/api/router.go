@@ -114,7 +114,7 @@ func resolveCaptchaRecognizer(
 
 	// 配置为 vision（值域已由 handleAdminConfig 校验，其余值一律按 vision 处理）
 	if v := vision(); v != nil {
-		return captchaResolution{v, "vision", "硅基流动 Vision 云识别"}
+		return captchaResolution{v, "vision", "OpenAI 兼容视觉 API 云识别"}
 	}
 	if !cfg.CaptchaFallback {
 		return captchaResolution{nil, "none",

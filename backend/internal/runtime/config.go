@@ -14,7 +14,7 @@ type Config struct {
 	VisionAPIKey string
 	// VisionModel 验证码识别模型。
 	VisionModel string
-	// CaptchaEngine 验证码识别引擎（"vision"=硅基流动 Vision；"ddddocr"=本地 ddddocr）。
+	// CaptchaEngine 验证码识别引擎（"vision"=OpenAI 兼容视觉 API；"ddddocr"=本地 ddddocr）。
 	CaptchaEngine string
 	// CaptchaFallback 引擎兜底开关（默认关闭）。
 	// 关闭时两引擎严格互不回退：配置的引擎不可用即视为"识别不可用"，绝不静默换引擎

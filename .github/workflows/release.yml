@@ -81,7 +81,7 @@ jobs:
           $tpl = ("# 至道选课自动化 - 环境配置文件模板`n" +
                   "# 1. 必填项：管理员访问口令`n" +
                   "XUANKE_ADMIN_TOKEN=your_secure_admin_token_here`n" +
-                  "# 2. 可选：硅基流动 Vision API Key（教务登录验证码识别）`n" +
+                  "# 2. 可选：OpenAI 兼容视觉 API Key（教务登录验证码识别）`n" +
                   "# SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`n" +
                   "# 3. 可选：激活码机制开关（on=启用；off=关闭）`n" +
                   "XUANKE_ACTIVATION=on`n" +
@@ -184,7 +184,7 @@ jobs:
           $tpl = ("# 至道选课自动化 - 环境配置文件模板`n" +
                   "# 1. 必填项：管理员访问口令`n" +
                   "XUANKE_ADMIN_TOKEN=your_secure_admin_token_here`n" +
-                  "# 2. 可选：硅基流动 Vision API Key（教务登录验证码识别）`n" +
+                  "# 2. 可选：OpenAI 兼容视觉 API Key（教务登录验证码识别）`n" +
                   "# SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`n" +
                   "# 3. 可选：激活码机制开关（on=启用；off=关闭）`n" +
                   "XUANKE_ACTIVATION=on`n" +
@@ -273,7 +273,7 @@ jobs:
           # 1. 必填项：管理员访问口令（用于进入管理后台、生成与分发激活码）
           XUANKE_ADMIN_TOKEN=your_secure_admin_token_here
 
-          # 2. 可选项：硅基流动 Vision API Key（教务登录验证码识别；Linux/macOS 版无内置引擎时需填写）
+          # 2. 可选项：OpenAI 兼容视觉 API Key（教务登录验证码识别；Linux/macOS 版无内置引擎时需填写）
           # SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
           # 3. 可选项：激活码机制开关（on=启用；off=完全关闭，教务账密登录直接进入）

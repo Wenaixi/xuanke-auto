@@ -31,7 +31,7 @@ cd backend && CGO_ENABLED=1 go build -o xuanke.exe .
 | XUANKE_ADMIN_TOKEN | 随机生成 | 管理口令（必填；缺失拒绝启动） |
 | XUANKE_ADMIN_NAME | admin | 管理员登录账号名 |
 | XUANKE_CAPTCHA_ENGINE | ddddocr | 识别引擎（ddddocr=本地离线免密钥；vision=云识别需填 SF_API_KEY） |
-| SF_API_KEY | 空 | 硅基流动 Vision 密钥（仅 vision 引擎需要） |
+| SF_API_KEY | 空 | OpenAI 兼容视觉 API 密钥（仅 vision 引擎需要） |
 | XUANKE_ACTIVATION | off | 激活码机制开关（on=启用激活码；默认 off 登录直接进入系统） |
 | XUANKE_PORT | 3091 | HTTP 端口 |
 | XUANKE_DB | data/xuanke.db | SQLite 路径 |

@@ -670,7 +670,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
                     : "border-neutral-800 glass-input text-neutral-400 hover:text-white"
                 }`}
               >
-                硅基流动 Vision（云）
+                OpenAI 兼容视觉 API（云）
               </button>
               <button
                 onClick={() => setEngine("ddddocr")}
@@ -686,7 +686,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
             <p className="text-[11px] text-neutral-600 mt-0.5">
               {engine === "ddddocr"
                 ? "使用本机内置/本机 Python ddddocr（免 API 密钥）；本机缺失时将按下方开关决定是否回退"
-                : "需在后台填写硅基流动接口地址、密钥与模型；密钥未填时按下方开关决定是否回退"}
+                : "需在后台填写 OpenAI 兼容接口地址、密钥与模型；密钥未填时按下方开关决定是否回退"}
             </p>
           </div>
           <div className="flex items-center justify-between rounded-[var(--radius-sm)] border border-neutral-900 glass px-3 py-2.5">
@@ -794,7 +794,7 @@ function StatsTab({ account, sessionToken, activeTab }: { account: Account; sess
           label: "识别引擎",
           value: (() => {
             const e = s.captcha_active_engine ?? s.captcha_engine ?? ""
-            return e === "ddddocr" ? "本地 ddddocr" : e === "vision" ? "硅基流动 Vision" : "不可用（无可用引擎）"
+            return e === "ddddocr" ? "本地 ddddocr" : e === "vision" ? "OpenAI 兼容视觉 API" : "不可用（无可用引擎）"
           })(),
         },
         { label: "识别并发", value: String(s.captcha_concurrency ?? 1) },

@@ -126,7 +126,7 @@ func resolveLoginTestEngine(vision zhidao.VisionConfig, fallback bool) zhidao.Ca
 	}
 	if config.CaptchaEngineDefault() == "vision" {
 		if vision.APIKey != "" {
-			fmt.Println("识别引擎：硅基流动 Vision 云识别")
+			fmt.Println("识别引擎：OpenAI 兼容视觉 API 云识别")
 			return zhidao.NewVisionRecognizer(vision)
 		}
 		if fallback {

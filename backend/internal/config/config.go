@@ -32,7 +32,7 @@ type Config struct {
 	Port    string // HTTP 监听端口
 	DBPath  string // SQLite 数据库路径
 	BaseURL string // 至道平台根地址
-	// 硅基流动 Vision 验证码识别配置（登录必需）
+	// OpenAI 兼容视觉 API 验证码识别配置（登录必需；默认指向一个 OpenAI 兼容服务地址，可改任意兼容服务）
 	SFBaseURL string
 	SFAPIKey  string
 	SFModel   string
@@ -148,7 +148,7 @@ XUANKE_ADMIN_TOKEN=` + admin + `
 
 # 教务登录验证码识别密钥（可选留空；默认识别引擎 ddddocr 免密钥，vision 云识别才需填）
 SF_API_KEY=
-# 识别引擎（ddddocr=默认，本地免密钥无外网；vision=硅基流动云识别，需填 SF_API_KEY）
+# 识别引擎（ddddocr=默认，本地免密钥无外网；vision=OpenAI 兼容视觉 API，需填 SF_API_KEY）
 XUANKE_CAPTCHA_ENGINE=ddddocr
 # 识别引擎兜底开关（默认不回退：ddddocr 与 vision 严格互不兜底；如需双向兜底请在管理员后台开启）
 

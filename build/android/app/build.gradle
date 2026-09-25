@@ -7,7 +7,14 @@ apply plugin: 'com.android.application'
 android {
     namespace 'com.xuanke.android'
     compileSdk 35
+    // NDK 版本与 CI 安装的 NDK 26.3.11579264 精确定位（AGP 按 ndkVersion 找 SDK 内 NDK）
+    ndkVersion "26.3.11579264"
     // minSdk 26（Android 8.0）：前台服务通知渠道 + 抢课窗口期常驻的最低线
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+        }
+    }
     defaultConfig {
         applicationId "com.xuanke.android"
         minSdk 26

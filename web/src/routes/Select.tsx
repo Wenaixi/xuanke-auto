@@ -46,7 +46,7 @@ function priorityName(p: number): string {
 // CountdownLeaf 选课大厅倒计时叶子（memo 化）：每秒 cd.* 的 tick 只重渲染这
 // 六个数字文本节点。与 Dashboard 的 MemoCountdownMatrix 同构——useTickingCountdown
 // 每秒 setNow 归属路由宿主即重渲染宿主，宿主因自身 props/state 无变化而快速 bail out，
-// 重渲染成本从 1254 行整树降到这个叶子。props 仅六个数独数字 + isExpired 布尔，
+// 重渲染成本从 1290 行整树降到这个叶子。props 仅六个数独数字 + isExpired 布尔，
 // 每秒传入的四个数字串字符串引用稳定（padStart 返回同值字符串），memo 浅比较全命中。
 function CountdownLeaf({
   days,

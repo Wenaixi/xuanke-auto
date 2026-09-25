@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "test": "vitest run",
     "guard": "node --import jiti/register scripts/perf-countdown-guard.ts && node --import jiti/register scripts/target-guard-check.ts && node --import jiti/register scripts/admin-auth-check.ts && node --import jiti/register scripts/unauthorized-check.ts && node --import jiti/register scripts/lazy-route-guard.ts"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "tailwindcss": "^4.3.3",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.2"
   }
 }

@@ -2,15 +2,14 @@
 
 package main
 
-// Android 壳入口：Go 代码编译为 c-shared 库（-buildmode=c-shared + NDK
-// aarch64-linux-android clang），由 Java 侧 System.loadLibrary("xuanke") 加载后
-// 显式调 XuankeSetDataDir / XuankeStart / XuankeStop。
-// 与桌面 main 的分工：main() 只服务桌面形态；Android 无 main 入口（c-shared
-// 库的 main 不执行），全部导出函数由 Java JNI 调用。
+// Android 壳入口（Go c-shared 库）：Java System.loadLibrary("xuanke") 加载后，
+// JNI_OnLoad（见 jni_bridge.go 的 C 实现）先注册 native 方法，再调本文件导出的
+// XuankeSetDataDir / XuankeStart / XuankeStop。
+//
+// cgo 前言限制：含 //export 的文件，其前言会被 cgo 复制到两份 C 输出文件，
+// 故此处**只能放声明、绝不能放定义**（定义统一放 jni_bridge.go 的 JNI_OnLoad）。
+// 这里甚至不需要任何 extern 声明——//export 本身就会生成同名 C 导出符号。
 
-/*
-#include <stdlib.h>
-*/
 import "C"
 
 import (
@@ -24,10 +23,10 @@ import (
 // export XuankeSetDataDir
 // 注入 App 沙箱数据目录（Java filesDir）：config.dataDir 即 <filesDir>/data。
 // Java 壳 onCreate 最先调用（config.Load 之前）。
-func XuankeSetDataDir(dirCString *C.char) {
-	dir := C.GoString(dirCString)
-	log.Printf("[android] 数据目录注入: %s", dir)
-	config.SetDataDirForPlatform(dir)
+func XuankeSetDataDir(dir *C.char) {
+	dirStr := C.GoString(dir)
+	log.Printf("[android] 数据目录注入: %s", dirStr)
+	config.SetDataDirForPlatform(dirStr)
 }
 
 // export XuankeStart

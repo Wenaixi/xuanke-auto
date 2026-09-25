@@ -184,26 +184,21 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
         run: |
           cd dist-release
           $TAG = "$env:GITHUB_REF_NAME"
-          # 配置说明模板（与 amd64 相同）
-          @'
-# 抢课系统数据配置文件模板（生产部署时请放入 data/.env）
-# 1. 必填项：管理员访问口令（用于进入管理后台、生成与分发激活码）
-XUANKE_ADMIN_TOKEN=your_secure_admin_token_here
-
-# 2. 可选：硅基流动 Vision API Key（教务登录验证码识别；Windows 内置原生 ddddocr 引擎无需填写即可离线识别）
-# SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# 3. 可选：激活码机制开关（on=启用；off=完全关闭，教务账密登录直接进入）
-XUANKE_ACTIVATION=on
-
-# 4. 可选：验证码识别引擎（vision=默认云识别需填 SF_API_KEY；ddddocr=内置原生离线识别，免 Python 免密钥）
-XUANKE_CAPTCHA_ENGINE=ddddocr
-# 识别引擎兜底开关——默认关闭（ddddocr 与 vision 严格互不回退）；需双向兜底请在管理员后台开启
-
-# 5. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
-# XUANKE_PORT=3091
-# XUANKE_DB=data/xuanke.db
-'@ | Set-Content -Encoding utf8 .env.example
+          # 配置说明模板：多行 here-string 里的 XUANKE_*= 行会被 YAML 解析器误当 mapping，
+          # 必须用单行字符串写入（每行末尾分号）；与 amd64 同款内容。
+          $tpl = ("# 至道选课自动化 - 环境配置文件模板`n" +
+                  "# 1. 必填项：管理员访问口令`n" +
+                  "XUANKE_ADMIN_TOKEN=your_secure_admin_token_here`n" +
+                  "# 2. 可选：硅基流动 Vision API Key（教务登录验证码识别）`n" +
+                  "# SF_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`n" +
+                  "# 3. 可选：激活码机制开关（on=启用；off=关闭）`n" +
+                  "XUANKE_ACTIVATION=on`n" +
+                  "# 4. 可选：验证码识别引擎（ddddocr=内置离线；vision=云识别需填密钥）`n" +
+                  "XUANKE_CAPTCHA_ENGINE=ddddocr`n" +
+                  "# 5. 可选：服务端口与数据库路径`n" +
+                  "# XUANKE_PORT=3091`n" +
+                  "# XUANKE_DB=data/xuanke.db`n")
+          Set-Content -Encoding utf8 .env.example -Value $tpl
 
           New-Item -ItemType Directory -Force win-arm-pkg | Out-Null
           Copy-Item xuanke-windows-arm64.exe win-arm-pkg/xuanke.exe

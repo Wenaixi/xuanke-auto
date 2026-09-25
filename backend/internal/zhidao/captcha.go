@@ -169,7 +169,7 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("视觉 API 接口 HTTP %d: %s", resp.StatusCode, string(data[:min(len(data), 200)]))
+		return "", fmt.Errorf("视觉 API 接口 HTTP %d（地址 %s）: %s", resp.StatusCode, cfg.BaseURL, string(data[:min(len(data), 200)]))
 	}
 	var j struct {
 		Choices []struct {
@@ -179,10 +179,10 @@ func recognizeViaVision(cfg VisionConfig, img []byte) (string, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &j); err != nil {
-		return "", fmt.Errorf("视觉 API 响应解析失败: %w", err)
+		return "", fmt.Errorf("视觉 API 响应解析失败（地址 %s）: %w", cfg.BaseURL, err)
 	}
 	if len(j.Choices) == 0 {
-		return "", fmt.Errorf("视觉 API 响应无 choices")
+		return "", fmt.Errorf("视觉 API 响应无 choices（地址 %s）", cfg.BaseURL)
 	}
 	return strings.TrimSpace(j.Choices[0].Message.Content), nil
 }

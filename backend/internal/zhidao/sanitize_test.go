@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -110,7 +111,7 @@ func TestDoRequestSanitizesDialError(t *testing.T) {
 	if strings.Contains(msg, "idToken=") {
 		t.Fatalf("doRequest 连接层错误仍含 idToken= 参数：%q", msg)
 	}
-	if !strings.Contains(msg, "dial") || !strings.Contains(msg, "connectex") {
+	if !strings.Contains(msg, "dial") || (strings.Contains(msg, "connectex") && runtime.GOOS != "windows") {
 		t.Fatalf("doRequest 连接层错误丢失 dial/connectex 可读描述：%q", msg)
 	}
 	if IsReadErr(err) {

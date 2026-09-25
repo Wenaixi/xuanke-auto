@@ -161,7 +161,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	rt := runtime.New(runtime.Config{
 		ActivationEnabled: activation,
 		VisionBaseURL:     zhi.URL,
-		VisionAPIKey:      "***REMOVED***",
+		VisionAPIKey:      "sk-testkeyfortestonly",
 		VisionModel:       "m",
 	})
 	// 与 main 一致：注入真实 AES-256-GCM 加密（凭据与 vision_key 落库前加密）
@@ -677,7 +677,7 @@ func TestAdminConfigHotReload(t *testing.T) {
 	if cfg["activation_enabled"] != true {
 		t.Fatalf("初始激活码开关应为 true: %v", cfg)
 	}
-	if cfg["vision_api_key_masked"] != "****D***" {
+	if cfg["vision_api_key_masked"] != "****only" { // "sk-testkeyfortestonly" 后 4 位 = "only"
 		t.Fatalf("Vision key 应脱敏回显后 4 位: %v", cfg)
 	}
 	// 热更新：关闭激活码 + 改识别模型（Vision 保持 mock server 可登录）

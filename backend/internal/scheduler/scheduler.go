@@ -2048,3 +2048,142 @@ func (s *Scheduler) RemoveFull(acct string, classID int) {
 		s.state.Courses[idx].Result = ""
 	}
 }
+
+// ManualSelect 手动报名深方法（C4 收权：把 handler 手动决策树收进调度器）。
+// 内部完成：取排他锁 → 快照复核 → 同账号客户端 → 平台调用 → classify 分类 →
+// 重登/退避/记 full/落库。与 spawnChain 自动链共用 classifyPlatformError 与 inflight 位。
+// 差异（刻意保留，核实确认）：
+//   - CheckClassSelectable 手动专属：无快照/过期快照一律放行交给平台（与自动链的
+//     内联退避判定不同源——手动是"真实用户即时操作"，拿旧数据拦用户是错的）；
+//   - 同步执行（同一请求内持锁网络往返），无跨请求身份顶替窗口——身份防线
+//     由 MarkDone 内部的 ClientFor 复核覆盖（删号竞态写回防线，决策 B21）。
+// 补核实挖出的缺口：重登退避期（tokenValidForLocked=false）手动点报名必须短路——
+// 自动链重登退避期内手动路径此前照发 SelectClass 烧平台请求，这里前置检查。
+func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (string, error) {
+	client, ok := s.clients.ClientFor(acct)
+	if !ok || client == nil {
+		return "", errors.New("账号会话未建立或未登录")
+	}
+	// 退避期短路：token 已知失效（tokenValid=true || relogging=true）时手动点报名
+	// 平台必然 code=-1，且自动链正在重登——绝不放行烧平台请求。
+	s.mu.Lock()
+	if !s.tokenValidForLocked(acct) {
+		s.mu.Unlock()
+		return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
+	}
+	s.mu.Unlock()
+	// 快照复核（手动专属语义：无快照/过期快照放行，交给平台把关）
+	if reason, ok := s.CheckClassSelectable(acct, classID); !ok {
+		return "", errors.New(reason)
+	}
+	// 取排他锁（inflight 位，与自动链共享互斥——绝不并发双发包）
+	release, ok := s.TryAcquireSubmit(acct, classID)
+	if !ok {
+		return "", errors.New("该课程正在提交中，请勿重复操作")
+	}
+	defer release()
+	// 平台调用
+	msg, err := client.SelectClass(classID)
+	if err != nil {
+		// 分类处理（手动/自动共用 classifyPlatformError）
+		switch classifyPlatformError(err) {
+		case errAuth:
+			// 只触发重登，绝不 MarkTokenValid（决策 42-4：后者会击穿指数退避）
+			s.MaybeRelogin(acct)
+			if s.store != nil {
+				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
+					log.Printf("[scheduler] 手动报名失效日志落库失败: %v", aErr)
+				}
+			}
+			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
+		case errRead:
+			if s.store != nil {
+				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 报名请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
+					log.Printf("[scheduler] 手动报名 read 日志落库失败: %v", aErr)
+				}
+			}
+			return "", errors.New("报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
+		case errRateLimit:
+			s.mu.Lock()
+			s.markRateLimitedLocked(acct, classID, 30*time.Second)
+			s.mu.Unlock()
+			if s.store != nil {
+				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false); aErr != nil {
+					log.Printf("[scheduler] 手动报名风控日志落库失败: %v", aErr)
+				}
+			}
+			return "", errors.New("触发平台风控退避，请稍后再试")
+		case errWindowClosed:
+			s.mu.Lock()
+			s.markFullLocked(acct, Target{ClassID: classID, CourseName: courseName})
+			s.mu.Unlock()
+			return "", errors.New("选课窗口已关闭")
+		}
+		// errOther：原文案透传（含"课程不存在"等平台业务错误）+ 审计日志
+		if s.store != nil {
+			if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 手动报名失败: "+err.Error(), false); aErr != nil {
+				log.Printf("[scheduler] 手动报名失败日志落库失败: %v", aErr)
+			}
+		}
+		return "", err
+	}
+	// 成功：MarkDone（清 refused/inflight/full + 置 success + SaveSuccess + AppendLog）
+	if err := s.MarkDone(acct, classID, courseName, msg); err != nil {
+		return "", errors.New("报名成功但状态落库失败: " + err.Error())
+	}
+	return msg, nil
+}
+
+// ManualExit 手动退选深方法（C4 收权，与 ManualSelect 对称）。
+// 内部完成：取排他锁 → 同账号客户端 → 平台调用 → classify 分类 → 重登/落库。
+// 刻意不含 CheckClassSelectable——退选不该被快照满员/窗口拦截（用户可随时退自己已选的课，
+// 与旧 handler 语义一致）；窗口关闭时退选请求平台会正常处理（退选窗口通常长于报名）。
+func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
+	client, ok := s.clients.ClientFor(acct)
+	if !ok || client == nil {
+		return "", errors.New("账号会话未建立或未登录")
+	}
+	// 退避期短路（与 ManualSelect 同款：token 失效期绝不放行烧平台请求）
+	s.mu.Lock()
+	if !s.tokenValidForLocked(acct) {
+		s.mu.Unlock()
+		return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
+	}
+	s.mu.Unlock()
+	release, ok := s.TryAcquireSubmit(acct, classID)
+	if !ok {
+		return "", errors.New("该课程正在操作中，请勿重复操作")
+	}
+	defer release()
+	msg, err := client.ExitClass(classID)
+	if err != nil {
+		switch classifyPlatformError(err) {
+		case errAuth:
+			s.MaybeRelogin(acct)
+			if s.store != nil {
+				if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
+					log.Printf("[scheduler] 手动退选失效日志落库失败: %v", aErr)
+				}
+			}
+			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
+		case errRead:
+			if s.store != nil {
+				if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 退选请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
+					log.Printf("[scheduler] 手动退选 read 日志落库失败: %v", aErr)
+				}
+			}
+			return "", errors.New("退选请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
+		}
+		if s.store != nil {
+			if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 手动退选失败: "+err.Error(), false); aErr != nil {
+				log.Printf("[scheduler] 手动退选失败日志落库失败: %v", aErr)
+			}
+		}
+		return "", err
+	}
+	// 成功：RemoveDone（清 done/inflight + 记 refused + 置"已退选"状态 + 落库）
+	if err := s.RemoveDone(acct, classID); err != nil {
+		return "", errors.New("退选成功但状态落库失败: " + err.Error())
+	}
+	return msg, nil
+}

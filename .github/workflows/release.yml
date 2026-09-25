@@ -394,10 +394,14 @@ jobs:
           cache-dependency-path: 'backend/go.sum'
 
       # Android SDK/NDK + JDK（Wails v3 ANDROID.md 同款依赖：API 35 + NDK 26.3 + JDK 21）
-      - name: Install Android SDK/NDK + JDK + Gradle
+      - name: Install Android SDK/NDK + JDK + Gradle 8.7
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openjdk-21-jdk unzip gradle
+          sudo apt-get install -y --no-install-recommends openjdk-21-jdk unzip
+          # 固定 Gradle 8.7（AGP 8.5.2 要求 Gradle 8.7+；apt 版 4.x 太老无法加载 AGP 8）
+          curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          sudo unzip -q /tmp/gradle.zip -d /opt
+          echo "/opt/gradle-8.7/bin" >> "$GITHUB_PATH"
           # cmdline-tools（sdkmanager 所在）
           mkdir -p /opt/android-sdk/cmdline-tools
           curl -fsSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
@@ -429,11 +433,9 @@ jobs:
       - name: Assemble Release APK
         run: |
           cd build/android
-          # Gradle wrapper：用系统 gradle 直接构建（无 wrapper 则下载）
-          if [ ! -x gradlew ]; then
-            gradle wrapper --gradle-version 8.5 || true
-          fi
-          ./gradlew assembleRelease --no-daemon
+          # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；
+          # gradle 8.5 已 apt 安装，AGP 8.5.2 与其匹配）
+          gradle assembleRelease --no-daemon
           cp app/build/outputs/apk/release/app-release.apk ../../dist-release/xuanke-android-arm64.apk
 
       - name: Upload Android APK

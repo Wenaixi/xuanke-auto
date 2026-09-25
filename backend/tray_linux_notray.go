@@ -1,4 +1,4 @@
-//go:build linux && cgo && notray
+//go:build linux && cgo && notray && !android
 
 package main
 

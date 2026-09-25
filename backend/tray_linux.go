@@ -1,4 +1,4 @@
-//go:build linux && cgo && !notray
+//go:build linux && cgo && !notray && !android
 
 package main
 
@@ -8,6 +8,8 @@ package main
 // release 的 Linux 服务器构建带 -tags notray（CGO=1 只为内嵌 ddddocr，服务器
 // 无桌面托盘是纯负担；且 zig 交叉编 GTK 头会因 regparm 属性失败），见
 // tray_linux_notray.go（linux && cgo && notray 占位，与服务同跑无托盘）。
+// android：GOOS=android 隐含 linux build tag，但 Android 无桌面托盘且不编 GTK
+// （systray 需 GTK3 头，NDK 无），用 tray_android.go 占位（同 notray 语义）。
 // 关于对话框用 zenity 命令行对话框（多数桌面发行版自带；无 zenity 时打印到控制台）。
 
 import (

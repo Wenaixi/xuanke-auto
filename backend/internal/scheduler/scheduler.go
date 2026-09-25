@@ -2005,20 +2005,6 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 	return nil
 }
 
-// RemoveFull 外部手动或快照更新时解除满员标记。
-func (s *Scheduler) RemoveFull(acct string, classID int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.full[acct] != nil {
-		delete(s.full[acct], classID)
-	}
-	idx := s.statusIndexLocked(acct, classID)
-	if idx >= 0 && s.state.Courses[idx].Status == "failed" {
-		s.state.Courses[idx].Status = "pending"
-		s.state.Courses[idx].Result = ""
-	}
-}
-
 // ManualSelect 手动报名深方法（C4 收权：把 handler 手动决策树收进调度器）。
 // 内部完成：取排他锁 → 快照复核 → 同账号客户端 → 平台调用 → classify 分类 →
 // 重登/退避/记 full/落库。与 spawnChain 自动链共用 classifyPlatformError 与 inflight 位。

@@ -256,24 +256,39 @@ jobs:
           go-version: 'stable'
           cache-dependency-path: 'backend/go.sum'
 
-      - name: Build Multi-Platform Binaries (CGO=0)
+      # Linux/macOS 内置 go-ddddocr（CGO=1）——需交叉工具链与各平台 onnxruntime 资产
+      - name: Install cross compilers (linux/macOS arm64)
+        run: |
+          # darwin 交叉：zig cc 提供 aarch64-macos / aarch64-linux-gnu 目标（无需 apt gcc / osxcross，轻量可靠）
+          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /opt
+          echo "/opt/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
+
+      - name: Download onnxruntime assets (linux/macOS)
+        run: |
+          bash backend/scripts/fetch-onnxruntime.sh linux amd64
+          bash backend/scripts/fetch-onnxruntime.sh linux arm64
+          bash backend/scripts/fetch-onnxruntime.sh darwin arm64
+
+      - name: Build Linux AMD64 (CGO=1, embedded ddddocr)
         run: |
           cd backend
-          mkdir -p ../dist-release
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-amd64 .
 
-          TAG_NAME="${{ github.ref_name }}"
-          echo "Building release for tag: ${TAG_NAME}"
+      - name: Build Linux ARM64 (CGO=1, embedded ddddocr)
+        run: |
+          cd backend
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux-gnu" go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-arm64 .
 
-          # Linux x64 服务器部署版（免 CGO，单二进制开箱即用）
-          echo "Compiling Linux AMD64..."
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-amd64 .
+      - name: Build macOS ARM64 (CGO=1, embedded ddddocr)
+        run: |
+          cd backend
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC="zig cc -target aarch64-macos" go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
 
-          # macOS ARM64 (Apple Silicon M1/M2/M3/M4)
-          echo "Compiling macOS ARM64..."
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
-
-          # macOS x64 (Intel)
-          echo "Compiling macOS AMD64..."
+      - name: Build macOS AMD64 (CGO=0, no embedded ddddocr)
+        run: |
+          cd backend
+          # macOS x64 已停发 onnxruntime（Microsoft 停 macOS x86_64），继续 CGO=0 纯 Go
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-amd64 .
 
       - name: Package Unix Archives

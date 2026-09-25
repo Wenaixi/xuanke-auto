@@ -424,7 +424,9 @@ jobs:
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           NDK_ROOT="$ANDROID_HOME/ndk/26.3.11579264"
           cd backend
-          # c-shared：Go 导出 + JNI_OnLoad 桥（jni_bridge.c）同编进 libxuanke.so
+          # jniLibs 目录提前建好（go build -o 不自动建父目录）
+          mkdir -p ../build/android/app/src/main/jniLibs/arm64-v8a
+          # c-shared：Go 导出 + JNI_OnLoad 桥（jni_android.c）同编进 libxuanke.so
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \

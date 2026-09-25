@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"sync"
@@ -72,22 +70,27 @@ type Client struct {
 	token     string
 	cookies   map[string]string // 附加 Cookie（access_limit_cookie / zd_edu_cookie 等）
 	visionCfg VisionConfig
+
+	// loginEngine 登录引擎（C5-3 收权）：登录链路收进 LoginEngine 深模块，
+	// Client.Login 改调它；SetRecognizer/SetVision 双驱动保证引擎热切换同步。
+	loginEngine *LoginEngine
 }
 
 // New 创建客户端。绑定全局高性能连接池 sharedTransport。
 // 默认识别引擎为 Vision（跟随配置）；管理员可后续 SetRecognizer 热切换到 ddddocr 本地引擎。
+// C5 调整：登录链路收进 loginEngine（LoginEngine 深模块），New 同时构造登录引擎。
+// 注：识别引擎注入唯一通道 = SetRecognizer / SetVision（C5-2 删静默建 Vision 旁路后，
+// New 不再根据 APIKey 非空静默自建引擎——引擎由 accounts.Manager 按运行时配置显式注入）。
 func New(baseURL string, visionCfg VisionConfig) *Client {
-	if visionCfg.recognizer == nil && visionCfg.APIKey != "" {
-		visionCfg.recognizer = NewVisionRecognizer(visionCfg)
-	}
 	return &Client{
 		baseURL: baseURL,
 		http: &http.Client{
 			Timeout:   15 * time.Second,
 			Transport: sharedTransport,
 		},
-		cookies:   make(map[string]string),
-		visionCfg: visionCfg,
+		cookies:     make(map[string]string),
+		visionCfg:   visionCfg,
+		loginEngine: NewLoginEngine(baseURL, visionCfg),
 	}
 }
 
@@ -161,9 +164,17 @@ func (c *Client) SetCookies(cookies map[string]string) {
 	}
 }
 
+// CurrentRecognizer 返回当前生效的验证码识别引擎（测试/诊断读取；nil=无引擎）。
+func (c *Client) CurrentRecognizer() CaptchaRecognizer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.visionCfg.recognizer
+}
+
 // SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
 // 仅当当前引擎是 Vision 时才重建识别器（ddddocr 本地引擎不受 Vision 配置影响）。
 // 传入的 cfg.recognizer 为 nil 时保留当前引擎：SetVision 只管 Vision 配置，绝不挥动引擎切换。
+// 同时驱动 loginEngine.SetVision——登录引擎与客户端的视觉配置保持一致（C5-4 双驱动）。
 func (c *Client) SetVision(cfg VisionConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -174,21 +185,22 @@ func (c *Client) SetVision(cfg VisionConfig) {
 		cfg.recognizer = c.visionCfg.recognizer
 	}
 	c.visionCfg = cfg
+	if c.loginEngine != nil {
+		c.loginEngine.SetVision(cfg)
+	}
 }
 
 // SetRecognizer 热切换验证码识别引擎（ddddocr 本地 / Vision 二选一，管理员热重载）。
 // 传入 nil 表示当前无识别引擎（登录识别立即报错，直到配置恢复）。
+// 同时驱动 loginEngine.SetRecognizer——否则 SetRecognizer 后登录引擎的识别器恒 nil，
+// 新账号登录识别直接报错（C5-4 双驱动，与 accounts.Manager.SetRecognizer 同款语义）。
 func (c *Client) SetRecognizer(r CaptchaRecognizer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.visionCfg.recognizer = r
-}
-
-// CurrentRecognizer 返回当前生效的验证码识别引擎（测试/诊断读取；nil=无引擎）。
-func (c *Client) CurrentRecognizer() CaptchaRecognizer {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.visionCfg.recognizer
+	if c.loginEngine != nil {
+		c.loginEngine.SetRecognizer(r)
+	}
 }
 
 // Token 返回当前 token。
@@ -205,76 +217,30 @@ type YearTerm struct {
 	Selected   bool `json:"selected"`
 }
 
-// Login 完整登录链路：GET /login 初始化会话，GET /login/captcha 取验证码，
-// Vision 识别后 POST /login/doLogin。
-//
-// 平台限流安全设计（避免触发"登录失败次数过多"熔断）：
+// Login 完整登录链路（C5-3 收权 LoginEngine 深模块）：编排全在 loginEngine.Login，
+// 本方法负责调用 + 成功写回客户端内部态（账密/token/cookie——ReloginIfNeeded 依赖）。
+// 平台限流安全设计（避免触发"登录失败次数过多"熔断，loginEngine 内实现）：
 //   - 识别共 maxCaptchaAttempts 次：识别失败/识别码提交被拒，刷新验证码重新识别；
 //   - 验证码一次性：提交被拒（多为验证码过期）绝不带同一验证码重试，直接刷新重识别；
 //   - 任一环节网络/配置错误立即返回，绝不无谓重试；识别结果为空视为识别失败，不提交。
 //
 // 成功后将 token 写入客户端并返回。
 func (c *Client) Login(account, password string) (string, error) {
-	const maxCaptchaAttempts = 3 // 验证码识别最大次数（识别失败/提交被拒各刷新一次）
-	var lastErr error
-	for attempt := 1; attempt <= maxCaptchaAttempts; attempt++ {
-		// 每个 attempt 使用独立会话：登录页 Cookie 与验证码绑定
-		jar, _ := cookiejar.New(nil)
-		sess := &http.Client{Timeout: 15 * time.Second, Jar: jar}
-		ua := loginUserAgent
-
-		// 1. 初始化会话（失败即返回：无谓重试只会累积平台限流）
-		if err := fetchLoginPage(sess, ua, c.baseURL); err != nil {
-			return "", fmt.Errorf("初始化登录会话失败: %w", err)
-		}
-
-		// 2. 取验证码图片
-		img, err := fetchCaptchaImage(sess, ua, c.baseURL)
-		if err != nil {
-			return "", fmt.Errorf("获取验证码失败: %w", err)
-		}
-
-		// 3. Vision 识别（识别失败 → 刷新验证码换一次，最多 maxCaptchaAttempts 次）
-		c.mu.Lock()
-		vc := c.visionCfg
-		c.mu.Unlock()
-		captchaText, err := recognizeCaptcha(vc, img)
-		if err != nil || strings.TrimSpace(captchaText) == "" {
-			if err == nil {
-				err = fmt.Errorf("识别结果为空")
-			}
-			lastErr = fmt.Errorf("第%d次验证码识别失败: %w", attempt, err)
-			log.Printf("[login] 账号 %s 第%d次验证码识别失败（引擎 %T）：%v", account, attempt, vc.recognizer, err)
-			continue
-		}
-		log.Printf("[login] 账号 %s 第%d次验证码识别成功（引擎 %T，识别 %d 位字符）", account, attempt, vc.recognizer, len(captchaText))
-
-		// 4. 提交登录。验证码一次性：提交被拒（多为验证码过期）绝不带同一验证码重试，
-		//    直接 continue 刷新验证码重识别（重复提交只会浪费平台限流额度）。
-		identification, identErr := encryptIdentification(account, password)
-		if identErr != nil {
-			return "", identErr
-		}
-		token, submitErr := c.submitLogin(sess, ua, captchaText, identification)
-		if submitErr != nil {
-			lastErr = fmt.Errorf("第%d次验证码提交被拒: %w", attempt, submitErr)
-			log.Printf("[login] 账号 %s 第%d次验证码提交被拒：%v", account, attempt, submitErr)
-			continue // 验证码可能已失效：刷新验证码重识别
-		}
-		// 登录成功即把账密写入客户端内部——运行时登录（/api/login、
-		// LoginByPassword）此前从未 SetCredentials，客户端内部只有 Restore 路径有账密，
-		// 导致线上每次账密登录后自动重登（ReloginIfNeeded）永远报"未登录且无保存账密"：
-		// token 失效只能人工重新登录，黄金期失效即全程停摆。这里与 SetCredentials 的
-		// "客户端内部账密唯一绑定"语义完全一致——每个客户端只用自己的账密重登自己，
-		// 绝不交叉污染；ReloginIfNeeded 仍用内部 account/password，不受调用方参数影响。
-		c.SetCredentials(account, password, token)
-		return token, nil
+	token, err := c.loginEngine.Login(account, password)
+	if err != nil {
+		return "", err
 	}
-	if lastErr != nil {
-		log.Printf("[login] 账号 %s 登录失败（共 %d 次识别尝试）：%v", account, maxCaptchaAttempts, lastErr)
-		return "", fmt.Errorf("登录失败：验证码识别 %d 次均未通过（%s）", maxCaptchaAttempts, lastErr)
-	}
-	return "", fmt.Errorf("登录失败")
+	// 登录成功即把账密写入客户端内部——运行时登录（/api/login、
+	// LoginByPassword）此前从未 SetCredentials，客户端内部只有 Restore 路径有账密，
+	// 导致线上每次账密登录后自动重登（ReloginIfNeeded）永远报"未登录且无保存账密"：
+	// token 失效只能人工重新登录，黄金期失效即全程停摆。这里与 SetCredentials 的
+	// "客户端内部账密唯一绑定"语义完全一致——每个客户端只用自己的账密重登自己，
+	// 绝不交叉污染；ReloginIfNeeded 仍用内部 account/password，不受调用方参数影响。
+	c.SetCredentials(account, password, token)
+	// 登录会话 Cookie 从登录引擎同步回客户端（zd_edu_cookie + 服务端会话 Cookie），
+	// 保证 doRequest 的 Cookie 双通道携带完整会话。
+	c.SetCookies(c.loginEngine.SnapshotCookies())
+	return token, nil
 }
 
 // ErrUnauthorized token 失效（code=-1）错误。
@@ -344,69 +310,6 @@ func fetchCaptchaImage(sess *http.Client, ua string, baseURL string) ([]byte, er
 		return nil, fmt.Errorf("验证码图片为空")
 	}
 	return img, nil
-}
-
-// submitLogin 提交登录表单并登记成功后的 token/cookie。
-// 返回错误表示提交被拒（多为验证码过期），可由调用方刷新验证码重试。
-func (c *Client) submitLogin(sess *http.Client, ua, captchaText, identification string) (string, error) {
-	form := url.Values{}
-	form.Set("captcha", captchaText)
-	form.Set("identification", identification)
-	form.Set("uniqueId", uniqueDeviceID(ua, time.Now()))
-	// 契约微差：真实网站 `priorityId: localStorage["priorityId"]`
-	// 在学生首次登录（未进 /home/menus）时 undefined，jQuery 表单编码静默丢弃该键；
-	// Go 端恒发 `priorityId=` 空串。平台解析"空串"与"缺键"等价（不触发切换用户），
-	// 学生登录本就无真值，两形态无实质差异——保留空串（行为零变化），载明语义即可。
-	form.Set("priorityId", "")
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/login/doLogin",
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", ua)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Referer", c.baseURL+"/login")
-	resp, err := sess.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("提交登录请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := readBody(resp)
-	if err != nil {
-		return "", fmt.Errorf("读取登录响应失败: %w", err)
-	}
-
-	var j struct {
-		Code  int    `json:"code"`
-		IsOk  bool   `json:"isOk"`
-		Token string `json:"token"`
-		Msg   string `json:"msg"`
-	}
-	if err := json.Unmarshal(body, &j); err != nil {
-		return "", fmt.Errorf("登录响应解析失败: %w", err)
-	}
-	if !j.IsOk || j.Token == "" {
-		return "", fmt.Errorf("登录被拒绝: %s", j.Msg)
-	}
-	c.mu.Lock()
-	c.token = j.Token
-	c.cookies["zd_edu_cookie"] = j.Token
-	if u, _ := url.Parse(c.baseURL); u != nil {
-		for _, ck := range sess.Jar.Cookies(u) {
-			if ck.Name != "" && ck.Value != "" {
-				c.cookies[ck.Name] = ck.Value
-			}
-		}
-	}
-	if _, ok := c.cookies["access_limit_cookie"]; !ok {
-		// 占位补充：真实值由登录响应 Set-Cookie 收集（上方 sess.Jar.Cookies 循环），
-		// 平台未下发时用统一占位防缺失（与 accounts 重启恢复 SetCookies 的 "1" 同语义，
-		// 对齐 manager.go:313——不得用审查脱敏产物当活值）
-		c.cookies["access_limit_cookie"] = "1"
-	}
-	c.mu.Unlock()
-	return j.Token, nil
 }
 
 // doRequest 统一请求入口：转发到至道并附加 idToken 与 Cookie。

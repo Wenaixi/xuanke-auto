@@ -19,14 +19,17 @@ import (
 var captchaSemInit bool
 
 // initCaptchaAtStartup 初始化识别并发信号量（默认并发 1），并按当前引擎预置识别器。
-// 多次调用幂等：仅首次生效。
+// 幂等只护"并发信号量"（进程级单例）；识别引擎注入 applyCaptchaRecognizerFor 必须
+// **每次 Register 都跑**——每个 Register 的 accounts.Manager 是自己的实例，若被
+// captchaSemInit 短路跳掉，第二个及以后的 Register 的 Manager 模板零识别器，
+// ensure 新建客户端识别器恒 nil（"验证码识别器未初始化"）。此缺陷在 C5-2 删
+// zhidao.New 静默建 Vision 旁路后被暴露（此前客户端级旁路掩盖了模板级缺失）。
 func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
-	if captchaSemInit {
-		return
+	if !captchaSemInit {
+		captchaSemInit = true
+		cfg := rt.Get()
+		zhidao.NewCaptchaSemaphore(cfg.CaptchaConcurrency)
 	}
-	captchaSemInit = true
-	cfg := rt.Get()
-	zhidao.NewCaptchaSemaphore(cfg.CaptchaConcurrency)
 	applyCaptchaRecognizerFor(rt, accts)
 }
 

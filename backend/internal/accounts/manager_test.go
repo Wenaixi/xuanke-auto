@@ -62,6 +62,14 @@ func (f *fakeStore) SaveCredential(acct, passwordEnc, idToken string) error {
 
 func (f *fakeStore) LoadCredentials() ([]Credential, error) { return nil, nil }
 
+// visionSrvManager 构造带显式 Vision 识别引擎的 Manager（C5-2 后 New 不再静默建引擎，
+// 夹具显式注入——模拟生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→SetRecognizer 通道）。
+func visionSrvManager(_ *testing.T, baseURL string, st Store) *Manager {
+	m := New(baseURL, zhidao.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}, st)
+	m.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}))
+	return m
+}
+
 // loginRejectSrv 假教务平台：验证码识别恒成功、doLogin 恒拒绝——
 // 用于构造"登录失败"路径（密码错/平台瞬时拒绝），失败前先按真实客户端注册。
 func loginRejectSrv(t *testing.T) *httptest.Server {
@@ -93,6 +101,9 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string) {
 	t.Helper()
 	c := zhidao.New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	// C5-2 后 zhidao.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
+	// 显式注入（模拟生产 applyCaptchaRecognizerFor 的 SetRecognizer 通道）
+	c.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
 	c.SetCredentials(acct, "pwd", "tok-valid")
 	m.mu.Lock()
 	m.clients[acct] = c
@@ -107,7 +118,7 @@ func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string
 // 修复后（Token()!="" 保留）：绿——客户端仍存在，下个 tick 自动链继续工作。
 func TestLoginFailKeepsExistingValidClient(t *testing.T) {
 	srv := loginRejectSrv(t)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+	m := visionSrvManager(t, srv.URL, &fakeStore{})
 	seedValidClient(t, m, srv, "acct1")
 
 	if _, err := m.LoginByPassword("acct1", "wrong-pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err == nil {
@@ -125,7 +136,7 @@ func TestLoginFailKeepsExistingValidClient(t *testing.T) {
 // lastData 永不刷新）。"token 判别"绝不放行此路径。
 func TestLoginFailRemovesFreshShell(t *testing.T) {
 	srv := loginRejectSrv(t)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+	m := visionSrvManager(t, srv.URL, &fakeStore{})
 
 	if _, err := m.LoginByPassword("newbie", "wrong-pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err == nil {
 		t.Fatal("doLogin 恒拒绝：期望登录失败")
@@ -173,7 +184,7 @@ func gateSrv(t *testing.T) (*httptest.Server, *int32) {
 // 修复后（gateTryAcquire 非阻塞准入）：绿——拒绝且 doLogin 0 次。
 func TestLoginByPasswordRejectsWhenGateBudgetExhausted(t *testing.T) {
 	srv, calls := gateSrv(t)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+	m := visionSrvManager(t, srv.URL, &fakeStore{})
 
 	// 构造窗口 quota 已满现场：gateMu 下把窗口起点拨到当前、gateUsed 置满
 	m.gateMu.Lock()
@@ -197,7 +208,7 @@ func TestLoginByPasswordRejectsWhenGateBudgetExhausted(t *testing.T) {
 // 手动登录必须正常放行（且消耗一次预算，与排队重登共享同一闸门计数）——绝不误伤正常登录。
 func TestLoginByPasswordAllowedWhenGateBudgetAvailable(t *testing.T) {
 	srv, calls := gateSrv(t)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+	m := visionSrvManager(t, srv.URL, &fakeStore{})
 
 	// 预置旧窗口（跨分钟）：确保 gateTryAcquire 内部按"窗口已过期重置"分支放行
 	m.gateMu.Lock()
@@ -288,7 +299,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 // 修复前（无 else log）：退化为静默吞错，无测试覆盖。
 func TestLoginByPasswordEncryptFailLogs(t *testing.T) {
 	srv, calls := gateSrv(t)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}, &fakeStore{})
+	m := visionSrvManager(t, srv.URL, &fakeStore{})
 
 	m.gateMu.Lock()
 	m.gateWindow = time.Now().Add(-2 * time.Minute)

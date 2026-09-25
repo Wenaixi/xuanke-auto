@@ -38,7 +38,7 @@ func TestProbeDeletedThenRebuiltSameNameDropsSnapshot(t *testing.T) {
 	s := New(fa, &fakeStore{}, time.Time{}, 10*time.Millisecond)
 	// 预置识别槽（旧值，随后 PurgeAccount 清）
 	s.mu.Lock()
-	s.openTimeDetected["acct1"] = int64(1111111111111)
+	s.ws.setOpenTime("acct1", int64(1111111111111))
 	s.mu.Unlock()
 
 	// 旧链发起探测（goroutine）——进入 FindElectives 阻塞段
@@ -83,7 +83,7 @@ func TestProbeDeletedThenRebuiltSameNameDropsSnapshot(t *testing.T) {
 	s.mu.Lock()
 	_, hasData := s.acctData["acct1"]
 	_, hasAt := s.acctDataAt["acct1"]
-	_, hasOpen := s.openTimeDetected["acct1"]
+	hasOpen := !s.ws.openTimeFor("acct1").IsZero()
 	s.mu.Unlock()
 	if hasData || hasAt || hasOpen {
 		t.Fatal("旧身份探测回写应被丢弃（身份已变），acctData/acctDataAt/openTimeDetected 必须全空")
@@ -99,7 +99,7 @@ func TestProbeDeletedThenRebuiltSameNameDropsSnapshot(t *testing.T) {
 	}
 	s.mu.Lock()
 	snap := s.acctData["acct1"]
-	openNow := s.openTimeDetected["acct1"]
+	openNow := s.ws.openTimeFor("acct1").UnixMilli()
 	s.mu.Unlock()
 	if snap == nil || len(snap.Publishes) == 0 || snap.Publishes[0].PublishID != 99 {
 		t.Fatalf("acctData 应落新身份帧（99），实际: %+v", snap)
@@ -128,7 +128,7 @@ func TestProbeForAccountDropsWriteWhenRemoved(t *testing.T) {
 	s := New(fa, &fakeStore{}, time.Time{}, 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.openTimeDetected["acct1"] = int64(1111111111111)
+	s.ws.setOpenTime("acct1", int64(1111111111111))
 	s.mu.Unlock()
 
 	// 旧链发起探测（goroutine）——进入 FindElectives 阻塞段
@@ -163,7 +163,7 @@ func TestProbeForAccountDropsWriteWhenRemoved(t *testing.T) {
 	s.mu.Lock()
 	_, hasData := s.acctData["acct1"]
 	_, hasAt := s.acctDataAt["acct1"]
-	_, hasOpen := s.openTimeDetected["acct1"]
+	hasOpen := !s.ws.openTimeFor("acct1").IsZero()
 	s.mu.Unlock()
 	if hasData || hasAt || hasOpen {
 		t.Fatal("已删账号探测应整体放弃写回（acctData/acctDataAt/openTimeDetected 全空）")
@@ -185,7 +185,7 @@ func TestProbeChainSameClientIdentity(t *testing.T) {
 	fa := &fakeAccts{c: newFc, perAccount: map[string]*fakeClient{"acct1": newFc}, removed: map[string]bool{}}
 	s := New(fa, &fakeStore{}, time.Time{}, 10*time.Millisecond)
 	s.mu.Lock()
-	s.openTimeDetected["acct1"] = int64(1111111111111)
+	s.ws.setOpenTime("acct1", int64(1111111111111))
 	s.mu.Unlock()
 
 	data, err := s.ProbeForAccount("acct1")
@@ -197,7 +197,7 @@ func TestProbeChainSameClientIdentity(t *testing.T) {
 	}
 	s.mu.Lock()
 	snap := s.acctData["acct1"]
-	openNow := s.openTimeDetected["acct1"]
+	openNow := s.ws.openTimeFor("acct1").UnixMilli()
 	s.mu.Unlock()
 	if snap == nil || len(snap.Publishes) == 0 || snap.Publishes[0].PublishID != 77 {
 		t.Fatalf("acctData 应落新身份帧（77），实际: %+v", snap)

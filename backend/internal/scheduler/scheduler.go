@@ -155,7 +155,7 @@ type Scheduler struct {
 	mu               sync.Mutex
 	acctTargets      map[string][]Target // 按账号隔离的目标课程
 	state            SchedulerState
-	openTimeDetected map[string]int64
+	ws               *windowState // 窗口状态机（C6：openTimeDetected/opened/closed/emptyProbeRuns/syncFailStreak 写侧收敛，见 window_state.go）
 	inflight         map[string]map[int]bool // [账号][classID] 正在提交
 	done             map[string]map[int]bool // [账号][classID] 已成功
 	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
@@ -251,7 +251,7 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		probeSem:         make(chan struct{}, 4), // per-account 探测并发上限
 		acctData:         make(map[string]*zhidao.ElectivesData),
 		acctDataAt:       make(map[string]time.Time),
-		openTimeDetected: make(map[string]int64),
+		ws:               newWindowState(),
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -424,16 +424,10 @@ func (s *Scheduler) openTimeFor(acct string) time.Time {
 // 零值：tick 提交守卫的第二判据 `!now.After(open)` 天然放行"已到点"的过期识别值，
 // 这里截断会使开窗瞬间起 open 恒零 → 提交循环被第一守卫永久挂起（黄金期自动抢课失效）。
 func (s *Scheduler) openTimeForLocked(acct string) time.Time {
-	ms := s.openTimeDetected[acct]
-	if ms == 0 {
-		ms = s.openTimeDetected["*"]
-	}
-	if ms > 0 {
-		return time.UnixMilli(ms)
-	}
-	// 识别槽无值 → 回退遗留初始化 openTime 字段。生产路径 main.go 传零值后此回退恒零值
-	// （配置链路已整体移除，识别槽是唯一事实源）；保留字段仅为测试兼容与防御性兜底。
-	return s.openTime
+	// C6：识别槽读写收权进 ws（window_state.go）。tick/StateForAccount 持 s.mu 调本方法，
+	// ws 自持锁在 s.mu 内获取，无嵌套冲突。识别值已过去也照常返回（见上注释：
+	// 绝不截断零值——挂起/展示解耦，识别过期只影响展示层）。
+	return s.ws.openTimeFor(acct)
 }
 
 // RecognizedOpenTime 返回全校识别的开放时间——**未识别（识别槽无值）返回零值**；
@@ -507,7 +501,7 @@ func (s *Scheduler) PurgeAccount(acct string) {
 	delete(s.refused, acct)
 	delete(s.acctData, acct)
 	delete(s.acctDataAt, acct)
-	delete(s.openTimeDetected, acct) // 开放时间识别槽随账号全量清理，绝不残留旧批次识别值
+	s.ws.purge(acct) // 开放时间识别槽随账号全量清理，绝不残留旧批次识别值
 	delete(s.tokenValid, acct)
 	delete(s.reloginAt, acct)
 	delete(s.reloginFail, acct)
@@ -857,7 +851,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 		return data, nil
 	}
 	if len(data.BeginTimes) > 0 {
-		s.openTimeDetected[acct] = data.BeginTimes[0]
+		s.ws.setOpenTime(acct, data.BeginTimes[0])
 		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}
 	if s.acctData == nil {
@@ -1109,7 +1103,7 @@ func (s *Scheduler) probe() {
 	// 写入必须在 s.mu 锁内（与 tick/openTimeForLocked 持锁读并发，见 ProbeForAccount 同款注释）。
 	if len(data.BeginTimes) > 0 {
 		s.mu.Lock()
-		s.openTimeDetected["*"] = data.BeginTimes[0]
+		s.ws.setOpenTime("*", data.BeginTimes[0])
 		s.mu.Unlock()
 		log.Printf("[scheduler] 识别到开放时间 %s（平台 beginTimes）", time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}

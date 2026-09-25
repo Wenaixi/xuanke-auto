@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 无密度限定兜底图标（minSdk=26 实际走 mipmap-anydpi-v26 自适应图标，此处保证
+     @mipmap/ic_launcher 引用在编译期恒可解析，防 AAPT2 'resource not found'） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M0,0h108v108h-108z"
+        android:fillColor="#000000" />
+    <path
+        android:pathData="M34,34h40v40h-40z"
+        android:fillColor="#FFFFFF" />
+</vector>

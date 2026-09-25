@@ -284,19 +284,20 @@ jobs:
           cd backend
           CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux-gnu" go build -tags notray -ldflags="-s -w" -o ../dist-release/xuanke-linux-arm64 .
 
-      - name: Build macOS ARM64 (CGO=1, embedded ddddocr)
+      - name: Build macOS ARM64 (CGO=0, no embedded ddddocr)
         run: |
           cd backend
-          # darwin 无托盘实现（tray_other.go 占位），不编 GTK；zig cc 交叉直接可用。
-          # 注意：darwin 需 -tags notray（tray_other.go 已占位无 GTK，但 onnxruntime_go 的
-          # darwin 分支要编 CoreML provider 头，zig 的 libc 与 macOS SDK 组合偶发 AccessDenied
-          # 编译错误——保持纯 CPU 构建不编 CoreML provider，规避 zig 交叉不确定）。
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC="zig cc -target aarch64-macos" go build -tags notray -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
+          # macOS 双架构统一 CGO=0 纯 Go：zig cc 交叉 darwin 不稳定（onnxruntime_go
+          # darwin 分支编 CoreML provider 头 → 'unable to create compilation: AccessDenied'，
+          # zig 0.13 在 darwin 目标上的临时目录/缓存权限问题，与 notray 无关——systray 已排除）。
+          # 务实决策：macOS 为次要桌面平台，先保发布流水线确定性，识别走云端视觉/Vision 兜底；
+          # 待有真 mac runner 或 osxcross 再补内置 go-ddddocr（Linux 全平台已 CGO=1 内置）。
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
 
       - name: Build macOS AMD64 (CGO=0, no embedded ddddocr)
         run: |
           cd backend
-          # macOS x64 已停发 onnxruntime（Microsoft 停 macOS x86_64），继续 CGO=0 纯 Go
+          # macOS x64 已停发 onnxruntime（Microsoft 停 macOS x86_64），保持 CGO=0 纯 Go
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-amd64 .
 
       - name: Package Unix Archives

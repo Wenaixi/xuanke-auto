@@ -616,16 +616,16 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   (c.class_room_name &&
                     c.class_room_name.toLowerCase().includes(search.toLowerCase()))
 
-                // max_count=0（名额未公布，与 isFull 判据同源）不能被
-                // "仅看有余量"当已满滤掉——0 表示未公布而非满员，课程照常显示。
-                const matchAvailable = !onlyAvailable || c.max_count === 0 || c.selected_count < c.max_count
+                // 满员与否直接读后端派生 class_full（单一记忆点，架构深化 C）——
+                // "仅看有余量"滤掉已满课程；max_count=0（名额未公布）时 class_full=false 照常显示。
+                const matchAvailable = !onlyAvailable || !c.class_full
                 return matchSearch && matchAvailable
               })
 
               // 剩余名额正序：名额越少越靠前，抢手课程一眼可见。
               // 排序键必须按"剩余名额 = max_count - selected_count"而非已报名数——
               // 两课上限不同时已报少≠剩余少（1/5 余4 与 10/100 余90，应前者靠前）。
-              // max_count=0（名额未公布）映射为 0（最紧张），与筛选/徽章同源语义。
+              // max_count=0（名额未公布）映射为 0（最紧张），与 class_full 同源语义。
               if (sortTightest) {
                 const remaining = (c: ClassItem) =>
                   c.max_count > 0 ? c.max_count - c.selected_count : 0
@@ -654,12 +654,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                       const selIdx = selArr.findIndex((x) => x.id === c.id)
                       const isSelected = selIdx >= 0
                       const rate = fillRate(c)
-                      // max_count=0（未公布名额的新课程）时 `0>=0` 恒真
-                      // 会误显"已满额"徽章并把进度条染红——与后端 IsClassFull 的
-                      // `MaxCount>0 && SelectedCount>=MaxCount` 判据同源，0 表示名额未公布而非满员。
-                      const isFull = c.max_count > 0 && c.selected_count >= c.max_count
-                      // max_count=0 时 remaining 恒 0 会误显"余 0 席"琥珀警示——
-                      // 名额未公布（0）不是快满，徽章改显"名额未公布"、进度色回 emerald。
+                      // 满员与否直接读后端派生 class_full（单一记忆点，架构深化 C）：
+                      // 后端解析端按 max_count>0 && selected_count>=max_count 算一次，
+                      // 0=名额未公布（class_full=false）绝不误显"已满额"徽章。
+                      const isFull = c.class_full
+                      // 剩余名额展示：max_count>0 才可算余量，未公布（0）显示"余 0"会误导，
+                      // 与 class_full 同源语义——未公布不是快满，徽章改显"名额未公布"。
                       const remaining = c.max_count > 0 ? Math.max(0, c.max_count - c.selected_count) : 0
                       const unannounced = c.max_count <= 0
 

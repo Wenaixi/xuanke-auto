@@ -11,6 +11,9 @@ export interface ClassItem {
   class_room_name: string
   selected_count: number
   max_count: number
+  // 满员派生字段（后端解析端算一次，单一记忆点）：= max_count>0 && selected_count>=max_count。
+  // 0=名额未公布绝不误判满员；前端 isFull/筛选/排序/徽章一律读本字段，不再各自手写判据。
+  class_full: boolean
   can_select: boolean
   btn_type: number
   btn_text: string

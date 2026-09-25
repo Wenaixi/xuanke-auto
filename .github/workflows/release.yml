@@ -287,8 +287,11 @@ jobs:
       - name: Build macOS ARM64 (CGO=1, embedded ddddocr)
         run: |
           cd backend
-          # darwin 无托盘实现（tray_other.go 占位），不编 GTK；zig cc 交叉直接可用
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC="zig cc -target aarch64-macos" go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
+          # darwin 无托盘实现（tray_other.go 占位），不编 GTK；zig cc 交叉直接可用。
+          # 注意：darwin 需 -tags notray（tray_other.go 已占位无 GTK，但 onnxruntime_go 的
+          # darwin 分支要编 CoreML provider 头，zig 的 libc 与 macOS SDK 组合偶发 AccessDenied
+          # 编译错误——保持纯 CPU 构建不编 CoreML provider，规避 zig 交叉不确定）。
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC="zig cc -target aarch64-macos" go build -tags notray -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
 
       - name: Build macOS AMD64 (CGO=0, no embedded ddddocr)
         run: |

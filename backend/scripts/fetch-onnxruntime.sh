@@ -16,6 +16,7 @@ case "${GOOS}-${GOARCH}" in
   linux-amd64)   PKG="onnxruntime-linux-x64-1.25.0.tgz";      INNER="lib/libonnxruntime.so";     OUT="libonnxruntime_linux_amd64.so";;
   linux-arm64)   PKG="onnxruntime-linux-aarch64-1.25.0.tgz";  INNER="lib/libonnxruntime.so";     OUT="libonnxruntime_linux_arm64.so";;
   darwin-arm64)  PKG="onnxruntime-osx-arm64-1.25.0.tgz";      INNER="lib/libonnxruntime.dylib";  OUT="libonnxruntime_darwin_arm64.dylib";;
+  android-arm64) PKG="onnxruntime-android-1.25.0.aar";        INNER="jni/arm64-v8a/libonnxruntime.so"; OUT="libonnxruntime_android_arm64.so";;
   *) echo "不支持的平台: ${GOOS}-${GOARCH}" >&2; exit 1;;
 esac
 
@@ -32,7 +33,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "[fetch-onnxruntime] 下载 $URL"
 curl -fsSL "$URL" -o "$TMP/pkg"
-if [[ "$PKG" == *.zip ]]; then
+if [[ "$PKG" == *.zip || "$PKG" == *.aar ]]; then
   unzip -o -q "$TMP/pkg" -d "$TMP/x"
 else
   tar -xzf "$TMP/pkg" -C "$TMP/x"

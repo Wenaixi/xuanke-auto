@@ -56,6 +56,12 @@ jobs:
           go-version: 'stable'
           cache-dependency-path: 'backend/go.sum'
 
+      # ubuntu 默认 CGO_ENABLED=1 → 编译 native_ocr_linux_amd64（//go:embed 需资产）。
+      # 下载 linux amd64 onnxruntime 使 embed 满足；linux/arm64 单测不需要（Go 只编本机 arch）。
+      - name: Download onnxruntime asset (linux-amd64)
+        run: |
+          bash backend/scripts/fetch-onnxruntime.sh linux amd64
+
       - name: Run Backend Unit Tests
         run: |
           cd backend

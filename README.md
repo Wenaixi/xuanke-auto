@@ -5,10 +5,12 @@ Go 后端 + React 前端的单二进制选课服务：账密登录（验证码�
 ## 一、快速开始
 
 想直接用，去 [Releases](https://github.com/Wenaixi/xuanke-auto/releases) 下载对应平台压缩包解压即可：
-- `xuanke-windows-amd64.zip`（Windows x64，内置离线验证码识别，免装 Python）
+- `xuanke-windows-amd64.zip`（Windows x64，内置离线验证码识别）
 - `xuanke-windows-arm64.zip`（Windows on ARM，如骁龙 X 笔记本）
-- `xuanke-linux-amd64.tar.gz`（Linux 服务器，识别走云端视觉或本机 Python）
-- `xuanke-darwin-*.tar.gz`（macOS）
+- `xuanke-linux-amd64.tar.gz`（Linux x64，内置离线验证码识别）
+- `xuanke-linux-arm64.tar.gz`（Linux ARM）
+- `xuanke-darwin-arm64.tar.gz`（macOS Apple Silicon）
+- `xuanke-darwin-amd64.tar.gz`（macOS Intel）
 
 解压后双击 `xuanke.exe`（或 `./xuanke`），浏览器打开 http://localhost:3091 即可使用。首次运行自动生成 `data/.env`（配管理口令），账号登录点选"选课大厅"即可配置目标并交给调度器定时抢报。
 
@@ -72,7 +74,7 @@ cd web && npm run dev      # 前端 :5173（/api 代理到 3091）
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-产物覆盖 **Windows x64 / Windows ARM64**（各含 GUI 与控制台两个 exe）、**Linux x64**、**macOS 双架构**，均附 `.env.example` 与 `checksums.txt`。Windows 原生内嵌 ddddocr 需 CGO=1；Linux/macOS 走 CGO=0 纯 Go。识别引擎库（onnxruntime）不入 git，CI 构建时下载 + 缓存（微软官方 v1.25.0，与 go.sum 对齐）。
+产物覆盖 **Windows x64 / ARM64**（各含 GUI 与控制台两个 exe）、**Linux x64/ARM64**、**macOS 双架构**，均附 `.env.example` 与 `checksums.txt`。所有平台（除停发 onnxruntime 的 macOS Intel）均内置离线 ddddocr 识别引擎（CGO=1 内嵌模型与 ONNX Runtime），识别零外网依赖。识别引擎库（onnxruntime dll/so/dylib）不入 git，CI 构建时经 `fetch-onnxruntime.sh` 下载 + 缓存（微软官方 v1.25.0，与 go.sum 对齐）。
 
 ## 五、测试与质量门
 

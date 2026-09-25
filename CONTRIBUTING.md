@@ -24,7 +24,7 @@
 - 新功能或缺陷修复一律走 **TDD**：先写失败测试（红灯）→ 最小实现（绿灯）→ 重构。
 - 测试断言真实行为，不"手写实现当断言"（否则恒假绿，测不出契约）。
 - 后端测试放 `backend/internal/<pkg>/` 对应包；前端暂无测试框架，用 `npm run build` 类型检查 + `npm run guard` 守卫脚本兜底。
-- 测试要跨平台稳（CI 跑 Linux/Windows/macOS）：不依赖 Windows 保留路径、不硬编码平台特定错误文案（如 `connectex`）、不要求 CI 环境装 Python 包。
+- 测试要跨平台稳（CI 跑 Linux/Windows/macOS）：不依赖 Windows 保留路径、不硬编码平台特定错误文案（如 `connectex`）、不假设 CI 环境有 Python（引擎识别已由 CGO 内嵌原生库覆盖）。
 
 ## 编码规范
 

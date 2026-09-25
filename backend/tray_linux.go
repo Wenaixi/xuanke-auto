@@ -1,10 +1,13 @@
-//go:build linux && cgo
+//go:build linux && cgo && !notray
 
 package main
 
 // Linux 桌面版托盘（桌面版带托盘 + Docker 无头）。
 // 用 getlantern/systray（Linux 后端需要 CGO + GTK3 桌面库）——CGO=0 时本文件
 // 被 build tag 排除（见 tray_linux_cgo0.go），Docker/服务器版无托盘。
+// release 的 Linux 服务器构建带 -tags notray（CGO=1 只为内嵌 ddddocr，服务器
+// 无桌面托盘是纯负担；且 zig 交叉编 GTK 头会因 regparm 属性失败），见
+// tray_linux_notray.go（linux && cgo && notray 占位，与服务同跑无托盘）。
 // 关于对话框用 zenity 命令行对话框（多数桌面发行版自带；无 zenity 时打印到控制台）。
 
 import (

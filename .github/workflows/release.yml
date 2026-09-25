@@ -276,16 +276,18 @@ jobs:
       - name: Build Linux AMD64 (CGO=1, embedded ddddocr)
         run: |
           cd backend
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-amd64 .
+          # -tags notray：服务器版无桌面托盘（systray 需 GTK3，交叉/服务器构建负担）
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags notray -ldflags="-s -w" -o ../dist-release/xuanke-linux-amd64 .
 
       - name: Build Linux ARM64 (CGO=1, embedded ddddocr)
         run: |
           cd backend
-          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux-gnu" go build -ldflags="-s -w" -o ../dist-release/xuanke-linux-arm64 .
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux-gnu" go build -tags notray -ldflags="-s -w" -o ../dist-release/xuanke-linux-arm64 .
 
       - name: Build macOS ARM64 (CGO=1, embedded ddddocr)
         run: |
           cd backend
+          # darwin 无托盘实现（tray_other.go 占位），不编 GTK；zig cc 交叉直接可用
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 CC="zig cc -target aarch64-macos" go build -ldflags="-s -w" -o ../dist-release/xuanke-darwin-arm64 .
 
       - name: Build macOS AMD64 (CGO=0, no embedded ddddocr)

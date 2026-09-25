@@ -332,6 +332,13 @@ jobs:
           cp .env.example linux-pkg/.env.example
           tar -czvf xuanke-${TAG_NAME}-linux-amd64.tar.gz -C linux-pkg .
 
+          # 打包 Linux ARM64 版
+          mkdir -p linux-arm-pkg
+          cp xuanke-linux-arm64 linux-arm-pkg/xuanke
+          chmod +x linux-arm-pkg/xuanke
+          cp .env.example linux-arm-pkg/.env.example
+          tar -czvf xuanke-${TAG_NAME}-linux-arm64.tar.gz -C linux-arm-pkg .
+
           # 打包 macOS ARM64 版
           mkdir -p darwin-arm-pkg
           cp xuanke-darwin-arm64 darwin-arm-pkg/xuanke

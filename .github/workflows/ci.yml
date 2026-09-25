@@ -135,7 +135,7 @@ jobs:
   # ============ Windows ARM64：验证内嵌原生 ddddocr（CGO=1）arm64 可编译 ============
   ci-windows-arm64:
     name: Windows ARM64 CGO Build Check
-    runs-on: windows-11-arm        # 原生 ARM64 runner；不可用则改用 windows-latest + zig 交叉
+    runs-on: windows-11-arm        # 原生 ARM64 runner；无 gnu ABI 交叉编译器，需装 llvm-mingw
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -158,6 +158,21 @@ jobs:
         with:
           go-version: 'stable'
           cache-dependency-path: 'backend/go.sum'
+
+      # windows-11-arm 不自带 gnu-ABI aarch64 C 工具链（Go cgo 需要）；预装的 clang 是
+      # aarch64-pc-windows-msvc（Go 不支持），mingw gcc 是 x86_64。装 pinned llvm-mingw
+      # （提供 aarch64-w64-mingw32-clang + lld），并设 CC/CXX——否则 gcc_arm64.S 被
+      # x86 汇编器解析报 "no such instruction: stp"（Go 官方 + 多仓库实证）。
+      - name: Install llvm-mingw (Windows ARM64)
+        shell: pwsh
+        run: |
+          $ver = "20240619"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/llvm-mingw-$ver-ucrt-aarch64.zip"
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          Expand-Archive -Path llvm-mingw.zip -DestinationPath C:\
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\llvm-mingw-$ver-ucrt-aarch64\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "CC=aarch64-w64-mingw32-clang"
+          Add-Content -Path $env:GITHUB_ENV -Value "CXX=aarch64-w64-mingw32-clang++"
 
       - name: Cache onnxruntime dll (windows-arm64)
         uses: actions/cache@v4

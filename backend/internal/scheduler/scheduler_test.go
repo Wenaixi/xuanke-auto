@@ -1351,7 +1351,7 @@ func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	// 注入"窗口已开启"状态，模拟已经历过开窗阶段（open 清空前 WindowOpened=true）
 	s.mu.Lock()
-	s.state.WindowOpened = true
+	s.ws.setOpened(true)
 	s.mu.Unlock()
 
 	// 跑足够多轮 tick（每轮 50ms，共约 1.2s，远超 1s 常态提交间隔）
@@ -1373,7 +1373,7 @@ func TestSubmitSuspendedWhenOpenTimeCleared(t *testing.T) {
 		t.Fatalf("探测失败: %v", err)
 	}
 	s2.mu.Lock()
-	s2.state.WindowOpened = false
+	s2.ws.setOpened(false)
 	s2.mu.Unlock()
 	s2.tick()
 	time.Sleep(50 * time.Millisecond)
@@ -1402,7 +1402,7 @@ func TestProbeIntervalZeroOpenTime(t *testing.T) {
 	fcPast.data.BeginTimes = []int64{time.Now().Add(-time.Hour).UnixMilli()}
 	sPast := New(&fakeAccts{c: fcPast}, &fakeStore{}, time.Time{}, time.Hour)
 	sPast.mu.Lock()
-	sPast.state.WindowOpened = true // 曾开过窗（关闭判定前提）
+	sPast.ws.setOpened(true) // 曾开过窗（关闭判定前提）
 	sPast.mu.Unlock()
 	sPast.probe()
 	if got := sPast.probeIntervalFor(time.Now()); got != probeIntervalFar {
@@ -1442,7 +1442,7 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Second)
 	s.mu.Lock()
-	s.state.WindowOpened = true // 开过窗（关闭判定前提）
+	s.ws.setOpened(true) // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
@@ -1455,7 +1455,7 @@ func TestProbeIntervalWindowClosed(t *testing.T) {
 	// 临门期（开放时间在未来）：即使标记已关闭，仍 2s 盯守（平台下发新一轮 beginTimes 的防守场景）
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(4*time.Minute), time.Second)
 	s2.mu.Lock()
-	s2.state.WindowOpened = true // 开过窗（关闭判定前提）
+	s2.ws.setOpened(true) // 开过窗（关闭判定前提）
 	s2.mu.Unlock()
 	s2.probe() // 空快照 → WindowClosed=true
 	if got := s2.probeIntervalFor(time.Now()); got != probeIntervalNear {
@@ -1664,7 +1664,7 @@ func TestClockSyncFailureResetsOffset(t *testing.T) {
 		wait := time.Now().Add(5 * time.Second)
 		for {
 			s.mu.Lock()
-			streak := s.syncFailStreak
+			streak := s.ws.syncFailStreakCount()
 			over := s.syncing
 			s.mu.Unlock()
 			if !over && streak >= desired {
@@ -1760,7 +1760,7 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 		wait := time.Now().Add(5 * time.Second)
 		for {
 			s.mu.Lock()
-			got := s.syncFailStreak
+			got := s.ws.syncFailStreakCount()
 			s.mu.Unlock()
 			if got == want {
 				return
@@ -1783,7 +1783,7 @@ func TestClockSyncSuccessClearsFailStreak(t *testing.T) {
 	for {
 		s.mu.Lock()
 		off := s.clockOffset
-		streak := s.syncFailStreak
+		streak := s.ws.syncFailStreakCount()
 		s.mu.Unlock()
 		if streak == 0 && off == 5*time.Second {
 			break
@@ -1808,7 +1808,7 @@ func TestWindowClosedState(t *testing.T) {
 	s := New(&fakeAccts{c: fcEmpty}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.state.WindowOpened = true // 开过窗（关闭判定前提）
+	s.ws.setOpened(true) // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe()
 	if !s.StateForAccount("acct1").WindowClosed {
@@ -1849,7 +1849,7 @@ func TestWindowClosedTransitionStateGrace(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-5*time.Second), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.state.WindowOpened = true // 上一轮确证开过窗
+	s.ws.setOpened(true) // 上一轮确证开过窗
 	s.mu.Unlock()
 	s.probe()
 	if s.StateForAccount("acct1").WindowClosed {
@@ -1870,7 +1870,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 场景 1：幽灵窗口兜底判据（EmptyProbeRuns≥3 + 从未开窗 + 开放时间已过）
 	s1 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s1.mu.Lock()
-	s1.state.EmptyProbeRuns = 3
+	s1.ws.setEmptyProbeRuns(3)
 	s1.mu.Unlock()
 	if !s1.WindowClosed() {
 		t.Fatal("前置：EmptyProbeRuns=3 + 从未开窗 + 已过开窗点应视同关闭")
@@ -1882,7 +1882,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间已过）
 	s2 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s2.mu.Lock()
-	s2.syncFailStreak = 3
+	s2.ws.noteSyncFailure(); s2.ws.noteSyncFailure(); s2.ws.noteSyncFailure()
 	s2.mu.Unlock()
 	if !s2.WindowClosed() {
 		t.Fatal("前置：syncFailStreak=3 + 开放时间已过应视同关闭")
@@ -1894,7 +1894,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 判据2 原实现只查"开放时间非零"，未来开窗点 + 平台故障恢复后黄金期提交被挂起。
 	s2b := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
 	s2b.mu.Lock()
-	s2b.syncFailStreak = 3
+	s2b.ws.noteSyncFailure(); s2b.ws.noteSyncFailure(); s2b.ws.noteSyncFailure()
 	s2b.mu.Unlock()
 	if s2b.WindowClosed() {
 		t.Fatal("时钟失败 3 次但开放时间在未来，绝不能视同关闭（黄金期提交必须存活）")
@@ -1913,7 +1913,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 场景 3（原）：主判据（state.WindowClosed 已置位）照旧镜像 + 非关闭状态不误报
 	s4 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now(), time.Hour)
 	s4.mu.Lock()
-	s4.state.WindowClosed = true
+	s4.ws.setClosed(true)
 	s4.mu.Unlock()
 	if !s4.StateForAccount("acct1").WindowClosed {
 		t.Fatal("主判据置位必须镜像进状态字段")
@@ -2472,7 +2472,7 @@ func TestWindowClosedProbeDropsToFar(t *testing.T) {
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.mu.Lock()
-	s.state.WindowOpened = true // 开过窗（关闭判定前提）
+	s.ws.setOpened(true) // 开过窗（关闭判定前提）
 	s.mu.Unlock()
 	s.probe() // 探测落地 WindowClosed 状态
 
@@ -2508,16 +2508,17 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 		t.Fatal("从未连续探测到空快照前不得视同关闭（首探不计数）")
 	}
 	// 入账 1-2 轮：仍未达 3 轮阈值，不得误判（连续两次空快照可能是平台抖动）
-	// 注意：入账计数由 probe() 在真实探测时递增，测试直接置 state 模拟"探测已入账 2 轮"
+	// 注意：入账计数由 probe() 在真实探测时递增，测试直接置 ws 模拟"探测已入账 2 轮"
 	s.mu.Lock()
-	s.state.EmptyProbeRuns = 2
+	s.ws.noteProbeEmpty()
+	s.ws.noteProbeEmpty()
 	s.mu.Unlock()
 	if s.WindowClosed() {
 		t.Fatal("连续 2 轮空快照不应视同关闭（阈值 3）")
 	}
 	// 第 3 轮空快照：触发幽灵窗口判定
 	s.mu.Lock()
-	s.state.EmptyProbeRuns = 3
+	s.ws.noteProbeEmpty()
 	s.mu.Unlock()
 	if !s.WindowClosed() {
 		t.Fatal("连续 3 轮空快照 + 开放时间已过 + 从未开窗应视同关闭（挂起提交 + 探测降频）")
@@ -2528,7 +2529,7 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 
 	// 反向断言 1：开窗后（state.WindowOpened=true）无论空快照轮数多少都不视同关闭
 	s.mu.Lock()
-	s.state.WindowOpened = true
+	s.ws.setOpened(true)
 	s.mu.Unlock()
 	if s.WindowClosed() {
 		t.Fatal("窗口已开（曾确证开启）后不得视同关闭——黄金期提交/探测绝不挂起")
@@ -2536,8 +2537,8 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 
 	// 反向断言 2：空快照轮数归零（非空快照探测入账）后幽灵窗口判定解除
 	s.mu.Lock()
-	s.state.WindowOpened = false
-	s.state.EmptyProbeRuns = 0
+	s.ws.setOpened(false)
+	s.ws.noteProbeReset()
 	s.mu.Unlock()
 	if s.WindowClosed() {
 		t.Fatal("EmptyProbeRuns 归零（窗口若真开、探测拿到非空快照）后应解除")
@@ -2550,7 +2551,7 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 	s2 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-5*time.Second), time.Hour)
 	s2.probe()
 	s2.mu.Lock()
-	runs2 := s2.state.EmptyProbeRuns
+	runs2 := s2.ws.emptyProbeRunsCount()
 	s2.mu.Unlock()
 	if runs2 != 0 {
 		t.Fatalf("开窗点后 10s 裕量内的空快照探测不得入账 EmptyProbeRuns（防误挂黄金期），实际 %d", runs2)
@@ -2559,7 +2560,7 @@ func TestGhostWindowEmptyProbesSuspend(t *testing.T) {
 	s3 := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-12*time.Second), time.Hour)
 	s3.probe()
 	s3.mu.Lock()
-	runs3 := s3.state.EmptyProbeRuns
+	runs3 := s3.ws.emptyProbeRunsCount()
 	s3.mu.Unlock()
 	if runs3 != 1 {
 		t.Fatalf("已过 10s 裕量的空快照探测应正常入账 EmptyProbeRuns=1，实际 %d", runs3)
@@ -2830,8 +2831,8 @@ func TestWindowClosedSelectStopsBombing(t *testing.T) {
 	// → state.WindowClosed=true；首个 tick 的 probe() 会按真实判据维持该值（prevOpened 且
 	// 空发布，见 probe 的 WindowClosed 计算）。随后 tick 守卫命中 WindowClosed 挂起提交。
 	s.mu.Lock()
-	s.state.WindowOpened = true // 语义自洽：关闭以"至少开过窗"为前提
-	s.state.WindowClosed = true
+	s.ws.setOpened(true) // 语义自洽：关闭以"至少开过窗"为前提
+	s.ws.setClosed(true)
 	s.mu.Unlock()
 	s.Start()
 	defer s.Stop()
@@ -2876,7 +2877,7 @@ func TestClassFullRealtimeNotHoldingMu(t *testing.T) {
 	defer s.Stop()
 
 	s.mu.Lock()
-	s.state.WindowOpened = true // 预置开窗状态，避免依赖探测时序
+	s.ws.setOpened(true) // 预置开窗状态，避免依赖探测时序
 	s.mu.Unlock()
 
 	// 等待提交走到实时复核的"网络请求"段（此时 s.mu 必须已释放）
@@ -2960,7 +2961,7 @@ func TestRealtimeFullRecheckKeepsManualSuccess(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 	s.mu.Lock()
-	s.state.WindowOpened = true // 预置开窗状态，避免依赖探测时序
+	s.ws.setOpened(true) // 预置开窗状态，避免依赖探测时序
 	s.mu.Unlock()
 
 	// 自动链报名失败 → 进入实时复核的网络段（锁已释放）
@@ -3002,7 +3003,7 @@ func TestRealtimeFullRecheckWithNoManualDoneMarksFull(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 	s.mu.Lock()
-	s.state.WindowOpened = true
+	s.ws.setOpened(true)
 	s.mu.Unlock()
 	// 让 IsClassFull 立即返回真满（无手动介入）
 	fc.mu.Lock()
@@ -3455,7 +3456,7 @@ func TestSubmitAllowedWhenWindowOpenedWithZeroOpenTime(t *testing.T) {
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	// 预置窗口已开（模拟 probe 已用发布级 inDateRange 确证开启但识别槽空的组合）
 	s.mu.Lock()
-	s.state.WindowOpened = true
+	s.ws.setOpened(true)
 	s.lastSubmit = time.Time{} // 清提交闸门：本次 tick 直接走提交段
 	s.mu.Unlock()
 	s.tick()

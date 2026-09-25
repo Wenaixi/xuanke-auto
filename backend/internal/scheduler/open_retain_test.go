@@ -40,7 +40,7 @@ func TestOpenTimeRetainedAfterWindowClosed(t *testing.T) {
 
 	// 识别槽必须保留（底层 map 不清空）——关闭≠时间消失
 	s.mu.Lock()
-	kept := s.openTimeDetected["acct1"]
+	kept := s.ws.openTimeFor("acct1").UnixMilli()
 	s.mu.Unlock()
 	if kept == 0 {
 		t.Fatal("窗口关闭后识别槽必须保留在 openTimeDetected 中（关闭≠时间消失）")

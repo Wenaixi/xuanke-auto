@@ -174,15 +174,13 @@ type Scheduler struct {
 	reloginResults   chan reloginResult               // 重登结果回传（异步结果在 tick 主循环统一处理）
 	warnedNoTargets  bool                             // 无目标空转警告只打一次
 
-	clockOffset      time.Duration                // 服务端时钟对齐偏差 (server - local)
-	lastSyncTime     time.Time                    // 上次时钟对齐成功采样时间（仅成功推进）
-	lastSyncStart    time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
-	lastSyncFailAt   time.Time                    // 上次同步失败时刻（失败退避计时基准）
-	syncFailedWindow time.Time                    // 时钟失败/恢复时刻留档（写而不读，判据用 syncFailStreak，见 maybeSyncClock）
-	syncing          bool                         // 同步进行中标记（防 tick 叠加发起并发同步）
-	probing          bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑）
-	syncFailStreak   int                          // 时钟同步连续失败次数（≥3 时回退 offset=0）
-	lastPrewarm      time.Time                    // 上次连接池预热时间
+	clockOffset      time.Duration // 服务端时钟对齐偏差 (server - local)
+	lastSyncTime     time.Time     // 上次时钟对齐成功采样时间（仅成功推进）
+	lastSyncStart    time.Time     // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
+	lastSyncFailAt   time.Time     // 上次同步失败时刻（失败退避计时基准）
+	syncing          bool          // 同步进行中标记（防 tick 叠加发起并发同步）
+	probing          bool          // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑）
+	lastPrewarm      time.Time     // 上次连接池预热时间
 	rateLimited      map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
 
 	chainMu sync.Mutex
@@ -367,30 +365,25 @@ func (s *Scheduler) maybeSyncClock(now time.Time) {
 				defer s.mu.Unlock()
 				s.syncing = false
 				if err != nil {
-					s.syncFailStreak++
+					s.ws.noteSyncFailure()
 					s.lastSyncFailAt = s.nowAlignedLocked() // 失败落地即记录，退避 30s（对齐钟，判读侧 :342 同基准——LOW-132-01 混用孤岛收敛）
-					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.syncFailStreak, err)
-					// 时钟失败时刻留档——幽灵窗口判定只读
-					// syncFailStreak（≥3 且开放时间已过），本字段写而不读，与成功路径的
-					// 清零对称保留（失败/恢复时刻留档，便于未来按时间差精细调参）。
-					s.syncFailedWindow = s.nowAlignedLocked() // 对齐钟同上（失败留档与 lastSyncFailAt 同基准）
+					log.Printf("[scheduler] 时钟对齐失败（连续 %d 次）：%v", s.ws.syncFailStreakCount(), err)
 					// 到达 3 次后只把校准偏差复位（回退到本地时钟），
 					// 绝不在此清零 streak——旧实现同一临界区先 ++ 再清零，外部读取方
 					// （WindowClosed 持同一把锁）永远读不到 3（值域恒 {0,1,2}），时钟兜底
 					// 判据实为不可达死代码（对应测试手动注入 3 恒假绿）。
 					// 保留 streak 持续增长，幽灵窗口判据成为真实可达状态；同步成功时
 					// 统一清零自愈（见下），瞬断 1 次只记 1 次、绝不误触发。
-					if s.syncFailStreak >= 3 {
+					if s.ws.syncFailStreakCount() >= 3 {
 						s.clockOffset = 0
-						log.Printf("[scheduler] 时钟对齐连续失败已达 %d 次，校准偏差已复位（回退到本地时钟）", s.syncFailStreak)
+						log.Printf("[scheduler] 时钟对齐连续失败已达 %d 次，校准偏差已复位（回退到本地时钟）", s.ws.syncFailStreakCount())
 					}
 					return
 				}
 				s.clockOffset = offset
-				s.syncFailStreak = 0
+				s.ws.noteSyncSuccess()
 				s.lastSyncFailAt = time.Time{}   // 成功即清失败退避（瞬断不拖延后续校准）
 				s.lastSyncTime = s.lastSyncStart // 只有成功才推进成功采样闸门
-				s.syncFailedWindow = time.Time{} // 与失败写点对称（写而不读，留档自愈语义）
 				log.Printf("[scheduler] 服务端时钟对齐成功，校准偏差: %v", offset)
 			}()
 			return
@@ -427,7 +420,12 @@ func (s *Scheduler) openTimeForLocked(acct string) time.Time {
 	// C6：识别槽读写收权进 ws（window_state.go）。tick/StateForAccount 持 s.mu 调本方法，
 	// ws 自持锁在 s.mu 内获取，无嵌套冲突。识别值已过去也照常返回（见上注释：
 	// 绝不截断零值——挂起/展示解耦，识别过期只影响展示层）。
-	return s.ws.openTimeFor(acct)
+	// 注：识别槽无值时的回退 s.openTime（New 构造参数）由 Task 2 删除（openTime 回退
+	// 字段清理），届时同步迁移依赖该回退的测试为显式 setOpenTime。
+	if t := s.ws.openTimeFor(acct); !t.IsZero() {
+		return t
+	}
+	return s.openTime
 }
 
 // RecognizedOpenTime 返回全校识别的开放时间——**未识别（识别槽无值）返回零值**；
@@ -698,6 +696,9 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
+	// C6：WindowOpened/EmptyProbeRuns 从 ws 读（裸字段已移除），WindowClosed 实时三判据。
+	st.WindowOpened = s.ws.isOpened()
+	st.EmptyProbeRuns = s.ws.emptyProbeRunsCount()
 	st.WindowClosed = s.windowClosedLocked() // 三条判据单源（含兜底），与 WindowClosed() 同真相
 	// 开放时间解析（唯一事实源 = 平台 beginTimes 自动识别）：
 	// 优先级 = 该账号自识别 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"]。
@@ -894,7 +895,7 @@ func (s *Scheduler) HasProbed() bool {
 func (s *Scheduler) WindowOpened() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.state.WindowOpened
+	return s.ws.isOpened()
 }
 
 // WindowClosed 返回窗口是否已关闭（探测到空快照且从未开过窗）。
@@ -908,32 +909,14 @@ func (s *Scheduler) WindowClosed() bool {
 	return s.windowClosedLocked()
 }
 
-// windowClosedLocked 计算窗口关闭判定（需持 s.mu）——三条判据单源：
-// 1) 主判据 s.state.WindowClosed（至少开过窗 + 空快照 + 已过开窗点 10s，probe 写入）；
-// 2) 时钟连续失败 ≥3（平台不可达信号）且开放时间非零；
-// 3) 从未开过窗 + EmptyProbeRuns≥3（幽灵窗口量变）且开放时间非零。
+// windowClosedLocked 计算窗口关闭判定（需持 s.mu）——三条判据单源，
+// 逻辑收敛进 ws.isClosed（C6，window_state.go 逐字等价）：
+// 1) 主判据 closed（至少开过窗 + 空快照 + 已过开窗点 10s，probe 写入）；
+// 2) 时钟连续失败 ≥3（平台不可达信号）且开放时间已过；
+// 3) 从未开过窗 + emptyProbeRuns≥3（幽灵窗口量变）且开放时间已过。
 // StateForAccount 与 WindowClosed() 共用同一实现，杜绝两套真相分叉。
 func (s *Scheduler) windowClosedLocked() bool {
-	if s.state.WindowClosed {
-		return true
-	}
-	// open 单快照对三条判据统一（判据2 取一次复用 + 判据3 同快照）——识别槽是唯一
-	// 事实源，一次读取避免"识别值在两次读取间被新批次覆盖"的不一致窗口。
-	open := s.openTimeForLocked("")
-	if s.syncFailStreak >= 3 && !open.IsZero() && s.nowAlignedLocked().After(open) {
-		return true
-	}
-	// 视同关闭的探测持续判定——开放时间已过 + 窗口从未开过（prevOpened
-	// 恒 false，时钟兜底覆盖不到）+ 探测返回空快照 ≥3 次：平台窗口从未开启/已关闭且
-	// 从未被确认开过（主判据 requirement 不满足 + 时钟正常时兜底不触发），
-	// 2s 探测/1s 提交恒高频轰炸 findElectivesData + 报名接口（防轰炸契约闭环缺口）。
-	// 首次探测（acctDataAt 全空）不计数、不误伤；runs≥3 即连续三轮空快照确证"从未开过"，
-	// 进入幽灵窗口挂起，探测/提交同步降频。窗口若真开、平台下发新一轮 beginTimes，success 探测
-	// 数据后势必推开始 open 实况、emptyRuns 归零自愈。
-	if !open.IsZero() && !s.state.WindowOpened && s.state.EmptyProbeRuns >= 3 {
-		return true
-	}
-	return false
+	return s.ws.isClosed(s.openTimeForLocked(""), s.nowAlignedLocked())
 }
 
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
@@ -992,7 +975,7 @@ func (s *Scheduler) tick() {
 	}
 
 	s.mu.Lock()
-	opened := s.state.WindowOpened
+	opened := s.ws.isOpened()
 	s.mu.Unlock()
 	// 提交触发条件（或关系）：
 	//   1) 探测已确认窗口开启（WindowOpened）；
@@ -1121,8 +1104,8 @@ func (s *Scheduler) probe() {
 	}
 	// 先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
 	// "至少开过窗"作为前提（见下），若在覆写后读取 prevOpened 拿到的恒是本次 opened 值。
-	prevOpened := s.state.WindowOpened
-	s.state.WindowOpened = opened
+	prevOpened := s.ws.isOpened()
+	s.ws.setOpened(opened) // C6：窗口状态位收权进 ws（见 window_state.go）
 	// 窗口关闭判定：快照为空（code:0 空 publishes，平台选课窗口关闭特征）
 	// 且开放时间已过 → 明确标记窗口已关闭，日志输出供排查"课程为空"原因。
 	// 去掉 !prevWindowOpened 条件——"开过再关"是窗口关闭最常见场景，
@@ -1141,19 +1124,21 @@ func (s *Scheduler) probe() {
 	// 裕量基准 open 取一次快照复用——同一探测内两处 10s 裕量判定若各自取 open，热改
 	// 亚毫秒窗口内主判据与 EmptyProbeRuns 入账可能基于新旧两个不同 open（同族）。
 	open := s.openTimeForLocked("")
-	s.state.WindowClosed = prevOpened && !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second))
+	closed := prevOpened && !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second))
+	s.state.WindowClosed = closed
+	s.ws.setClosed(closed) // C6：主判据关闭标记收权进 ws（逐字等值迁移；state 供 /state 下发）
 	// 探测量变入账——空快照 + 从未开窗 + 开放时间已过 → 连续轮数 +1；
 	// 否则（非空快照 / 本轮被确证开窗 / 未到开放时间）归零。窗开 shift probe 会自然重置。
-	// 注意绝不触碰 state.WindowClosed（由主判据/时钟判据独占）：这里只维护量变计数，
-	// WindowClosed() 读取它做"视同关闭"兜底——不写 state.WindowClosed 避免误标真实关闭。
+	// 注意绝不触碰主判据 closed（由主判据/时钟判据独占）：这里只维护量变计数，
+	// windowClosedLocked 读取它做"视同关闭"兜底——不写 closed 避免误标真实关闭。
 	// 入账另加"已过开窗点 10s 裕量"——平台在开窗前会预清空 publishes
 	// （记录的真实现象，切学期/数据迁移），若开窗瞬间清空过渡态持续 ≥6 秒（3 次探测
 	// × 2s 临门间隔），旧判据会在真实窗口已开时误挂起黄金期提交+降频探测；以"开窗点后
 	// 10s 内不计空快照轮数"错开过渡态，窗口真开（10s 黄金期结束）后连续空才确证幽灵窗口。
 	if !opened && len(data.Publishes) == 0 && now.After(open.Add(10*time.Second)) {
-		s.state.EmptyProbeRuns++
+		s.ws.noteProbeEmpty() // C6：探测量变计数收权进 ws
 	} else {
-		s.state.EmptyProbeRuns = 0
+		s.ws.noteProbeReset() // C6：非空快照/确证开窗/未到开放时间 → 归零
 	}
 	// prevWindowOpened 是写而不读的死字段（已去掉 !prevWindowOpened 条件），
 	// 删除避免误导后续维护者以为还有清提交闸门的路径。

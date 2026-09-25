@@ -7,14 +7,18 @@ import (
 
 // windowState 窗口状态机：把 openTimeDetected / opened / closed / emptyProbeRuns /
 // syncFailStreak 五个状态位与"三判据关闭判定"收进一个 struct（C6 写侧收敛），
-// 写侧只经 noteXxx 入账、读侧经 isClosed/isOpened 查询——调度器 Scheduler 持
-// 一个 ws *windowState 而非裸字段，杜绝写侧多写点各自散落。
-// 读侧 isClosed 迁入 windowClosedLocked 的三判据逻辑（逐字等价，见下）。
+// 写侧只经 setOpened/setClosed/noteProbeEmpty/noteSyncXxx/setOpenTime 入账、
+// 读侧经 isOpened/isClosed 查询——调度器 Scheduler 持一个 ws *windowState
+// 而非裸字段，杜绝写侧多写点各自散落。
+// 忠实契约（对照 probe 原实现）：opened/closed 是**每轮探测覆写**的当前值
+// （开过再关后 opened 回落 false、closed 由 prevOpened 表达式写 true 后下一轮
+// 因 prevOpened 已 false 回落——持久关闭信号由 emptyProbeRuns 判据兜底），
+// 绝不是一次性的单调置位。
 type windowState struct {
 	mu               sync.Mutex
 	openTimeDetected map[string]int64 // 识别槽：openTimeDetected[acct] → ["*"]（关闭≠时间消失）
-	opened           bool             // 曾开窗（探测非空快照 + 发布级 InDateRange 确证）
-	closed           bool             // 已确认关闭（state.WindowClosed 迁移）
+	opened           bool             // 当前探测是否确证窗口开启（发布级 InDateRange）
+	closed           bool             // 主判据关闭标记（prevOpened && 空快照 && 已过开窗点 10s）
 	emptyProbeRuns   int              // 空快照连续探测轮数（幽灵窗口判据）
 	syncFailStreak   int              // 时钟同步连续失败次数（≥3 判关闭）
 }
@@ -23,17 +27,19 @@ func newWindowState() *windowState {
 	return &windowState{openTimeDetected: make(map[string]int64)}
 }
 
-func (w *windowState) noteProbeOpened() {
+// setOpened 覆写本轮"窗口已开"判定（probe 每轮计算 opened 后调用，可 true→false）。
+func (w *windowState) setOpened(v bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.opened = true
-	w.emptyProbeRuns = 0
+	w.opened = v
 }
 
-func (w *windowState) noteProbeClosed() {
+// setClosed 覆写主判据关闭标记（probe 每轮按
+// prevOpened && !opened && 空快照 && 已过开窗点 10s 计算后调用）。
+func (w *windowState) setClosed(v bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.closed = true
+	w.closed = v
 }
 
 func (w *windowState) noteProbeEmpty() {
@@ -42,13 +48,19 @@ func (w *windowState) noteProbeEmpty() {
 	w.emptyProbeRuns++
 }
 
-// noteProbeReset 非空快照/未到开放时间时归零空快照轮数（入账侧语义：probe 的
-// else 分支 reset）。开窗（noteProbeOpened）本身也会清零，此方法供不置 opened
-// 的普通归零路径使用。
+// noteProbeReset 非空快照/本轮被确证开窗/未到开放时间时归零空快照轮数。
 func (w *windowState) noteProbeReset() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.emptyProbeRuns = 0
+}
+
+// setEmptyProbeRuns 显式覆写空快照轮数（测试夹具用：模拟"探测已入账 N 轮"的
+// 幽灵窗口形态，不触发真实探测）。生产路径不用——probe 每轮 noteProbeEmpty/Reset。
+func (w *windowState) setEmptyProbeRuns(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.emptyProbeRuns = n
 }
 
 func (w *windowState) noteSyncSuccess() {
@@ -69,14 +81,16 @@ func (w *windowState) setOpenTime(acct string, ms int64) {
 	w.openTimeDetected[acct] = ms
 }
 
+// openTimeFor 返回指定账号的"已识别开放时间"（毫秒转 time.Time，未识别返回零值）。
+// 识别值已过去也照常返回——绝不截断零值（识别过期只影响展示层，挂起/展示解耦）。
+// 优先级 = 该账号识别槽 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"]。
 func (w *windowState) openTimeFor(acct string) time.Time {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return time.UnixMilli(w.openTimeForLocked(acct))
+	return openTimeFromMs(w.openTimeForLocked(acct))
 }
 
-// openTimeForLocked 需持 w.mu 的毫秒级读取（调度器 s.mu 锁内复用）。
-// 优先级 = 该账号识别槽 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"] → 0。
+// openTimeForLocked 需持 w.mu 的毫秒级读取（调度器 s.mu 锁内复用，省 time.Time 转换）。
 func (w *windowState) openTimeForLocked(acct string) int64 {
 	ms := w.openTimeDetected[acct]
 	if ms == 0 {
@@ -85,17 +99,33 @@ func (w *windowState) openTimeForLocked(acct string) int64 {
 	return ms
 }
 
+// openTimeFromMs 毫秒 → time.Time：ms<=0 视为"未识别"返回零值。
+// time.UnixMilli(0) 返回 1970-01-01（IsZero()=false），会把"未写入槽"误判成已识别——
+// 测试断言未写入槽必须返回零值（识别槽无值 ≠ epoch）。
+func openTimeFromMs(ms int64) time.Time {
+	if ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
+}
+
 func (w *windowState) purge(acct string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.openTimeDetected, acct)
 }
 
-// isOpened 返回"曾开过窗"状态（对外 DTO state.WindowOpened 填充）。
+// isOpened 返回当前"窗口已开"状态（对外 DTO state.WindowOpened 填充）。
 func (w *windowState) isOpened() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.opened
+}
+
+func (w *windowState) emptyProbeRunsCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.emptyProbeRuns
 }
 
 func (w *windowState) syncFailStreakCount() int {

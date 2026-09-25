@@ -438,6 +438,7 @@ jobs:
           # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；
           # gradle 8.5 已 apt 安装，AGP 8.5.2 与其匹配）
           gradle assembleRelease --no-daemon
+          mkdir -p ../../dist-release
           cp app/build/outputs/apk/release/app-release.apk ../../dist-release/xuanke-android-arm64.apk
 
       - name: Upload Android APK

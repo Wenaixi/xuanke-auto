@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -1548,7 +1547,8 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				return
 			}
 			// 平台风控退避：识别到"频繁"或 429 相关错误，为该课程设置 30s 退避，跳过轰炸
-			if isRateLimitError(err) {
+			switch classifyPlatformError(err) {
+			case errRateLimit:
 				// 与成功/失效分支同族防线：风控退避也是"写重建身份"的污染点——账号在
 				// SelectClass 往返期间被删并同名重建（注册表现指针已换），陈旧链命中风控
 				// 文案会把 rateLimited 退避写进重建身份（假"退避中"让该课黄金期被静默跳过）。
@@ -1566,13 +1566,12 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				}
 				s.mu.Unlock()
 				return
-			}
-			// 平台对"选课窗口已关闭"的报名请求返回 code=1 错误（窗口关闭后课程列表已清空）。
-			// 此时课程已无法再报，直接按满员处理记入 full 集合，
-			// 避免每个 tick 都带着失败状态反复刷平台报名接口（窗口关闭后的最后一层防线）。
-			// 与风控退避/成功分支同族防线：陈旧链命中窗口关闭错误会 markFullLocked
-			// 把"已满员"永久退避写进同名重建身份——指针身份比对，非同一身份静默放弃整链。
-			if isWindowClosedError(err) {
+			case errWindowClosed:
+				// 平台对"选课窗口已关闭"的报名请求返回 code=1 错误（窗口关闭后课程列表已清空）。
+				// 此时课程已无法再报，直接按满员处理记入 full 集合，
+				// 避免每个 tick 都带着失败状态反复刷平台报名接口（窗口关闭后的最后一层防线）。
+				// 与风控退避/成功分支同族防线：陈旧链命中窗口关闭错误会 markFullLocked
+				// 把"已满员"永久退避写进同名重建身份——指针身份比对，非同一身份静默放弃整链。
 				if !s.sameClientFor(acct, chainClient) {
 					s.mu.Unlock()
 					return
@@ -1678,8 +1677,7 @@ func isRateLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "频繁") || strings.Contains(msg, "429") || strings.Contains(msg, "稍后重试")
+	return classifyPlatformError(err) == errRateLimit
 }
 
 // isWindowClosedError 平台在选课窗口关闭后对报名请求的返回特征（code=1 且提示已关闭/未开启）。
@@ -1688,9 +1686,7 @@ func isWindowClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "关闭") || strings.Contains(msg, "未开启") ||
-		strings.Contains(msg, "报名时间") || strings.Contains(msg, "已结束")
+	return classifyPlatformError(err) == errWindowClosed
 }
 
 func (s *Scheduler) isRateLimitedLocked(acct string, classID int, now time.Time) bool {

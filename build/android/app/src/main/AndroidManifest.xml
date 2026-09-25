@@ -4,6 +4,8 @@
 
     <!-- 前台服务保活：抢课引擎随进程常驻（后台也能提交） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+：前台服务声明 dataSync 类型需对应 type 权限（漏了 startForeground 直接 SecurityException） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 通知渠道（Android 13+ 需运行时请求 POST_NOTIFICATIONS） -->

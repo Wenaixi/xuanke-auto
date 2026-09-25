@@ -1693,7 +1693,7 @@ func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 			for _, p := range d.Publishes {
 				for _, c := range p.Classes {
 					if c.ID == classID {
-						return c.MaxCount > 0 && c.SelectedCount >= c.MaxCount
+						return c.ClassFull
 					}
 				}
 			}
@@ -1705,7 +1705,7 @@ func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 	for _, p := range s.lastData.Publishes {
 		for _, c := range p.Classes {
 			if c.ID == classID {
-				return c.MaxCount > 0 && c.SelectedCount >= c.MaxCount
+				return c.ClassFull
 			}
 		}
 	}
@@ -1762,8 +1762,8 @@ func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	for _, p := range data.Publishes {
 		for _, c := range p.Classes {
 			if c.ID == classID {
-				// 明确有余量才解封；课程不在快照中（未知）也保持 full
-				if c.MaxCount > 0 && c.SelectedCount >= c.MaxCount {
+				// 明确有余量才解封（!ClassFull）；课程不在快照中（未知）也保持 full
+				if c.ClassFull {
 					return
 				}
 				delete(s.full[acct], classID)
@@ -1851,7 +1851,7 @@ func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason strin
 			if !p.InDateRange {
 				return "选课窗口未开放，暂不能报名", false
 			}
-			if !c.CanSelect || (c.MaxCount > 0 && c.SelectedCount >= c.MaxCount) {
+			if !c.CanSelect || c.ClassFull {
 				return "该课程已满员或不可选", false
 			}
 			return "", true

@@ -681,8 +681,8 @@ func TestBackupFallbackOnFull(t *testing.T) {
 	// 第一备选健美操已满 36/36；第二备选篮球空
 	fc.mu.Lock()
 	fc.data.Publishes[0].Classes = []zhidao.Class{
-		{ID: 61115, CourseName: "健美操", SelectedCount: 36, MaxCount: 36},
-		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36},
+		{ID: 61115, CourseName: "健美操", SelectedCount: 36, MaxCount: 36, ClassFull: true},
+		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36, ClassFull: false},
 	}
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
@@ -2140,7 +2140,7 @@ func TestCheckClassSelectable(t *testing.T) {
 	fc.data.Publishes[0].InDateRange = true // 发布 1 窗口开启
 	fc.data.Publishes[0].Classes = []zhidao.Class{
 		{ID: 61115, CourseName: "健美操", CanSelect: true, SelectedCount: 0, MaxCount: 36},
-		{ID: 61116, CourseName: "满员课", CanSelect: false, SelectedCount: 36, MaxCount: 36},
+		{ID: 61116, CourseName: "满员课", CanSelect: false, SelectedCount: 36, MaxCount: 36, ClassFull: true},
 	}
 	fc.data.Publishes[1].InDateRange = false // 发布 2 窗口关闭
 	fc.mu.Unlock()
@@ -3653,4 +3653,34 @@ func TestScheduleIntervalClamped(t *testing.T) {
 	if got := s.interval; got <= 0 {
 		t.Fatalf("interval 应被 clamp 到正数，实际 %v", got)
 	}
+}
+
+// TestClassFullInSnapshotReadsDerivedField 满员判据收敛为 class_full 派生字段：
+// 快照课程显式带 ClassFull 与数字矛盾时，classFullInSnapshot 必须**读派生字段**
+//（架构深化 C：单一记忆点，解析端算一次）而非重算 MaxCount>0 && SelectedCount>=MaxCount——
+// 旧实现按数字重算返回 false，新实现读 ClassFull 返回 true，红绿分明。
+func TestClassFullInSnapshotReadsDerivedField(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.mu.Lock()
+	fc.data.Publishes[0].Classes = []zhidao.Class{
+		// 数字未满（0<10）但派生字段确证满员——旧实现误判未满，新实现必须读字段
+		{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 10, ClassFull: true},
+		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36, ClassFull: false},
+	}
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
+	s.mu.Lock()
+	s.lastData = fc.data
+	s.mu.Unlock()
+
+	s.mu.Lock()
+	if !s.classFullInSnapshot("", 61115) {
+		s.mu.Unlock()
+		t.Fatal("ClassFull=true（数字矛盾）应判定满员——必须读派生字段")
+	}
+	if s.classFullInSnapshot("", 61205) {
+		s.mu.Unlock()
+		t.Fatal("ClassFull=false 的课程不应判定满员（读派生字段）")
+	}
+	s.mu.Unlock()
 }

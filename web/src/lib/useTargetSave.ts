@@ -161,6 +161,30 @@ export function useTargetSave(opts: {
     return targets.every((t) => ids.has(t.publish_id))
   }
 
+
+  // 守卫尾段共用执行（架构深化 D）：flush 与防抖两处的联查空/id 漂移守卫 +
+  // targetRef/savingRef/saveNow 收尾逐字重复（差异只在 selected 数据源：ref 镜像 vs
+  // 渲染闭包）。统一收进本函数，两处只传构建好的 targets 与校验数——
+  // 数据源差异保留在调用方（契约 12 消费时刻读镜像纪律），执行骨架单一记忆点。
+  const commitTargets = (next: Target[], selectedCount: number, pubs: readonly Publish[]): boolean => {
+    // "联查产物为空 = 假清空"——every 校验对空 targets 恒真，必须独立判
+    // "selectedCount>0 却产出空集"。仅在发布全缺席的极限情况 selectedCount 可能滞后，
+    // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
+    if (next.length === 0 && selectedCount > 0) {
+      return false // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
+    }
+    // 发布 id 漂移：回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
+    if (!targetsUseCurrentPublishes(next, pubs)) {
+      return false // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
+    }
+    targetRef.current = next
+    if (savingRef.current) {
+      dirtyRef.current = true // 保存进行中：标记脏，让飞行中的 PUT 完成后补发本次快照
+      return true
+    }
+    void saveNow()
+    return true
+  }
   const flushTargets = () => {
     // 消费时刻读 ref：handleBack 等待循环内用户新改动后，渲染闭包的 rev/selected
     // 是旧快照，必须取 ref 里的最新值——否则等待窗口内新增的课程被忽略。
@@ -202,22 +226,8 @@ export function useTargetSave(opts: {
       return
     }
     const targets = buildTargets(publishesRef.current, latestSelected)
-    // "用户有勾选但联查产物为空 = 假清空"——selectedCount 只随用户改动所在渲染更新，
-    // 只会偏保守绝不放过真实假清空。
-    if (targets.length === 0 && latestSelectedCount > 0) {
-      return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    // 发布集合在"渲染→回调"窗口内重建（id 漂移）时，targets 的 publish_id 已
-    // 不属于当前发布集 → 这份快照是错位假清空，绝不 PUT，置脏等下次正确联查再落库。
-    if (!targetsUseCurrentPublishes(targets, publishesRef.current)) {
-      return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    targetRef.current = targets
-    if (savingRef.current) {
-      dirtyRef.current = true // 保存进行中：标记脏，让飞行中的 PUT 完成后补发本次快照
-      return
-    }
-    void saveNow()
+    // 联查空/id 漂移守卫 + targetRef/savingRef/saveNow 收尾（架构深化 D：与防抖共用）
+    commitTargets(targets, latestSelectedCount, publishesRef.current)
   }
 
   const handleBack = async (onDone: () => void) => {
@@ -322,22 +332,8 @@ export function useTargetSave(opts: {
         return
       }
       const next = buildTargets(publishesRef.current, selected)
-      // "联查产物为空 = 假清空"——every 校验对空 targets 恒真，必须独立判
-      // "selectedCount>0 却产出空集"。仅在发布全缺席的极限情况 selectedCount 可能滞后，
-      // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
-      if (next.length === 0 && selectedCount > 0) {
-        return // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      // 发布 id 漂移：防抖回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
-      if (!targetsUseCurrentPublishes(next, publishesRef.current)) {
-        return // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      targetRef.current = next
-      if (savingRef.current) {
-        dirtyRef.current = true // 保存进行中：标记脏，完成后补发
-        return
-      }
-      void saveNow()
+      // 联查空/id 漂移守卫 + targetRef/savingRef/saveNow 收尾（架构深化 D：与 flush 共用）
+      commitTargets(next, selectedCount, publishesRef.current)
     }, 400)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps

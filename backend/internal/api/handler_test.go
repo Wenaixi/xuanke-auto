@@ -171,8 +171,11 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	}
 	enc := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
 	dec := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
-	apiHandler := Register(mux, st, sched, accts, sessions, testAdminToken, adminName,
-		rt.Get().ActivationEnabled, enc, dec, rt)
+	apiHandler := Register(Options{
+		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
+		AdminToken: testAdminToken, AdminName: adminName,
+		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: enc, Decrypt: dec, Runtime: rt,
+	})
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
 }
 
@@ -896,7 +899,9 @@ func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
 	// 的行为（失败 → 记日志 + 500）由实现注释与 handleAdminStats 其他数据源
 	// 同风格兜底，此处以最小契约回归：正常路径 stats 仍 200（回归 TestAdminStatsAccountsLogs
 	// 已覆盖 targets_count 正确计数）；失败路径的报错语义属"零吞错"族，走实现内复查。
-	// （替代注入方案需把 Deps.Store 改为接口——超范围改动，违反简洁优先。）
+	// （架构深化 A+E 已做 Options 装配收窄；Deps.Store 保持具体类型是刻意决策——
+	// 收窄为接口需暴露 api 消费的 17 方法面，接口面=实现面是假深度，测试缝收益
+	// 不抵维护成本。若未来真需要 stats 失败注入，再单独收窄 StatsStore 窄缝。）
 	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
 	if code != http.StatusOK {
 		t.Fatalf("正常路径 stats 应 200: %d", code)

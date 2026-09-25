@@ -24,6 +24,23 @@ import (
 	"xuanke-auto/backend/internal/store"
 	"xuanke-auto/backend/internal/zhidao"
 )
+// Options 装配配置对象（架构深化 E：替代 Register 的 11 位置参数——位置参数
+// 要求调用者按顺序记清 11 个实参，裸实参无语义标注，两处调用点（server.go /
+// handler_test.go）都必须逐位对齐；命名对象字段即语义自文档化）。
+// 字段与 Deps 一一对应，Register 内部填充 Deps。
+type Options struct {
+	Mux               *http.ServeMux
+	Store             *store.Store
+	Sched             *scheduler.Scheduler
+	Accounts          *accounts.Manager
+	Sessions          *session.Store
+	AdminToken        string
+	AdminName         string
+	ActivationEnabled bool
+	Encrypt           func(string) (string, error)
+	Decrypt           func(string) (string, error)
+	Runtime           *runtime.Store
+}
 
 // Deps API 层依赖。
 type Deps struct {

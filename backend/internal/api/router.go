@@ -8,9 +8,6 @@ import (
 
 	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/runtime"
-	"xuanke-auto/backend/internal/scheduler"
-	"xuanke-auto/backend/internal/session"
-	"xuanke-auto/backend/internal/store"
 	"xuanke-auto/backend/internal/zhidao"
 )
 
@@ -124,15 +121,15 @@ func requireJSONBody(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // Register 注册所有 API 路由到 mux，并返回包装了安全中间件的根 handler。
-// accts 为多账号客户端注册表；sessions 为会话库；adminToken 为管理口令；activationEnabled 为激活码机制开关。
-// encrypt/decrypt 用于敏感配置（vision_key）加密入库/解密读回；Decrypt 字段仅注入备用。
-func Register(mux *http.ServeMux, st *store.Store, sched *scheduler.Scheduler,
-	accts *accounts.Manager, sessions *session.Store, adminToken, adminName string,
-	activationEnabled bool, encrypt, decrypt func(string) (string, error), rt *runtime.Store) http.Handler {
+// 装配经 Options 配置对象（架构深化 E）——字段即语义，替代 11 位置参数。
+func Register(opts Options) http.Handler {
+	// 解包为局部变量——函数体既有 100+ 行直接引用 mux/rt/accts 等原名，
+	// 保持内部引用零改动（架构深化 E 只换装配面，不扰动路由注册体）。
+	mux, rt, accts := opts.Mux, opts.Runtime, opts.Accounts
 
-	d := &Deps{Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
-		Runtime: rt, AdminToken: adminToken, ActivationEnabled: activationEnabled,
-		Encrypt: encrypt, Decrypt: decrypt, AdminName: adminName}
+	d := &Deps{Store: opts.Store, Sched: opts.Sched, Accounts: opts.Accounts, Sessions: opts.Sessions,
+		Runtime: opts.Runtime, AdminToken: opts.AdminToken, ActivationEnabled: opts.ActivationEnabled,
+		Encrypt: opts.Encrypt, Decrypt: opts.Decrypt, AdminName: opts.AdminName}
 	// 登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
 	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。
 	loginLim := newLoginLimiter()

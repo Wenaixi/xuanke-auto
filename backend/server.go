@@ -175,8 +175,11 @@ func runServer(cfg config.Config) *Started {
 	}()
 
 	mux := http.NewServeMux()
-	apiHandler := api.Register(mux, st, sched, accts, sessions, cfg.AdminToken,
-		cfg.AdminName, rt.Get().ActivationEnabled, encrypt, decrypt, rt)
+	apiHandler := api.Register(api.Options{
+		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
+		AdminToken: cfg.AdminToken, AdminName: cfg.AdminName,
+		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: encrypt, Decrypt: decrypt, Runtime: rt,
+	})
 	mux.Handle("/", web.SpaHandler())
 
 	addr := ":" + cfg.Port

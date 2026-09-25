@@ -1,4 +1,4 @@
-//go:build linux && arm64 && cgo
+//go:build linux && arm64 && cgo && !android
 
 package zhidao
 

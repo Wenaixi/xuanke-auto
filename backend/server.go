@@ -29,6 +29,9 @@ type Started struct {
 	Addr string
 	// Shutdown 优雅关服（等服务在飞请求结束），托盘「退出」与安卓销毁时调用。
 	Shutdown func()
+	// Cleanup 关闭 DB/会话等底层资源（Android 常驻共享库 main 永不返回，
+	// 库内 defer 不触发，必须由 Java 销毁路径显式调用；桌面 main 的 defer 仍兜底）。
+	Cleanup func()
 	// ErrCh 服务退出原因（ErrServerClosed 表示被 Shutdown 主动关闭）。
 	ErrCh <-chan error
 }
@@ -51,12 +54,13 @@ func runServer(cfg config.Config) *Started {
 		log.Printf("[main] 激活码机制已关闭：账号登录后直接进入系统")
 	}
 
-	// 数据库（拒绝旧版数据形状）；服务生命周期内持有，退出即关
+	// d/err 生命周期归 Started.Cleanup（Android 常驻共享库：main 不返回，
+// 库内 defer 永不触发，DB/会话需随 Java 销毁显式关闭）。桌面 main 用 defer
+// 仍稳妥——Cleanup 由托盘退出路径调用，两形态共用同一收尾。
 	d, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("打开数据库失败: %v", err)
 	}
-	defer d.Close()
 	st := store.New(d)
 
 	// 凭据加密主密钥（环境变量或 DB 旁 .master_key）
@@ -159,7 +163,6 @@ func runServer(cfg config.Config) *Started {
 
 	// 会话库（12 小时过期；后台周期清扫过期会话与票据）
 	sessions := session.New(12 * time.Hour)
-	defer sessions.Close()
 
 	// 全局重登频率闸门的分钟推进器：每 30 秒检查一次窗口翻页，翻页时放行队列中的重登。
 	// 桌面与安卓共用此初始化路径，故闸门推进也统一放在这里（accts 在此创建）。
@@ -191,6 +194,12 @@ func runServer(cfg config.Config) *Started {
 		IdleTimeout:       120 * time.Second,
 	}
 	started := &Started{Addr: addr}
+	started.Cleanup = func() {
+		// DB 与会话库的关闭收口：桌面死库 defer 与安卓 Java 销毁都会到达这里。
+		// 幂等（多次调仅首回收）——sessions.Close 与 d.Close 内部都保证幂等。
+		sessions.Close()
+		d.Close()
+	}
 	started.Shutdown = func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

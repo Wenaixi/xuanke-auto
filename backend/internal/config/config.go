@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // randomAdminToken 生成 24 位十六进制随机管理口令（首次运行自动生成，用户可在 .env 修改）。
@@ -113,6 +114,11 @@ func CaptchaEngineDefault() string {
 
 // dataDir 数据目录：可执行文件同目录下的 data/（保证双击 exe 即可用，不依赖 cwd）。
 func dataDir() string {
+	// Android 平台入口先调 SetDataDirForPlatform 注入 filesDir（os.Executable 在
+	// APK 内不可靠：返回安装路径无写权限），见 platform_android.go 的 JNI 入口。
+	if forced := forcedDataDir.Load(); forced != nil {
+		return filepath.Join(forced.(string), "data")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return "data"
@@ -127,6 +133,17 @@ func dataDir() string {
 		return "data"
 	}
 	return filepath.Join(dir, "data")
+}
+
+// forcedDataDir 平台强制数据目录（安卓 filesDir 注入；桌面恒 nil）。
+var forcedDataDir atomic.Value
+
+// SetDataDirForPlatform 由平台入口强制数据根目录（成为 data/ 的父目录）：
+// Android 上 Java 壳先调 XuankeSetDataDir(filesDir) 注入，config.Load 的 dataDir
+// 即变成 <filesDir>/data（App 沙箱内可读写）。桌面/服务器不调用，保持现有
+// "可执行文件同目录 data/" 语义。注入必须在 config.Load 之前（运行时单点）。
+func SetDataDirForPlatform(dir string) {
+	forcedDataDir.Store(dir)
 }
 
 // ensureEnvFile 确保 .env 存在：不存在则自动生成随机管理员口令与默认配置。

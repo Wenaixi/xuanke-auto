@@ -149,7 +149,6 @@ type Store interface {
 type Scheduler struct {
 	clients  AccountClients
 	store    Store
-	openTime time.Time
 	interval time.Duration
 
 	mu               sync.Mutex
@@ -214,13 +213,17 @@ func clientIdentity(c Client) uintptr {
 		return 0
 	}
 	v := reflect.ValueOf(c)
-	if v.Kind() != reflect.Ptr || v.IsNil() {
+	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return 0
 	}
 	return v.Pointer()
 }
 
 // New 创建调度器。openTime 为选课窗口开启时间（本地时区）。
+// 注意：openTime 入参仅供旧测试兼容与"识别槽建立前的防御性默认"——构造时把非零值
+// 写入全校识别槽 ["*"]（开放时间唯一事实源 = 平台 beginTimes 自动识别，识别槽建立后
+// 一律以识别值为准）；生产 main.go/server.go 传零值（配置链路已整体移除）→ 不写，
+// 识别槽保持空直至探测识别。scheduler 不再落独立 openTime 字段（C6 收权，见 window_state.go）。
 func New(clients AccountClients, store Store, openTime time.Time, interval time.Duration) *Scheduler {
 	// interval 非正数兜底——time.NewTicker(非正) 直接 panic（实测 NewTicker(0)
 	// 抛 non-positive interval），生产 main 恒传 300ms、测试全部传正，此处防御未来
@@ -233,7 +236,6 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 	s := &Scheduler{
 		clients:          clients,
 		store:            store,
-		openTime:         openTime,
 		interval:         interval,
 		acctTargets:      make(map[string][]Target),
 		inflight:         make(map[string]map[int]bool),
@@ -254,7 +256,10 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		cancel:           cancel,
 	}
 	s.reloginResults = make(chan reloginResult, 8)
-	s.state.OpenTime = openTime
+	// 非零 openTime 入参 → 写入全校识别槽（见 New 头注释）。零值（生产路径）不写。
+	if !openTime.IsZero() {
+		s.ws.setOpenTime("*", openTime.UnixMilli())
+	}
 	return s
 }
 
@@ -417,15 +422,11 @@ func (s *Scheduler) openTimeFor(acct string) time.Time {
 // 零值：tick 提交守卫的第二判据 `!now.After(open)` 天然放行"已到点"的过期识别值，
 // 这里截断会使开窗瞬间起 open 恒零 → 提交循环被第一守卫永久挂起（黄金期自动抢课失效）。
 func (s *Scheduler) openTimeForLocked(acct string) time.Time {
-	// C6：识别槽读写收权进 ws（window_state.go）。tick/StateForAccount 持 s.mu 调本方法，
-	// ws 自持锁在 s.mu 内获取，无嵌套冲突。识别值已过去也照常返回（见上注释：
-	// 绝不截断零值——挂起/展示解耦，识别过期只影响展示层）。
-	// 注：识别槽无值时的回退 s.openTime（New 构造参数）由 Task 2 删除（openTime 回退
-	// 字段清理），届时同步迁移依赖该回退的测试为显式 setOpenTime。
-	if t := s.ws.openTimeFor(acct); !t.IsZero() {
-		return t
-	}
-	return s.openTime
+	// C6：识别槽读写收权进 ws（window_state.go，外层 s.mu 内持 ws.mu 无嵌套冲突）。
+	// 识别值已过去也照常返回（见上注释：绝不截断零值——挂起/展示解耦，
+	// 识别过期只影响展示层）；识别槽从未建立时返回零值（openTime 回退语义已随
+	// 构造参数统一迁移进 ws，见 New）。
+	return s.ws.openTimeFor(acct)
 }
 
 // RecognizedOpenTime 返回全校识别的开放时间——**未识别（识别槽无值）返回零值**；

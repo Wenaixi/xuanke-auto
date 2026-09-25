@@ -33,6 +33,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "[fetch-onnxruntime] 下载 $URL"
 curl -fsSL "$URL" -o "$TMP/pkg"
+# tar -C 目标目录必须已存在（unzip -d 会自建，tar 不会）——先把解包目录建好
+mkdir -p "$TMP/x"
 if [[ "$PKG" == *.zip || "$PKG" == *.aar ]]; then
   unzip -o -q "$TMP/pkg" -d "$TMP/x"
 else

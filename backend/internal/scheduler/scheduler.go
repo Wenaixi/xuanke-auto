@@ -1466,8 +1466,9 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			var msg string
 			var err error
 			msg, err = client.SelectClass(t.ClassID)
-			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复
-			if errors.Is(err, zhidao.ErrUnauthorized) {
+			// 该账号 token 失效：标记失效并异步重登（非探测账号也能触发），终止本链等恢复。
+			// 错误分类统一走 classifyPlatformError 单出口（架构深化 B：auth 臂即 ErrUnauthorized）。
+			if classifyPlatformError(err) == errAuth {
 				s.mu.Lock()
 				// 指针身份复核——失效分支此前只判账号名存在（ClientFor ok），
 				// 同名重建后旧链命中 ErrUnauthorized 也会把"教务令牌失效"状态写进新身份。
@@ -1641,7 +1642,8 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// 其余非归类错误维持原文。
 			failMsg := err.Error()
 			logMsg := "账号 " + acct + ": " + err.Error()
-			if zhidao.IsReadErr(err) {
+			// 错误分类统一走 classifyPlatformError 单出口（架构深化 B：errRead 臂即 IsReadErr）
+			if classifyPlatformError(err) == errRead {
 				failMsg = "报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）"
 				logMsg = "账号 " + acct + ": " + failMsg
 			}

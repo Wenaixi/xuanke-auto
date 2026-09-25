@@ -314,67 +314,15 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. 获取单课提交排他锁，防止与后台自动抢课并发冲突
-	release, ok := d.Sched.TryAcquireSubmit(acct, req.ClassID)
-	if !ok {
-		writeJSON(w, 1, nil, "该课程正在提交中，请勿重复操作")
-		return
-	}
-	defer release()
-
-	// 报名前按该账号最近快照复核窗口与满员状态：
-	// 窗口关闭/课程满员时返回友好错误，避免无谓打教务平台拿生硬 code=1
-	if reason, ok := d.Sched.CheckClassSelectable(acct, req.ClassID); !ok {
-		writeJSON(w, 1, nil, reason)
-		return
-	}
-
-	// 3. 获取该账号独立客户端
-	client, ok := d.Accounts.ClientFor(acct)
-	if !ok {
-		writeJSON(w, 1, nil, "账号会话未建立或未登录")
-		return
-	}
-
-	// 4. 调用教务平台真实报名接口
-	msg, err := client.SelectClass(req.ClassID)
+	// 手动报名收权 ManualSelect（C4）：取排他锁 → 快照复核 → 同账号客户端 →
+	// 平台调用 → 错误分类 → 重登/退避/记 full/落库，全部在调度器内完成。
+	// handler 只做参数解析 + 响应拼装；错误已分类为友好文案（read 类"可能已处理"、
+	// token 失效"自动重登中"、风控/窗口关闭/满员各自文案）。
+	msg, err := d.Sched.ManualSelect(acct, req.ClassID, req.CourseName)
 	if err != nil {
-		// token 失效时手动报名/退选同样触发自动重登——
-		// 此前手动路径把"未登录"原文直接抛给前端，不会走 maybeRelogin，后台要等
-		// 探测/自动链发现失效才重登（UX 断裂：用户手动点时报错却无人自愈）。
-		// 只调 MaybeRelogin，绝不先调 MarkTokenValid——后者只该用于"手动登录成功"
-		// 的 issueSession 恢复路径，在这里会 delete reloginFail 击穿指数退避（Vision 持续
-		// 故障时退避恒从 30s 重来，平台锁号防线失效）。失效标记由 maybeRelogin 自身置位。
-		if errors.Is(err, zhidao.ErrUnauthorized) {
-			d.Sched.MaybeRelogin(acct)
-			// B110-01：手动失败分支补库内审计日志——与自动链失败必落 AppendLog 对称，
-			// 手动 token 失效同样要在 /api/logs 留痕（否则事后无法核对动作结果）。
-			if err := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); err != nil {
-				log.Printf("[api] 手动报名失效日志落库失败: %v", err)
-			}
-			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
-			return
-		}
-		// read 类错误（请求已发出、平台可能已处理）手动路径同样区分
-		// 文案——与 scheduler 自动链同款，避免"read tcp ..."生硬
-		// 网络错误误导用户（平台可能已成功处理这次报名）。
-		if zhidao.IsReadErr(err) {
-			// read 类「请求已发出结果未知」最需留痕（B110-01）——事后要能在
-			// /api/logs 核对动作到底成没成，零库行会让审计链断裂。
-			if aErr := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 报名请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
-				log.Printf("[api] 手动报名 read 失败日志落库失败: %v", aErr)
-			}
-			writeJSON(w, 1, nil, "报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
-			return
-		}
-		// 其余业务失败同样落库审计（B110-01 对称补齐）
-		if aErr := d.Store.AppendLog(acct, req.ClassID, "select", "账号 "+acct+": 手动报名失败: "+err.Error(), false); aErr != nil {
-			log.Printf("[api] 手动报名失败日志落库失败: %v", aErr)
-		}
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}
-	_ = d.Sched.MarkDone(acct, req.ClassID, req.CourseName, msg)
 	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
 }
 
@@ -402,55 +350,13 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. 获取单课提交排他锁，防止并发冲突
-	release, ok := d.Sched.TryAcquireSubmit(acct, req.ClassID)
-	if !ok {
-		writeJSON(w, 1, nil, "该课程正在操作中，请勿重复操作")
-		return
-	}
-	defer release()
-
-	// 2. 获取该账号独立客户端
-	client, ok := d.Accounts.ClientFor(acct)
-	if !ok {
-		writeJSON(w, 1, nil, "账号会话未建立或未登录")
-		return
-	}
-
-	// 3. 调用教务平台真实退选接口
-	msg, err := client.ExitClass(req.ClassID)
+	// 手动退选收权 ManualExit（C4，与 ManualSelect 对称）：取排他锁 → 同账号客户端 →
+	// 平台调用 → 错误分类 → 重登/落库，全部在调度器内完成。
+	msg, err := d.Sched.ManualExit(acct, req.ClassID)
 	if err != nil {
-		// token 失效路径同样自动重登（与报名路径完全对称）——只调 MaybeRelogin，绝不先调 MarkTokenValid：后者会
-		// delete(reloginFail) 击穿重登指数退避（Vision 持续故障时退避恒从 30s 重来，
-		// 平台锁号防线失效），它只该用于"手动登录成功"的 issueSession 恢复路径。
-		if errors.Is(err, zhidao.ErrUnauthorized) {
-			d.Sched.MaybeRelogin(acct)
-			// B110-01：退选失败分支对称补库内审计日志（与报名路径、自动链失败同语义）
-			if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
-				log.Printf("[api] 手动退选失效日志落库失败: %v", aErr)
-			}
-			writeJSON(w, 1, nil, "教务令牌已失效，正在自动重登，请稍后重试")
-			return
-		}
-		// 退选路径与报名路径对称区分 read 文案
-		if zhidao.IsReadErr(err) {
-			// read 类「请求已发出结果未知」最需留痕（B110-01）
-			if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 退选请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
-				log.Printf("[api] 手动退选 read 失败日志落库失败: %v", aErr)
-			}
-			writeJSON(w, 1, nil, "退选请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
-			return
-		}
-		// 其余业务失败同样落库审计（B110-01 对称补齐）
-		if aErr := d.Store.AppendLog(acct, req.ClassID, "exit", "账号 "+acct+": 手动退选失败: "+err.Error(), false); aErr != nil {
-			log.Printf("[api] 手动退选失败日志落库失败: %v", aErr)
-		}
 		writeJSON(w, 1, nil, err.Error())
 		return
 	}
-
-	// 4. 退选成功：从调度器 done 移除（后台自动引擎下个 tick 可重新接管），记日志
-	_ = d.Sched.RemoveDone(acct, req.ClassID)
 	writeJSON(w, 0, map[string]any{"msg": msg, "class_id": req.ClassID}, msg)
 }
 

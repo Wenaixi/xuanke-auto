@@ -550,11 +550,15 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := d.Store.SetTargetsForAccount(acct, req.Targets); err != nil {
+	// 目标持久化唯一权威 = 调度器 SetTargetsForAccount（C1 契约）：内部完成
+	// enrich 发布元数据补全 → 落库 → 重建课程状态 三步合一，且落库失败 error 上抛。
+	// 此处绝不预写 store（旧实现双重写：handler 先写缺元数据版本、调度器再写补全版，
+	// 第一笔纯冗余且让持久化失败路径分裂）。调度器方法已含 store 持久化，
+	// 失败即正常报错、前端可重试；成功才继续 AppendLog + 返回成功。
+	if err := d.Sched.SetTargetsForAccount(acct, req.Targets); err != nil {
 		writeJSON(w, 1, nil, "保存目标失败: "+err.Error())
 		return
 	}
-	d.Sched.SetTargetsForAccount(acct, req.Targets)
 	if err := d.Store.AppendLog(acct, 0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true); err != nil {
 		log.Printf("[api] 目标保存日志落库失败: %v", err)
 	}

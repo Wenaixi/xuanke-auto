@@ -73,6 +73,13 @@ backend/internal/zhidao/assets/libonnxruntime_*.so
 backend/internal/zhidao/assets/libonnxruntime_*.dylib
 backend/internal/zhidao/assets/onnxruntime_win_*.dll
 
+# ============= Android 构建产物（CI 交叉编译生成，不入 git） =============
+# Go c-shared 编译的 libxuanke.so（进 APK 的 jniLibs）与 Gradle 输出 APK
+build/android/app/src/main/jniLibs/
+build/android/app/build/
+build/android/.gradle/
+build/android/app/.cxx/
+
 # ============= 运行日志 =============
 *.log
 server.log

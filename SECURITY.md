@@ -15,7 +15,8 @@
 - `XUANKE_ADMIN_TOKEN`、`SF_API_KEY`、`XUANKE_MASTER_KEY` 的真实值
 - `data/.env`、`data/xuanke.db`、`data/.master_key`（已被 .gitignore 忽略）
 - 真实抓包文件（HAR，含账号级会话数据）
-- 各平台 onnxruntime 库（16MB+，构建时经 `fetch-onnxruntime.sh` 下载，不入 git）
+- 各平台 onnxruntime 库（16MB+，构建时经 `fetch-onnxruntime.sh` 下载，不入 git；Android 版经 Maven Central `onnxruntime-android` aar 提供）
+- Android `libxuanke.so`（Go c-shared 交叉编译产物，CI 构建时生成，不入 git）
 
 > 已入库的敏感历史如被发现，请报告并配合重写历史清理（本项目已做过一次全历史脱敏）。
 > 新增配置项时先判断是否含敏感值：含则必须走 `data/.env`（不入库）并在日志/回显脱敏；`.env.example` 模板只写占位值。

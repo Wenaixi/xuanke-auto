@@ -11,6 +11,7 @@ Go 后端 + React 前端的单二进制选课服务：账密登录（验证码�
 - `xuanke-linux-arm64.tar.gz`（Linux ARM）
 - `xuanke-darwin-arm64.tar.gz`（macOS Apple Silicon）
 - `xuanke-darwin-amd64.tar.gz`（macOS Intel）
+- `xuanke-android-arm64.apk`（Android ARM64，Go 引擎内嵌 APK，WebView 直连本机引擎，侧载安装）
 
 解压后双击 `xuanke.exe`（或 `./xuanke`），浏览器打开 http://localhost:3091 即可使用。首次运行自动生成 `data/.env`（配管理口令），账号登录点选"选课大厅"即可配置目标并交给调度器定时抢报。
 
@@ -74,7 +75,7 @@ cd web && npm run dev      # 前端 :5173（/api 代理到 3091）
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-产物覆盖 **Windows x64 / ARM64**（各含 GUI 与控制台两个 exe）、**Linux x64/ARM64**、**macOS 双架构**，均附 `.env.example` 与 `checksums.txt`。所有平台（除停发 onnxruntime 的 macOS Intel）均内置离线 ddddocr 识别引擎（CGO=1 内嵌模型与 ONNX Runtime），识别零外网依赖。识别引擎库（onnxruntime dll/so/dylib）不入 git，CI 构建时经 `fetch-onnxruntime.sh` 下载 + 缓存（微软官方 v1.25.0，与 go.sum 对齐）。
+产物覆盖 **Windows x64 / ARM64**（各含 GUI 与控制台两个 exe）、**Linux x64/ARM64**、**macOS 双架构**、**Android ARM64 APK**，均附 `.env.example` 与 `checksums.txt`。所有平台（除停发 onnxruntime 的 macOS Intel）均内置离线 ddddocr 识别引擎（CGO=1 内嵌模型与 ONNX Runtime），识别零外网依赖；Android APK 为自制薄壳（Go 引擎 c-shared 编入 `libxuanke.so`，Java 壳 WebView 加载 127.0.0.1 引擎，侧载分发）。识别引擎库（onnxruntime dll/so/dylib）不入 git，CI 构建时经 `fetch-onnxruntime.sh` 下载 + 缓存（微软官方 v1.25.0，与 go.sum 对齐）。
 
 ## 五、测试与质量门
 
@@ -82,7 +83,7 @@ git tag v0.1.0 && git push origin v0.1.0
 
 - **后端**：`go test -race ./...` 全包。改 tick 守卫 / 探测时序前先跑 `TestWindowOpenSubmitsWithoutProbeReset` 与 `TestAdminStatsWindowOpenedUsesScheduler`。
 - **前端**：`npm run build`（tsc -b + Vite）+ `npm run guard`（五个防回归守卫）。项目根 `tsc --noEmit` 是 references 空壳，不报错。
-- **跨平台**：Windows x64/ARM64（CGO=1 内嵌 ddddocr）编译验证 + Linux/macOS 交叉编译验证。
+- **跨平台**：Windows x64/ARM64（CGO=1 内嵌 ddddocr）编译验证 + Linux/macOS 交叉编译验证 + Android APK（NDK c-shared 交叉 + Gradle 打包）验证。
 
 ## 六、安全与数据
 

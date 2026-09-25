@@ -9,7 +9,9 @@ GOOS="${1:?usage: fetch-onnxruntime.sh <goos> <goarch>}"
 GOARCH="${2:?usage: fetch-onnxruntime.sh <goos> <goarch>}"
 ASSETS_DIR="$(cd "$(dirname "$0")/../internal/zhidao/assets" && pwd)"
 
-# 微软官方 onnxruntime v1.25.0 各平台包名与目标文件名
+# 微软官方 onnxruntime v1.25.0 各平台包名与目标文件名。
+# Android 特例：微软不在 GitHub Releases 发 aar（桌面库才进 releases），
+# Android 走 Maven Central（com.microsoft.onnxruntime:onnxruntime-android）。
 case "${GOOS}-${GOARCH}" in
   windows-amd64) PKG="onnxruntime-win-x64-1.25.0.zip";   INNER="lib/onnxruntime.dll";      OUT="onnxruntime_win_amd64.dll";;
   windows-arm64) PKG="onnxruntime-win-arm64-1.25.0.zip"; INNER="lib/onnxruntime.dll";      OUT="onnxruntime_win_arm64.dll";;
@@ -20,7 +22,11 @@ case "${GOOS}-${GOARCH}" in
   *) echo "不支持的平台: ${GOOS}-${GOARCH}" >&2; exit 1;;
 esac
 
-URL="https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/${PKG}"
+if [ "${GOOS}-${GOARCH}" = "android-arm64" ]; then
+  URL="https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.25.0/onnxruntime-android-1.25.0.aar"
+else
+  URL="https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/${PKG}"
+fi
 
 # 幂等：目标已存在且大小合理（>10MB）则跳过
 if [ -f "$ASSETS_DIR/$OUT" ] && [ "$(stat -c%s "$ASSETS_DIR/$OUT" 2>/dev/null || stat -f%z "$ASSETS_DIR/$OUT")" -gt 10000000 ]; then

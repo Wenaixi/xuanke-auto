@@ -451,7 +451,7 @@ func (s *Scheduler) RecognizedOpenTime() time.Time {
 // 持久历史事实（重启恢复 RestoreDone 注入），重设目标清掉会把已成功课程重新提交；
 // full/rateLimited/inflight 是本次窗口内的真实防轰炸/防双包状态，清了让自动链立刻重打
 // 刚被平台拒绝的课。删账号路径的**全量清理**走专用 PurgeAccount（见下）。
-func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
+func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acctTargets[acct] = targets
@@ -473,8 +473,12 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 		targets = s.enrichTargetPubMetaLocked(acct, targets) // 内存态与 store 均用补全后的目标
 		s.acctTargets[acct] = targets
 		// 落库带发布元数据：窗口关闭后 /state.courses 仍自带日期/发布名。
+		// 落库失败必须 error 上抛（C1 契约：持久化失败绝不静默吞错）——此前只 log，
+		// handler 预写成功 + 这里写失败时前端拿"已保存"而库内是缺元数据版本，
+		// 目标持久化与用户感知分叉。错误上抛后调用方（handler）可正常报错、前端可重试。
 		if err := s.store.SetTargetsForAccount(acct, targets); err != nil {
 			log.Printf("[scheduler] 账号 %s 保存目标落库失败: %v", acct, err)
+			return err
 		}
 		// 重设目标同步清空库内退选行——用户主动重新接管，退选标记不再需要。
 		// 绝不静默吞错——库内 refused 行残留时，重启恢复序 LoadRefused +
@@ -486,6 +490,7 @@ func (s *Scheduler) SetTargetsForAccount(acct string, targets []Target) {
 		}
 	}
 	s.rebuildCoursesForAccountLocked(acct, targets)
+	return nil
 }
 
 // PurgeAccount 全量清空指定账号在调度器中的一切状态：

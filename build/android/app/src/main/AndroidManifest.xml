@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.xuanke.android">
+
+    <!-- 前台服务保活：抢课引擎随进程常驻（后台也能提交） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+：前台服务声明 dataSync 类型需对应 type 权限（漏了 startForeground 直接 SecurityException） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 通知渠道（Android 13+ 需运行时请求 POST_NOTIFICATIONS） -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:label="至道选课"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- 前端资源 + API 全部走本机 127.0.0.1 loopback（WebView 加载本地 Go 引擎） -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 前台服务：常驻通知保活引擎（关闭活动页仍继续抢课） -->
+        <service
+            android:name=".EngineService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>

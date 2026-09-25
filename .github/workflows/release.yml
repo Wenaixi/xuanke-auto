@@ -362,11 +362,91 @@ jobs:
           name: unix-binaries
           path: dist-artifacts/
 
+  # ============ Android APK：Go 引擎 c-shared 交叉 + Gradle 打包 ============
+  # 自制薄壳（非 Wails）：Go 编 libxuanke.so（NDK aarch64-linux-android26-clang），
+  # Java 壳（build/android/）+ WebView 加载 127.0.0.1:3091。arm64-v8a 侧载分发。
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Build Frontend Web App
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+          cache-dependency-path: 'backend/go.sum'
+
+      # Android SDK/NDK + JDK（Wails v3 ANDROID.md 同款依赖：API 35 + NDK 26.3 + JDK 21）
+      - name: Install Android SDK/NDK + JDK + Gradle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openjdk-21-jdk unzip gradle
+          # cmdline-tools（sdkmanager 所在）
+          mkdir -p /opt/android-sdk/cmdline-tools
+          curl -fsSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline.zip -d /opt/android-sdk/cmdline-tools
+          mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=/opt/android-sdk
+          yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
+          /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" >/dev/null
+          echo "/opt/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=/opt/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/opt/android-sdk" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> "$GITHUB_ENV"
+
+      - name: Download android onnxruntime asset
+        run: |
+          bash backend/scripts/fetch-onnxruntime.sh android arm64
+
+      - name: Compile Go engine to libxuanke.so (arm64-v8a)
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          NDK_ROOT="$ANDROID_HOME/ndk/26.3.11579264"
+          cd backend
+          # c-shared：Go 导出 + JNI_OnLoad 桥（jni_bridge.c）同编进 libxuanke.so
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+            CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
+            go build -buildmode=c-shared -tags production,android \
+            -ldflags="-w -s" -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
+
+      - name: Assemble Release APK
+        run: |
+          cd build/android
+          # Gradle wrapper：用系统 gradle 直接构建（无 wrapper 则下载）
+          if [ ! -x gradlew ]; then
+            gradle wrapper --gradle-version 8.5 || true
+          fi
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk ../../dist-release/xuanke-android-arm64.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist-release/xuanke-android-arm64.apk
+
   # ============ 汇总产物 + 校验和 + 发布 GitHub Release ============
   release:
     name: Assemble and Publish Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-windows-arm64, build-unix]
+    needs: [build-windows, build-windows-arm64, build-unix, build-android]
     steps:
       - name: Download Windows Binaries
         uses: actions/download-artifact@v4
@@ -386,10 +466,16 @@ jobs:
           name: unix-binaries
           path: dist-release/
 
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: dist-release/
+
       - name: Generate Checksums
         run: |
           cd dist-release
-          sha256sum xuanke-*.zip xuanke-*.tar.gz > checksums.txt
+          sha256sum xuanke-*.zip xuanke-*.tar.gz xuanke-*.apk > checksums.txt
           cat checksums.txt
 
       - name: Create GitHub Release
@@ -398,6 +484,7 @@ jobs:
           files: |
             dist-release/xuanke-*.zip
             dist-release/xuanke-*.tar.gz
+            dist-release/xuanke-*.apk
             dist-release/checksums.txt
           generate_release_notes: true
           draft: false

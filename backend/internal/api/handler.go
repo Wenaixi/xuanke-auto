@@ -39,11 +39,17 @@ type Options struct {
 	ActivationEnabled bool
 	Encrypt           func(string) (string, error)
 	Runtime           *runtime.Store
+	// Stats handleAdminStats 专用的可注入替身（窄接口，四个读方法）；nil 时回退 Store。
+	// 生产装配不设——只为让「目标数读取失败必须报 500」这条契约在测试里可被真实覆盖。
+	Stats StatsStore
 }
 
 // Deps API 层依赖。
 type Deps struct {
 	Store    *store.Store
+	// Stats handleAdminStats 专用的可注入替身（窄接口，四个读方法）；nil 时回退 Store。
+	// 存在的唯一理由是让「目标数读取失败 → 500」这条契约在测试里可被真实覆盖。
+	Stats StatsStore
 	Sched    *scheduler.Scheduler
 	Accounts *accounts.Manager
 	Sessions *session.Store
@@ -57,6 +63,27 @@ type Deps struct {
 	AdminName string
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
+}
+
+// StatsStore handleAdminStats 消费的最窄持久化接口——只含该 handler 实际用到的
+// 四个读方法。收窄的 seam 只为「目标数读取失败必须报 500」这条契约提供可注入替身：
+// Deps.Store 用具体类型时该失败路径无法构造，仓库里一度留下一个全仓零引用的
+// failingTargetsStore 与一个名字承诺 500、实际只断言 200 的测试。
+// 这里刻意不是把 Deps.Store 整体接口化——那会让接口面等于实现面（假深度），
+// 而本接口只承载 stats 一个 handler 的四个方法，是真正的窄缝。
+type StatsStore interface {
+	ListAccounts() ([]string, error)
+	LoadSuccess() (map[string][]int, error)
+	CountAllLogs() (int, error)
+	LoadTargetsForAccount(acct string) ([]scheduler.Target, error)
+}
+
+// statsStore 取 stats 用的持久化接口：注入替身优先，未注入时回退真实 store。
+func (d *Deps) statsStore() StatsStore {
+	if d.Stats != nil {
+		return d.Stats
+	}
+	return d.Store
 }
 
 // AdminNameValue 返回管理员账号名（默认 admin）。
@@ -781,13 +808,14 @@ func (d *Deps) saveSettings(kv map[string]string) error {
 // 不再静默吞 DB 错误——任一数据源读取失败时如实返回 500（管理员看到的是
 // 明确报错，而非一堆 0/空值误导），绝不假装"数据没问题"。
 func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
+	st := d.statsStore()
 	cfg := d.Runtime.Get()
-	accounts, aErr := d.Store.ListAccounts()
+	accounts, aErr := st.ListAccounts()
 	if aErr != nil {
 		writeJSON(w, 1, nil, "读取账号列表失败: "+aErr.Error())
 		return
 	}
-	success, sErr := d.Store.LoadSuccess()
+	success, sErr := st.LoadSuccess()
 	if sErr != nil {
 		writeJSON(w, 1, nil, "读取成功记录失败: "+sErr.Error())
 		return
@@ -795,7 +823,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	// 日志总数改 COUNT（不加载行）——此前 LoadAllLogs(1000) 全量拉行只为 len(allLogs)，
 	// 5s 轮询下每次白读 1000 行逐行反序列化（task_log 无限增长，量越大浪费越狠）。
 	// COUNT(*) 表级 O(1) 零行加载，语义与 LoadAllLogs 同口径（新日志/超窗一致）。
-	logsCount, lErr := d.Store.CountAllLogs()
+	logsCount, lErr := st.CountAllLogs()
 	if lErr != nil {
 		writeJSON(w, 1, nil, "读取日志失败: "+lErr.Error())
 		return
@@ -815,7 +843,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	targetsCount := 0
 	var targetErr error
 	for _, a := range accounts {
-		ts, err := d.Store.LoadTargetsForAccount(a)
+		ts, err := st.LoadTargetsForAccount(a)
 		if err != nil {
 			// 读目标数失败绝不静默计 0——DB 故障时 stats 若显示 targets_count=0
 			// 会误导管理员"无人设目标"（误判部署异常）。记日志 + 累计错误，循环后明确报 500，

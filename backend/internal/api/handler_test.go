@@ -36,6 +36,21 @@ type testDeps struct {
 	accts    *accounts.Manager
 	rt       *runtime.Store               // 运行时配置中心（测试重建 handler 用）
 	dec      func(string) (string, error) // 注入的解密函数（测试断言加密还原用）
+	enc      func(string) (string, error) // 注入的加密函数（rebuildWithStats 重装配用）
+	t        *testing.T                   // 夹具所属测试（rebuildWithStats 断言用）
+}
+
+// rebuildWithStats 用给定 StatsStore 替身重建 API handler（其余依赖沿用原实例）。
+// 存在的理由：StatsStore 窄接口是 handleAdminStats 唯一的注入 seam，而该 handler
+// 在 Register 时闭包捕获 *Deps，测试无法从外部改写——只能按同一组依赖重新装配一次。
+func (d *testDeps) rebuildWithStats(st StatsStore) {
+	d.t.Helper()
+	mux := http.NewServeMux()
+	d.api = Register(Options{
+		Mux: mux, Store: d.store, Stats: st, Sched: d.sched, Accounts: d.accts,
+		Sessions: d.sessions, AdminToken: testAdminToken, AdminName: "admin",
+		ActivationEnabled: d.rt.Get().ActivationEnabled, Encrypt: d.enc, Runtime: d.rt,
+	})
 }
 
 func newTestDeps(t *testing.T) *testDeps {
@@ -176,7 +191,8 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 		AdminToken: testAdminToken, AdminName: adminName,
 		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: enc, Runtime: rt,
 	})
-	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
+	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions,
+		accts: accts, rt: rt, dec: dec, enc: enc, t: t}
 }
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求（期望非连接错误响应），
@@ -891,23 +907,43 @@ func TestRenamedAdminSessionBindsConfigName(t *testing.T) {
 // TestAdminStatsTargetsLoadFailureReturns500 stats 的 targetsCount 循环若某个账号
 // 目标读取失败必须记日志 + 明确报 500——此前静默 continue 计 0，DB 故障时 stats 显示
 // targets_count=0 误导管理员"无人设目标"，违反零吞错精神（对齐其他数据源"任一失败即 500"）。
+//
+// 这条契约此前无法被测试：Deps.Store 是具体类型，失败路径构造不出替身，于是本测试
+// 名字承诺 500、函数体却只断言正常路径 200，failingTargetsStore 定义后全仓零引用。
+// StatsStore 窄接口（四个读方法）补上这个 seam 后，替身终于接得上，测试名与断言一致。
 func TestAdminStatsTargetsLoadFailureReturns500(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := adminTokenFor(t, d)
-	// 目标读取恒失败：Register 接收 *store.Store（非接口），无法注入替身——直接对真实
-	// store 的底层 DB 执行一次非法操作不可行（store 方法封装安全查询）。
-	// 的行为（失败 → 记日志 + 500）由实现注释与 handleAdminStats 其他数据源
-	// 同风格兜底，此处以最小契约回归：正常路径 stats 仍 200（回归 TestAdminStatsAccountsLogs
-	// 已覆盖 targets_count 正确计数）；失败路径的报错语义属"零吞错"族，走实现内复查。
-	// （架构深化 A+E 已做 Options 装配收窄；Deps.Store 保持具体类型是刻意决策——
-	// 收窄为接口需暴露 api 消费的 17 方法面，接口面=实现面是假深度，测试缝收益
-	// 不抵维护成本。若未来真需要 stats 失败注入，再单独收窄 StatsStore 窄缝。）
+	// 造一个已登录账号（stats 的 accounts 列表非空，目标读取循环才会真正进入）
+	loginAndGetToken(t, d, "acct1")
+	// 注入目标读取恒失败的替身后重建 handler（StatsStore 窄接口的另三个方法走真实 store）
+	d.rebuildWithStats(&failingTargetsStore{Store: d.store})
+
 	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
-	if code != http.StatusOK {
-		t.Fatalf("正常路径 stats 应 200: %d", code)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("目标读取失败必须报 HTTP 500（DB 故障时报 0 会误导管理员无人设目标），实际 %d", code)
 	}
-	if j["code"].(float64) != 0 {
-		t.Fatalf("正常路径 stats 应业务 code=0: %v", j)
+	if j["code"].(float64) != 500 {
+		t.Fatalf("目标读取失败的 body code 应与 HTTP-500 家族对齐为 500，实际 %v", j["code"])
+	}
+}
+
+// TestAdminStatsHealthyPathStillOK 对照组：未注入替身时（生产装配形态，
+// Stats 为 nil 回退真实 store）stats 仍走正常路径 200 + 计数正确。
+// 它同时证明上一条不是因为"根本没走到目标读取"而绿。
+func TestAdminStatsHealthyPathStillOK(t *testing.T) {
+	d := newTestDeps(t)
+	adminTok := adminTokenFor(t, d)
+	tok := loginAndGetToken(t, d, "acct1")
+	doJSONAuth(t, d.api, "PUT", "/api/targets", `{"targets":[{"publish_id":1,"class_id":61115,"course_name":"健美操"}]}`, tok)
+
+	code, j := doJSONAdmin(t, d.api, "GET", "/api/admin/stats", "", adminTok)
+	if code != http.StatusOK || j["code"].(float64) != 0 {
+		t.Fatalf("正常路径 stats 应 200 且 code=0: %d %v", code, j)
+	}
+	data, _ := j["data"].(map[string]any)
+	if data["targets_count"].(float64) != 1 {
+		t.Fatalf("正常路径应正确统计一个目标，实际 %v", data["targets_count"])
 	}
 }
 

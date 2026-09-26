@@ -127,7 +127,8 @@ func Register(opts Options) http.Handler {
 	// 保持内部引用零改动（架构深化 E 只换装配面，不扰动路由注册体）。
 	mux, rt, accts := opts.Mux, opts.Runtime, opts.Accounts
 
-	d := &Deps{Store: opts.Store, Sched: opts.Sched, Accounts: opts.Accounts, Sessions: opts.Sessions,
+	d := &Deps{Store: opts.Store, Stats: opts.Stats, Sched: opts.Sched, Accounts: opts.Accounts,
+		Sessions: opts.Sessions,
 		Runtime: opts.Runtime, AdminToken: opts.AdminToken, ActivationEnabled: opts.ActivationEnabled,
 		Encrypt: opts.Encrypt, AdminName: opts.AdminName}
 	// 登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、

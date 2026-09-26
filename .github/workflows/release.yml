@@ -439,20 +439,19 @@ jobs:
           # 即 Go c-shared 在 Android 目标不把 //export 写进 .dynsym。
           # 解法走 NDK 官方 symbol visibility：version script 显式声明全局符号，
           # 强制 lld 把它们放进 .dynsym（配合 -Wl,--version-script）。
-          cat > /tmp/libxuanke.map <<'MAP'
-          {
-            global:
-              JNI_OnLoad;
-              XuankeSetDataDir;
-              XuankeStart;
-              XuankeStop;
-            local: *;
-          };
-          MAP
+          # 诊断：先看 cgo 生成的 C 导出胶水是否含三个符号——区分「Go 根本没生成」
+          # 与「生成了但链接期丢失」两种成因。_cgo_export.c 是 //export 的真实产物。
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+            CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
+            go tool cgo -objdir /tmp/cgoobj -- -I"$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" platform_android.go 2>&1 | tail -5 || true
+          echo "--- cgo 生成的 _cgo_export.c 是否含 Xuanke 符号 ---"
+          grep -c 'XuankeSetDataDir\|XuankeStart\|XuankeStop' /tmp/cgoobj/_cgo_export.c 2>/dev/null || echo "文件不存在"
+          grep -n 'Xuanke' /tmp/cgoobj/_cgo_export.c 2>/dev/null | head -10 || true
+          echo "--- go build 实际编译（无 version script）---"
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
-            -ldflags="-w -extldflags=-Wl,--version-script=/tmp/libxuanke.map" \
+            -ldflags="-w" \
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
           # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
           # UNDEF 会在装机 dlopen 阶段炸，拦在构建期。

@@ -443,6 +443,7 @@ jobs:
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
+            -ldflags="-extldflags=-Wl,--no-gc-sections,-z,nocopyreloc" \
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
           # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
           # UNDEF 会在装机 dlopen 阶段炸（此前正是此坑闪退），构建期即拦。

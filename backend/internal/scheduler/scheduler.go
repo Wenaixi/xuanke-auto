@@ -1489,11 +1489,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.mu.Lock()
 				delete(s.inflight[acct], t.ClassID) // 清提交标记（避免残留占用）
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
-				if s.store != nil {
-					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); err != nil {
-						log.Printf("[scheduler] 账号 %s 课程 %d 失效日志落库失败: %v", acct, t.ClassID, err)
-					}
-				}
+				s.appendLog(acct, t.ClassID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)
 				s.mu.Unlock()
 				return
 			}
@@ -1518,9 +1514,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.done[acct][t.ClassID] = true
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "success", msg)
 				if s.store != nil {
-					if err := s.store.AppendLog(acct, t.ClassID, "select", msg, true); err != nil {
-						log.Printf("[scheduler] 账号 %s 课程 %d 报名成功日志落库失败: %v", acct, t.ClassID, err)
-					}
+					s.appendLog(acct, t.ClassID, "select", msg, true)
 					if err := s.store.SaveSuccess(acct, t.ClassID); err != nil {
 						// 落库失败会让重启后 RestoreDone 漏掉这条成功记录、已成功课被重新提交——
 						// 记录在案供运维排查（SQLite 单写者仅在磁盘满/IO 故障时失败）。
@@ -1544,11 +1538,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				}
 				s.markRateLimitedLocked(acct, t.ClassID, 30*time.Second)
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "触发平台风控退避 30 秒: "+err.Error())
-				if s.store != nil {
-					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false); err != nil {
-						log.Printf("[scheduler] 账号 %s 课程 %d 风控退避日志落库失败: %v", acct, t.ClassID, err)
-					}
-				}
+				s.appendLog(acct, t.ClassID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false)
 				s.mu.Unlock()
 				return
 			case errWindowClosed:
@@ -1599,11 +1589,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				s.maybeRelogin(acct)
 				s.mu.Lock()
 				s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "教务令牌失效，自动重登中")
-				if s.store != nil {
-					if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 实时复核命中 token 失效，自动重登中", false); err != nil {
-						log.Printf("[scheduler] 账号 %s 课程 %d 实时复核失效日志落库失败: %v", acct, t.ClassID, err)
-					}
-				}
+				s.appendLog(acct, t.ClassID, "select", "账号 "+acct+": 实时复核命中 token 失效，自动重登中", false)
 				s.mu.Unlock()
 				return
 			}
@@ -1648,11 +1634,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 				logMsg = "账号 " + acct + ": " + failMsg
 			}
 			s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", failMsg)
-			if s.store != nil {
-				if err := s.store.AppendLog(acct, t.ClassID, "select", logMsg, false); err != nil {
-					log.Printf("[scheduler] 账号 %s 课程 %d 报名失败日志落库失败: %v", acct, t.ClassID, err)
-				}
-			}
+			s.appendLog(acct, t.ClassID, "select", logMsg, false)
 			s.mu.Unlock()
 			return
 		}
@@ -1737,11 +1719,7 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 	}
 	s.full[acct][t.ClassID] = true
 	s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "该课程已满员，退避至下一备选")
-	if s.store != nil {
-		if err := s.store.AppendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false); err != nil {
-			log.Printf("[scheduler] 账号 %s 课程 %d 满员日志落库失败: %v", acct, t.ClassID, err)
-		}
-	}
+	s.appendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false)
 }
 
 // releaseFullIfFreedLocked 快照显示不满时解除 full 标记并回 pending（需持锁）。
@@ -1889,7 +1867,7 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 // 身份归属防线：发起方传入 origin（ManualSelect 捕获的客户端指针），非 nil 时在锁内
 // 比对指针身份——管理员 DeleteAccount 与在飞手动报名（SelectClass 最长 15s）竞态时，
 // 删除完成后本请求才返回成功；同名重建（换绑/误删加回）后注册表现指针已换成新客户端，
-// 只判账号名存在会把旧请求的成功写进重建身份（重启后 RestoreDone 恢复成"已报名成功"假状态）。
+// 只判账号名存在会把旧请求的成功写进重建身份（重启后 RestoreDone 恢复成“已报名成功”假状态）。
 // origin 为 nil 表示调用方不持有身份概念（仅测试夹具与外部同步调用），此时只判账号存在。
 func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string, origin Client) error {
 	s.mu.Lock()
@@ -1952,12 +1930,25 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string, o
 		if err := s.store.SaveSuccess(acct, classID); err != nil {
 			log.Printf("[scheduler] 账号 %s 课程 %d 手动报名成功记录落库失败: %v", acct, classID, err)
 		}
-		if err := s.store.AppendLog(acct, classID, "select", msg, true); err != nil {
-			log.Printf("[scheduler] 账号 %s 课程 %d 手动报名日志落库失败: %v", acct, classID, err)
-		}
+		s.appendLog(acct, classID, "select", msg, true)
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 手动标记成功: %s", acct, classID, msg)
 	return nil
+}
+
+// appendLog 写报名/退选审计日志并对落库失败留痕——「落库失败必须记日志绝不静默吞错」
+// 这条契约的唯一实现。此前该契约以手抄形态散在 15 处调用点（判 store 非 nil → 调
+// AppendLog → 判 err → log.Printf 三层 if 逐处复制），"记得写 log.Printf"成了每个新
+// 分支都要重复的人工纪律：漏写一处无人发现，失败路径静默消失，收敛成本随调用点线性增长。
+// 收进本方法后契约由 module 强制，新增落点无需再记得。
+// nil 语义：s.store 为 nil（测试夹具）时静默跳过，与既有守卫一致。
+func (s *Scheduler) appendLog(acct string, classID int, action, result string, isOK bool) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.AppendLog(acct, classID, action, result, isOK); err != nil {
+		log.Printf("[scheduler] 账号 %s 课程 %d %s 日志落库失败: %v", acct, classID, action, err)
+	}
 }
 
 // RemoveDone 手动退选成功后同步调度器状态：从 done 移除、置 pending 状态并记日志。
@@ -2014,9 +2005,7 @@ func (s *Scheduler) RemoveDone(acct string, classID int, origin Client) error {
 		if err := s.store.SaveRefused(acct, classID); err != nil {
 			log.Printf("[scheduler] 账号 %s 课程 %d 退选记录落库失败（重启后自动引擎可能抢回）: %v", acct, classID, err)
 		}
-		if err := s.store.AppendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true); err != nil {
-			log.Printf("[scheduler] 账号 %s 课程 %d 退选日志落库失败: %v", acct, classID, err)
-		}
+		s.appendLog(acct, classID, "exit", "手动退选成功（自动引擎不再接管，重新设为目标可恢复）", true)
 	}
 	log.Printf("[scheduler] 账号 %s 课程 %d 已手动退选，记入 refused——自动引擎不再接管", acct, classID)
 	return nil
@@ -2067,28 +2056,16 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 		case errAuth:
 			// 只触发重登，绝不 MarkTokenValid（后者会击穿指数退避）
 			s.MaybeRelogin(acct)
-			if s.store != nil {
-				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
-					log.Printf("[scheduler] 手动报名失效日志落库失败: %v", aErr)
-				}
-			}
+			s.appendLog(acct, classID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)
 			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
 		case errRead:
-			if s.store != nil {
-				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 报名请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
-					log.Printf("[scheduler] 手动报名 read 日志落库失败: %v", aErr)
-				}
-			}
+			s.appendLog(acct, classID, "select", "账号 "+acct+": 报名请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false)
 			return "", errors.New("报名请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
 		case errRateLimit:
 			s.mu.Lock()
 			s.markRateLimitedLocked(acct, classID, 30*time.Second)
 			s.mu.Unlock()
-			if s.store != nil {
-				if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false); aErr != nil {
-					log.Printf("[scheduler] 手动报名风控日志落库失败: %v", aErr)
-				}
-			}
+			s.appendLog(acct, classID, "select", "账号 "+acct+": 触发平台风控退避 30s: "+err.Error(), false)
 			return "", errors.New("触发平台风控退避，请稍后再试")
 		case errWindowClosed:
 			s.mu.Lock()
@@ -2097,11 +2074,7 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 			return "", errors.New("选课窗口已关闭")
 		}
 		// errOther：原文案透传（含"课程不存在"等平台业务错误）+ 审计日志
-		if s.store != nil {
-			if aErr := s.store.AppendLog(acct, classID, "select", "账号 "+acct+": 手动报名失败: "+err.Error(), false); aErr != nil {
-				log.Printf("[scheduler] 手动报名失败日志落库失败: %v", aErr)
-			}
-		}
+		s.appendLog(acct, classID, "select", "账号 "+acct+": 手动报名失败: "+err.Error(), false)
 		return "", err
 	}
 	// 成功：MarkDone（清 refused/inflight/full + 置 success + SaveSuccess + AppendLog）
@@ -2138,25 +2111,13 @@ func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
 		switch classifyPlatformError(err) {
 		case errAuth:
 			s.MaybeRelogin(acct)
-			if s.store != nil {
-				if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false); aErr != nil {
-					log.Printf("[scheduler] 手动退选失效日志落库失败: %v", aErr)
-				}
-			}
+			s.appendLog(acct, classID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false)
 			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
 		case errRead:
-			if s.store != nil {
-				if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 退选请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false); aErr != nil {
-					log.Printf("[scheduler] 手动退选 read 日志落库失败: %v", aErr)
-				}
-			}
+			s.appendLog(acct, classID, "exit", "账号 "+acct+": 退选请求已发出但响应读取失败（平台可能已处理，以大厅状态为准）", false)
 			return "", errors.New("退选请求已发出但响应读取失败（平台可能已处理，请以选课大厅状态为准）")
 		}
-		if s.store != nil {
-			if aErr := s.store.AppendLog(acct, classID, "exit", "账号 "+acct+": 手动退选失败: "+err.Error(), false); aErr != nil {
-				log.Printf("[scheduler] 手动退选失败日志落库失败: %v", aErr)
-			}
-		}
+		s.appendLog(acct, classID, "exit", "账号 "+acct+": 手动退选失败: "+err.Error(), false)
 		return "", err
 	}
 	// 成功：RemoveDone（清 done/inflight + 记 refused + 置"已退选"状态 + 落库）

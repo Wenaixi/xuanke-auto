@@ -707,24 +707,17 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				changed = append(changed, "captcha_concurrency")
 			}
 		})
-		cfg := d.Runtime.Get()
-		// 先尝试落库（settings 全量替换，重启后恢复）。vision_key 加密落库：
-		// 与凭据同强度（AES-256-GCM），settings 表内永不出现明文密钥。
-		visionKey, vErr := d.secureEncrypt(cfg.VisionAPIKey)
-		if vErr != nil {
-			writeJSON(w, 1, nil, "配置加密失败: "+vErr.Error())
-			return
-		}
-		// 先落库、后内存生效与下游下发（落库失败也要完成下发，杜绝半生效误导）。
-		if sErr := d.saveSettings(map[string]string{
-			"activation_enabled":  strconv.FormatBool(cfg.ActivationEnabled),
-			"vision_base_url":     cfg.VisionBaseURL,
-			"vision_key":          visionKey,
-			"vision_model":        cfg.VisionModel,
-			"captcha_engine":      cfg.CaptchaEngine,
-			"captcha_fallback":    strconv.FormatBool(cfg.CaptchaFallback),
-			"captcha_concurrency": strconv.Itoa(cfg.CaptchaConcurrency),
-		}); sErr != nil {
+	cfg := d.Runtime.Get()
+	// 落库键名与序列化规则由 runtime 配置表统一定义（与启动还原侧同一张表）。
+	// 传 d.Encrypt 原始加密器而非 secureEncrypt——前缀由 ToSettings 统一拼接，
+	// 避免 enc: 双重前缀；未注入加密器时 ToSettings 直接报错，绝不明文入库。
+	settings, serErr := runtime.ToSettings(cfg, d.Encrypt)
+	if serErr != nil {
+		writeJSON(w, 1, nil, "配置加密失败: "+serErr.Error())
+		return
+	}
+	// 先落库、后内存生效与下游下发（落库失败也要完成下发，杜绝半生效误导）。
+	if sErr := d.saveSettings(settings); sErr != nil {
 			// 落库失败绝不静默——配置已内存生效，但重启即回退。
 			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，
 			// 识别引擎/Vision 仍按新配置同步给账号客户端，杜绝"半生效"误导。

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
@@ -90,43 +88,14 @@ func runServer(cfg config.Config) *Started {
 		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr 本地识别（免密钥），vision 云识别需显式配置
 		CaptchaConcurrency: 1,
 	})
-	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）
+	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）。
+	// 键名与解析规则由 runtime 包的配置表统一定义——落库侧（api PUT）与本还原侧
+	// 读同一张表，新增字段不可能只改一处而漏另一处。
 	if kv, err := st.LoadSettings(); err != nil {
 		log.Printf("[main] 读取运行时配置失败: %v", err)
 	} else if len(kv) > 0 {
 		rt.Update(func(c *runtime.Config) {
-			if v, ok := kv["activation_enabled"]; ok {
-				c.ActivationEnabled = v == "true"
-			}
-			if v, ok := kv["vision_base_url"]; ok {
-				c.VisionBaseURL = v
-			}
-			if v, ok := kv["vision_key"]; ok {
-				// vision_key 严格要求加密存储（enc: 前缀），彻底拒绝旧版未加密明文
-				if strings.HasPrefix(v, "enc:") {
-					if plain, err := decrypt(strings.TrimPrefix(v, "enc:")); err == nil {
-						c.VisionAPIKey = plain
-					} else {
-						log.Printf("[main] 解密 vision_key 失败，已忽略: %v", err)
-					}
-				} else {
-					log.Printf("[main] 警告：发现未加密的旧版 vision_key，已彻底拒绝加载（不兼容旧数据）")
-				}
-			}
-			if v, ok := kv["vision_model"]; ok {
-				c.VisionModel = v
-			}
-			if v, ok := kv["captcha_engine"]; ok {
-				c.CaptchaEngine = v
-			}
-			if v, ok := kv["captcha_fallback"]; ok {
-				c.CaptchaFallback = v == "true"
-			}
-			if v, ok := kv["captcha_concurrency"]; ok {
-				if n, err := strconv.Atoi(v); err == nil && n > 0 {
-					c.CaptchaConcurrency = n
-				}
-			}
+			runtime.ApplySettings(c, kv, decrypt)
 		})
 	}
 

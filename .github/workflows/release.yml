@@ -464,22 +464,25 @@ jobs:
       - name: Assemble Release APK
         run: |
           cd build/android
-          # 版本号从 git tag 注入（v0.2.7 → name=0.2.7 code=7），避免硬编码
-          # 导致所有发布 APK 都显示同一个 0.2.0。workflow_dispatch 无 tag 时
-          # 回退 master 提交号推导，保证任何触发方式都有可追溯版本。
+          # 版本号从 git tag 注入（v0.2.9 → name=0.2.9 code=209），避免硬编码
+          # 导致所有发布 APK 都显示同一个 0.2.0。
+          #
+          # 关键：**NAME 与 CODE 两条路径都必须赋值**。此前 fallback 分支只赋了
+          # TAG/CODE 而漏赋 NAME，workflow_dispatch（无 tag）时传入
+          # -PapkVersionName="" 空串，gradle 求值报 "Value is null" 直接失败。
           TAG="${GITHUB_REF#refs/tags/}"
-          if [ "${TAG#v}" = "$TAG" ] || [ -z "$TAG" ]; then
-            TAG="0.2.0+${GITHUB_SHA::7}"
-            CODE=1
-          else
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             NAME="${TAG#v}"
-            # 三段全用：0.2.8 → 0*10000 + 2*100 + 8 = 208，保证 patch 递增
-            # 也映射为递增 versionCode（此前只取 major.minor，0.2.7/0.2.8 都是 2，
-            # 同 versionCode 无法覆盖安装）。
+            # 三段全用：0.2.9 → 0*10000 + 2*100 + 9 = 209，保证 patch 递增
+            # 也映射为递增 versionCode（同 versionCode 无法覆盖安装）。
             MAJ="${NAME%%.*}"; REST="${NAME#*.}"
             MIN="${REST%%.*}"; PAT="${REST#*.}"
             PAT="${PAT%%[^0-9]*}"   # 去掉 pre-release 后缀（-rc1 等）
             CODE=$(( MAJ * 10000 + MIN * 100 + ${PAT:-0} ))
+          else
+            # 无 tag（workflow_dispatch / 分支触发）：用提交号派生可追溯版本
+            NAME="0.0.0+${GITHUB_SHA::7}"
+            CODE=1
           fi
           echo "::notice::APK 版本注入: versionName=$NAME versionCode=$CODE"
           # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；

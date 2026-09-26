@@ -174,7 +174,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	apiHandler := Register(Options{
 		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		AdminToken: testAdminToken, AdminName: adminName,
-		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: enc, Decrypt: dec, Runtime: rt,
+		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: enc, Runtime: rt,
 	})
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions, accts: accts, rt: rt, dec: dec}
 }

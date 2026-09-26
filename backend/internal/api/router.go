@@ -129,7 +129,7 @@ func Register(opts Options) http.Handler {
 
 	d := &Deps{Store: opts.Store, Sched: opts.Sched, Accounts: opts.Accounts, Sessions: opts.Sessions,
 		Runtime: opts.Runtime, AdminToken: opts.AdminToken, ActivationEnabled: opts.ActivationEnabled,
-		Encrypt: opts.Encrypt, Decrypt: opts.Decrypt, AdminName: opts.AdminName}
+		Encrypt: opts.Encrypt, AdminName: opts.AdminName}
 	// 登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
 	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。
 	loginLim := newLoginLimiter()

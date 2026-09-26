@@ -38,7 +38,6 @@ type Options struct {
 	AdminName         string
 	ActivationEnabled bool
 	Encrypt           func(string) (string, error)
-	Decrypt           func(string) (string, error)
 	Runtime           *runtime.Store
 }
 
@@ -50,10 +49,9 @@ type Deps struct {
 	Sessions *session.Store
 	// Runtime 进程内配置中心（管理员热重载生效）。
 	Runtime *runtime.Store
+	// Encrypt 数据加密函数（main 注入：secure.Encrypt，凭据与 vision_key 落库前加密）。
+	Encrypt    func(string) (string, error)
 	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；管理员账号的密码）。
-	Encrypt func(string) (string, error)
-	// Decrypt 数据解密函数（main 注入：secure.Decrypt，vision_key 读回时解密）。
-	Decrypt    func(string) (string, error)
 	AdminToken string
 	// AdminName 管理员登录账号名（默认 admin，可用 XUANKE_ADMIN_NAME 改名）。
 	AdminName string

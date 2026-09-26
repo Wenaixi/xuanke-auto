@@ -6,6 +6,7 @@ import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
 import { Badge } from "../components/ui/Badge"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
+import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
 import {
   Activity,
   ArrowUpRight,
@@ -27,10 +28,6 @@ interface Props {
   onGoSelect: () => void
 }
 
-// 优先级序号转展示名：0=首选，1=备选 1，2=备选 2
-function priorityName(p: number): string {
-  return p === 0 ? "首选" : `备选 ${p}`
-}
 
 // 是否为满员退避：失败且原因明确写"已满员"（调度器 markFullLocked 文案）
 function isFullFallback(c: { status: string; result: string }): boolean {
@@ -219,12 +216,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   // 主倒计时输入 openTimeStr 未识别时用 begin_times[0] 兜底（唯一未来开窗点），
   // 避免"主矩阵全 00 过期态 + 同屏『预计开放时间』显示未来时刻"的自相矛盾；识别槽
   // 建立（open_time_known=true）后仍以识别真值为准，兜底只在识别缺席时生效。
-  const cd = useTickingCountdown(
-    openTimeStr ??
-      (electives?.begin_times?.[0] != null
-        ? new Date(electives.begin_times[0]).toISOString()
-        : null)
-  )
+  // 解析链与 Select 同源收 lib/courseView（resolveCountdownTarget）。
+  const cd = useTickingCountdown(resolveCountdownTarget(openTimeStr, electives?.begin_times))
 
   // 折叠行实时标签由主矩阵每秒 tick 的整页重渲染驱动（见 relativeCountdown 注释）。
   const nowMs = Date.now()
@@ -407,13 +400,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                             （open_time_known=false）但平台已下发开窗点时，矩阵已明确倒数，
                             文案不能再显"未识别到开放时间"自相矛盾。识别真值优先，兜底只
                             在识别缺席时生效，识别也缺席才回落到"未识别"/"同步中"。 */}
-                        {openTimeStr
-                          ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-                          : electives?.begin_times?.[0] != null
-                            ? new Date(electives.begin_times[0]).toLocaleString("zh-CN", { hour12: false })
-                            : state
-                              ? "未识别到开放时间"
-                              : "正在同步教务平台时间配置..."}
+                        {formatOpenMoment(openTimeStr, electives?.begin_times, state ? "未识别到开放时间" : "正在同步教务平台时间配置...")}
                       </span>
                     </span>
                     <span className="text-neutral-500">

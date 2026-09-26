@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
 import { cleanStaleSelected, selectedHasStalePublish } from "../lib/targetGuard"
+import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
 import { useTargetSave } from "../lib/useTargetSave"
 import {
   ArrowLeft,
@@ -38,10 +39,6 @@ function fillRate(c: ClassItem): number {
   return Math.min(100, Math.round((c.selected_count / c.max_count) * 100))
 }
 
-// 优先级序号转展示名：0=首选，1=备选 1，2=备选 2（首位不再是"备选 1"）
-function priorityName(p: number): string {
-  return p === 0 ? "首选" : `备选 ${p}`
-}
 
 // CountdownLeaf 选课大厅倒计时叶子（memo 化）：每秒 cd.* 的 tick 只重渲染这
 // 六个数字文本节点。与 Dashboard 的 MemoCountdownMatrix 同构——useTickingCountdown
@@ -412,14 +409,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     stateData?.open_time_known && stateData.open_time
       ? stateData.open_time
       : null
-  // 识别缺席时用 begin_times[0] 兜底（与 Dashboard 同构）——同一浏览器
-  // 主看板有确切倒计时、选课大厅全 00 的跨页矛盾收口；识别槽建立后仍以识别真值为准。
-  const cd = useTickingCountdown(
-    openTimeStr ??
-      (data?.begin_times?.[0] != null
-        ? new Date(data.begin_times[0]).toISOString()
-        : null)
-  )
+  // 识别缺席时用 begin_times[0] 兜底（与 Dashboard 同源收 lib/courseView）——
+  // 同一浏览器主看板有确切倒计时、选课大厅全 00 的跨页矛盾收口；识别槽建立后
+  // 仍以识别真值为准。
+  const cd = useTickingCountdown(resolveCountdownTarget(openTimeStr, data?.begin_times))
 
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-28 sm:pb-24">
@@ -507,11 +500,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             )}
           </div>
           <span className="text-neutral-500 font-mono hidden sm:block shrink-0">
-            {stateData?.open_time_known && openTimeStr
-              ? new Date(openTimeStr).toLocaleString("zh-CN", { hour12: false })
-              : data?.begin_times?.[0] != null
-                ? new Date(data.begin_times[0]).toLocaleString("zh-CN", { hour12: false })
-                : "未知"}
+            {formatOpenMoment(openTimeStr, data?.begin_times, "未知")}
           </span>
         </div>
 

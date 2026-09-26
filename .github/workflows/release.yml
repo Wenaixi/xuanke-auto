@@ -431,30 +431,25 @@ jobs:
           mkdir -p ../build/android/app/src/main/jniLibs/arm64-v8a
           # c-shared：Go 导出 + JNI_OnLoad 桥（jni_android.c）同编进 libxuanke.so
           #
-          # 导出符号铁律（经真机 logcat + 四轮 CI 对照实验定案）：
-          # v0.2.2 装机闪退 = UnsatisfiedLinkError: cannot locate symbol
-          # "XuankeSetDataDir"（dlopen 期解析失败，ELF .dynsym 里三个 Xuanke* 全 U）。
-          # 已证伪：Go 版本（1.26/1.27 均同）、-s 剥离、--export-dynamic、
-          # --no-gc-sections/nocopyreloc、最简无 flag —— 符号始终 UNDEF。
-          # 即 Go c-shared 在 Android 目标不把 //export 写进 .dynsym。
-          # 解法走 NDK 官方 symbol visibility：version script 显式声明全局符号，
-          # 强制 lld 把它们放进 .dynsym（配合 -Wl,--version-script）。
-          # 诊断：先看 cgo 生成的 C 导出胶水是否含三个符号——区分「Go 根本没生成」
-          # 与「生成了但链接期丢失」两种成因。_cgo_export.c 是 //export 的真实产物。
-          CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
-            CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
-            go tool cgo -objdir /tmp/cgoobj -- -I"$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" platform_android.go 2>&1 | tail -5 || true
-          echo "--- cgo 生成的 _cgo_export.c 是否含 Xuanke 符号 ---"
-          grep -c 'XuankeSetDataDir\|XuankeStart\|XuankeStop' /tmp/cgoobj/_cgo_export.c 2>/dev/null || echo "文件不存在"
-          grep -n 'Xuanke' /tmp/cgoobj/_cgo_export.c 2>/dev/null | head -10 || true
-          echo "--- go build 实际编译（无 version script）---"
+          # 装机闪退根因（v0.2.2 真机 logcat 实证，五轮 CI 对照实验定案）：
+          # UnsatisfiedLinkError: dlopen failed: cannot locate symbol
+          # "XuankeSetDataDir" —— .dynsym 里三个 Xuanke* 全 UNDEF，lld 报
+          # "symbol not defined"。**真因不是链接 flag，而是 `// export` 注释里
+          # `//` 与 `export` 之间有空格** → cgo 不识别为导出指令，压根没生成
+          # _cgo_export.c 胶水（诊断实证：文件不存在）。Go 1.19+ gofmt 会把
+          # `//export` 重写成 `// export` 破坏导出（golang/go#63123）。
+          # 已证伪：Go 版本（1.26/1.27）、-s 剥离、--export-dynamic、
+          # --no-gc-sections/nocopyreloc、version script、最简无 flag。
+          # 故：导出格式检查 + 符号自检双保险，任一回归都在构建期拦下。
+          if grep -nE '^[[:space:]]*//[[:space:]]+export[[:space:]]' platform_android.go; then
+            echo "::error::platform_android.go 的 //export 被写成 '// export'（带空格）——cgo 不会生成导出胶水，装机 dlopen 失败闪退"; exit 1
+          fi
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
             -ldflags="-w" \
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
-          # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
-          # UNDEF 会在装机 dlopen 阶段炸，拦在构建期。
+          # 符号自检：四个符号必须已定义(T)，UNDEF 即装机闪退，拦在构建期。
           NM="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
           SO=../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so
           echo "--- 动态符号（Xuanke/JNI 相关）---"

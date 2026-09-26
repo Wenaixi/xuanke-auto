@@ -447,9 +447,14 @@ jobs:
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
           # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
           # UNDEF 会在装机 dlopen 阶段炸（此前正是此坑闪退），构建期即拦。
+          # 打印全量动态符号便于事后判读（区分「真 UND」与「grep 模式不匹配」）。
           NM="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          echo "--- 动态符号全量（Xuanke/JNI 相关）---"
+          "$NM" -D ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | grep -iE 'xuanke|jni_onload'
+          echo "--- 全部 UND 动态符号（前 20）---"
+          "$NM" -D --undefined-only ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | head -20
           for sym in XuankeSetDataDir XuankeStart XuankeStop; do
-            if ! "$NM" -D --defined-only ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | grep -q " $sym$"; then
+            if ! "$NM" -D --defined-only ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | awk '{print $NF}' | grep -qx "$sym"; then
               echo "::error::导出符号 $sym 未定义（UND），装机将 dlopen 失败闪退"; exit 1
             fi
           done

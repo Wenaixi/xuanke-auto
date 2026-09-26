@@ -85,7 +85,7 @@ func TestRefusedNeverResubmitted(t *testing.T) {
 	}
 
 	// 模拟用户手动退选（RemoveDone 由 /api/electives/select/exit 调用）
-	if err := s.RemoveDone("acct1", 61115, nil); err != nil {
+	if err := s.removeDone("acct1", 61115, nil); err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
 	if !s.refusedHas("acct1", 61115) {
@@ -131,7 +131,7 @@ func TestManualReselectClearsRefusedRow(t *testing.T) {
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 
 	// 用户手动退选 C：SaveRefused 落库行
-	if err := s.RemoveDone("acct1", 61115, nil); err != nil {
+	if err := s.removeDone("acct1", 61115, nil); err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
 	got, _ := st.LoadRefused()
@@ -140,7 +140,7 @@ func TestManualReselectClearsRefusedRow(t *testing.T) {
 	}
 
 	// 用户手动重报 C 成功：MarkDone 必须清该课库内退选行（其余课程不受影响）
-	if err := s.MarkDone("acct1", 61115, "健美操", "选课成功", nil); err != nil {
+	if err := s.markDone("acct1", 61115, "健美操", "选课成功", nil); err != nil {
 		t.Fatalf("MarkDone 失败: %v", err)
 	}
 	got, _ = st.LoadRefused()
@@ -170,7 +170,7 @@ func TestRefusedRestartOrderRealDB(t *testing.T) {
 	s1 := New(&fakeAccts{c: fc}, st, time.Now().Add(-time.Hour), 10*time.Millisecond)
 	s1.RestoreDone(map[string][]int{})
 	s1.RestoreTargets("acct1", initialTargets)
-	if err := s1.RemoveDone("acct1", 61115, nil); err != nil {
+	if err := s1.removeDone("acct1", 61115, nil); err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestRefusedPersistedAcrossRestart(t *testing.T) {
 	if _, err := s.ProbeForAccount("acct1"); err != nil {
 		t.Fatalf("填充快照失败: %v", err)
 	}
-	if err := s.RemoveDone("acct1", 61115, nil); err != nil {
+	if err := s.removeDone("acct1", 61115, nil); err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
 

@@ -85,7 +85,7 @@ func TestManualExitSameNameRebuiltDropsRefused(t *testing.T) {
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 
 	// 预置该课已报名成功（退选路径的真实前提）
-	if err := s.MarkDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
+	if err := s.markDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
 		t.Fatalf("预置 MarkDone 失败: %v", err)
 	}
 	store.mu.Lock()

@@ -63,7 +63,7 @@ func TestAppendLogFailureIsNotSwallowed(t *testing.T) {
 	s := New(&fakeAccts{c: newFakeClient(true)}, c, time.Now(), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 
-	if err := s.MarkDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
+	if err := s.markDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
 		t.Fatalf("日志落库失败不得让手动报名状态同步报错: %v", err)
 	}
 	if got := c.list(); len(got) != 0 {
@@ -85,7 +85,7 @@ func TestAppendLogSucceedsOnHealthyStore(t *testing.T) {
 	s := New(&fakeAccts{c: newFakeClient(true)}, c, time.Now(), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 
-	if err := s.MarkDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
+	if err := s.markDone("acct1", 61115, "健美操", "手动报名成功", nil); err != nil {
 		t.Fatalf("MarkDone 失败: %v", err)
 	}
 	got := c.list()

@@ -95,9 +95,9 @@ func TestStoreFailuresLogged(t *testing.T) {
 
 	// 触发 SaveSuccess 失败：手动标记成功（spawnChain 成功分支的网络 mock 复杂，直接走
 	// MarkDone——同一落库路径，1326/1706 同款 `_ =` 吞错）
-	s.MarkDone("acct1", 1, "健美操", "选课成功", nil)
+	s.markDone("acct1", 1, "健美操", "选课成功", nil)
 	// 触发 SaveRefused 失败：手动退选（RemoveDone 的 SaveRefused 落库失败）
-	_ = s.RemoveDone("acct1", 1, nil)
+	_ = s.removeDone("acct1", 1, nil)
 
 	logMu.Lock()
 	out := logs.String()
@@ -2108,7 +2108,7 @@ func TestManualDoneClearsInflight(t *testing.T) {
 	s.mu.Unlock()
 
 	// 手动报名成功 → MarkDone 必须清掉 inflight 位
-	if err := s.MarkDone(acct, classID, "健美操", "手动报名成功", nil); err != nil {
+	if err := s.markDone(acct, classID, "健美操", "手动报名成功", nil); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -2125,7 +2125,7 @@ func TestManualDoneClearsInflight(t *testing.T) {
 	}
 	s.inflight[acct][classID] = true
 	s.mu.Unlock()
-	if err := s.RemoveDone(acct, classID, nil); err != nil {
+	if err := s.removeDone(acct, classID, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -2163,27 +2163,27 @@ func TestCheckClassSelectable(t *testing.T) {
 	}
 
 	// 窗口开启 + 可报名 → 放行
-	if reason, ok := s.CheckClassSelectable("acct1", 61115); !ok {
+	if reason, ok := s.checkClassSelectable("acct1", 61115); !ok {
 		t.Fatalf("可报名课程应放行，被拒: %s", reason)
 	}
 	// 窗口开启 + 已满员 → 拒绝
-	if reason, ok := s.CheckClassSelectable("acct1", 61116); ok {
+	if reason, ok := s.checkClassSelectable("acct1", 61116); ok {
 		t.Fatal("满员课程应被拒绝")
 	} else if !strings.Contains(reason, "满") {
 		t.Fatalf("满员拒绝文案应说明原因，实际: %s", reason)
 	}
 	// 窗口关闭（61205 属发布 2）→ 拒绝
-	if reason, ok := s.CheckClassSelectable("acct1", 61205); ok {
+	if reason, ok := s.checkClassSelectable("acct1", 61205); ok {
 		t.Fatal("窗口关闭课程应被拒绝")
 	} else if !strings.Contains(reason, "窗口") {
 		t.Fatalf("窗口拒绝文案应说明原因，实际: %s", reason)
 	}
 	// 无快照的账号（acct2 从未探测）→ 放行（无法复核，交给平台）
-	if _, ok := s.CheckClassSelectable("acct2", 61205); !ok {
+	if _, ok := s.checkClassSelectable("acct2", 61205); !ok {
 		t.Fatal("无快照账号应放行（由平台最终把关）")
 	}
 	// 课程不在快照中 → 放行
-	if _, ok := s.CheckClassSelectable("acct1", 99999); !ok {
+	if _, ok := s.checkClassSelectable("acct1", 99999); !ok {
 		t.Fatal("不在快照中的课程应放行（由平台返回具体错误）")
 	}
 	// 快照超过 TTL 过期后复核必须放行——
@@ -2192,7 +2192,7 @@ func TestCheckClassSelectable(t *testing.T) {
 	s.mu.Lock()
 	s.acctDataAt["acct1"] = time.Now().Add(-(snapshotTTL + time.Second))
 	s.mu.Unlock()
-	if reason, ok := s.CheckClassSelectable("acct1", 61116); !ok {
+	if reason, ok := s.checkClassSelectable("acct1", 61116); !ok {
 		t.Fatal("快照过期后应放行（不拿旧数据拦真实操作），被拒: " + reason)
 	}
 }
@@ -2213,7 +2213,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	classID := 61115
 	courseName := "健美操"
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
-	err := s.MarkDone("acct1", classID, courseName, "手动报名成功", nil)
+	err := s.markDone("acct1", classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("预置 MarkDone 失败: %v", err)
 	}
@@ -2224,7 +2224,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	fa.mu.Unlock()
 
 	// 账号已删除后到账手动报名成功 → MarkDone 不得写任何内存状态与库行
-	err = s.MarkDone("acct1", classID, courseName, "手动报名成功", nil)
+	err = s.markDone("acct1", classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("MarkDone 不应报错（静默放弃落库）: %v", err)
 	}
@@ -2251,7 +2251,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	}
 
 	// 删除后到账手动退选 → RemoveDone 不得落库 refused 行
-	err = s.RemoveDone("acct1", classID, nil)
+	err = s.removeDone("acct1", classID, nil)
 	if err != nil {
 		t.Fatalf("RemoveDone 不应报错（静默放弃落库）: %v", err)
 	}
@@ -2282,16 +2282,16 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	courseName := "健美操"
 
 	// 1. 验证 TryAcquireSubmit 排他互斥
-	release1, ok1 := s.TryAcquireSubmit(acct, classID)
+	release1, ok1 := s.tryAcquireSubmit(acct, classID)
 	if !ok1 || release1 == nil {
 		t.Fatal("首次获取单课提交锁应成功")
 	}
-	_, ok2 := s.TryAcquireSubmit(acct, classID)
+	_, ok2 := s.tryAcquireSubmit(acct, classID)
 	if ok2 {
 		t.Fatal("并发重复获取同一账号同一课程的提交锁应被拒绝，防止重复发包")
 	}
 	release1() // 释放锁
-	release3, ok3 := s.TryAcquireSubmit(acct, classID)
+	release3, ok3 := s.tryAcquireSubmit(acct, classID)
 	if !ok3 || release3 == nil {
 		t.Fatal("释放锁后应能再次成功获取提交锁")
 	}
@@ -2299,7 +2299,7 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 
 	// 2. 验证 MarkDone 手动报名成功同步
 	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
-	err := s.MarkDone(acct, classID, courseName, "手动报名成功", nil)
+	err := s.markDone(acct, classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("MarkDone 失败: %v", err)
 	}
@@ -2312,7 +2312,7 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	}
 
 	// 3. 验证 RemoveDone 手动退选同步
-	err = s.RemoveDone(acct, classID, nil)
+	err = s.removeDone(acct, classID, nil)
 	if err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
@@ -2995,7 +2995,7 @@ func TestRealtimeFullRecheckKeepsManualSuccess(t *testing.T) {
 // markDoneTestHelper 手动报名成功的内联助手：在复核回调（已持 fakeClient 锁外的时机）
 // 里调用 MarkDone——这里是测试唯一需在回调里调 Scheduler 方法的地方，故抽出来。
 func (s *Scheduler) markDoneTestHelper(acct string, classID int) error {
-	return s.MarkDone(acct, classID, "健美操", "手动报名成功", nil)
+	return s.markDone(acct, classID, "健美操", "手动报名成功", nil)
 }
 
 // TestRealtimeFullRecheckWithNoManualDoneMarksFull 对偶守卫：复核"真满"且没有手动成功介入时，

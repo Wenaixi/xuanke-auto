@@ -687,6 +687,9 @@ func (s *Scheduler) Start() {
 }
 
 // Stop 停止轮询。
+// 当前无生产调用者：托盘「退出」与安卓销毁走的是整进程退出语义（main.go 注释
+// 自陈「进程退出会强杀在飞 goroutine」），Started.Shutdown 只关 HTTP server。
+// 保留导出以维持与 Start 的对称——优雅停机是本引擎的合理能力，删掉等于封死。
 func (s *Scheduler) Stop() {
 	s.cancel()
 }
@@ -1306,10 +1309,6 @@ func (s *Scheduler) MarkTokenValid(acct string) {
 	delete(s.relogging, acct)
 }
 
-// MaybeRelogin 导出别名：供 api 层在手动报名/退选命中 ErrUnauthorized 时触发重登
-// （与自动链路径对称），命名上明确它是幂等门控的。
-func (s *Scheduler) MaybeRelogin(acct string) { s.maybeRelogin(acct) }
-
 // reloginResult 重登结果（异步回传到 tick 主循环统一处理）。
 type reloginResult struct {
 	acct     string
@@ -1809,7 +1808,7 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 // 不使用 acct 外的全局 lastData 兜底（跨年级帧可为任意账号，无参考价值）。
 // 过期快照放行语义：不拿旧数据拦用户真实操作（名额/窗口可能已变化），交给平台把关，
 // 与 ElectivesSnapshotFor 的过期快照回退语义对齐。
-func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason string, selectable bool) {
+func (s *Scheduler) checkClassSelectable(acct string, classID int) (reason string, selectable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var data *zhidao.ElectivesData
@@ -1840,9 +1839,11 @@ func (s *Scheduler) CheckClassSelectable(acct string, classID int) (reason strin
 	return "", true // 课程不在快照中：交给平台返回具体业务错误
 }
 
-// TryAcquireSubmit 尝试获取对指定账号课程的提交排他锁（在飞互斥）。
+// tryAcquireSubmit 尝试获取对指定账号课程的提交排他锁（在飞互斥）。
 // 若当前正在提交，返回 false；若成功获取，返回安全释放函数和 true。
-func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), ok bool) {
+// 私有：手动报名/退选两条手动路径的实现细节，跨包无消费者——包外看到 inflight
+// 位只会得到「该课程正在提交中」这类无法进一步处理的信息。
+func (s *Scheduler) tryAcquireSubmit(acct string, classID int) (release func(), ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.inflight[acct] == nil {
@@ -1869,7 +1870,7 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 // 删除完成后本请求才返回成功；同名重建（换绑/误删加回）后注册表现指针已换成新客户端，
 // 只判账号名存在会把旧请求的成功写进重建身份（重启后 RestoreDone 恢复成“已报名成功”假状态）。
 // origin 为 nil 表示调用方不持有身份概念（仅测试夹具与外部同步调用），此时只判账号存在。
-func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string, origin Client) error {
+func (s *Scheduler) markDone(acct string, classID int, courseName, msg string, origin Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 删除账号与在飞手动报名竞态防线——账号不再存在于客户端注册表即视为已删，
@@ -1959,7 +1960,7 @@ func (s *Scheduler) appendLog(acct string, classID int, action, result string, i
 // 身份归属防线与 MarkDone 同源：origin 非 nil 时在锁内比对指针身份，
 // 拦删号同名重建后陈旧退选把 refused 写进新身份（重启后该课被恢复成"已手动退选"，
 // 自动引擎对一门用户从未退选的课永久跳过）。origin 为 nil 时只判账号存在。
-func (s *Scheduler) RemoveDone(acct string, classID int, origin Client) error {
+func (s *Scheduler) removeDone(acct string, classID int, origin Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 与 MarkDone 同款防线——账号已删时手动退选成功同样不能写回
@@ -2039,11 +2040,11 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 	}
 	s.mu.Unlock()
 	// 快照复核（手动专属语义：无快照/过期快照放行，交给平台把关）
-	if reason, ok := s.CheckClassSelectable(acct, classID); !ok {
+	if reason, ok := s.checkClassSelectable(acct, classID); !ok {
 		return "", errors.New(reason)
 	}
 	// 取排他锁（inflight 位，与自动链共享互斥——绝不并发双发包）
-	release, ok := s.TryAcquireSubmit(acct, classID)
+	release, ok := s.tryAcquireSubmit(acct, classID)
 	if !ok {
 		return "", errors.New("该课程正在提交中，请勿重复操作")
 	}
@@ -2055,7 +2056,7 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 		switch classifyPlatformError(err) {
 		case errAuth:
 			// 只触发重登，绝不 MarkTokenValid（后者会击穿指数退避）
-			s.MaybeRelogin(acct)
+			s.maybeRelogin(acct)
 			s.appendLog(acct, classID, "select", "账号 "+acct+": 教务令牌失效，自动重登中", false)
 			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
 		case errRead:
@@ -2079,7 +2080,7 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 	}
 	// 成功：MarkDone（清 refused/inflight/full + 置 success + SaveSuccess + AppendLog）
 	// 传入本方法捕获的 client 作为 origin，写回侧据此做指针身份复核。
-	if err := s.MarkDone(acct, classID, courseName, msg, client); err != nil {
+	if err := s.markDone(acct, classID, courseName, msg, client); err != nil {
 		return "", errors.New("报名成功但状态落库失败: " + err.Error())
 	}
 	return msg, nil
@@ -2101,7 +2102,7 @@ func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
 		return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
 	}
 	s.mu.Unlock()
-	release, ok := s.TryAcquireSubmit(acct, classID)
+	release, ok := s.tryAcquireSubmit(acct, classID)
 	if !ok {
 		return "", errors.New("该课程正在操作中，请勿重复操作")
 	}
@@ -2110,7 +2111,7 @@ func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
 	if err != nil {
 		switch classifyPlatformError(err) {
 		case errAuth:
-			s.MaybeRelogin(acct)
+			s.maybeRelogin(acct)
 			s.appendLog(acct, classID, "exit", "账号 "+acct+": 教务令牌失效，自动重登中", false)
 			return "", errors.New("教务令牌已失效，正在自动重登，请稍后重试")
 		case errRead:
@@ -2122,7 +2123,7 @@ func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
 	}
 	// 成功：RemoveDone（清 done/inflight + 记 refused + 置"已退选"状态 + 落库）
 	// 传入本方法捕获的 client 作为 origin，写回侧据此做指针身份复核。
-	if err := s.RemoveDone(acct, classID, client); err != nil {
+	if err := s.removeDone(acct, classID, client); err != nil {
 		return "", errors.New("退选成功但状态落库失败: " + err.Error())
 	}
 	return msg, nil

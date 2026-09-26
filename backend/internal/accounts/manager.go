@@ -119,12 +119,10 @@ func (m *Manager) ClientFor(acct string) (scheduler.Client, bool) {
 	return c, ok
 }
 
-// Remove 移除账号客户端与登录顺序（管理员删除账号后调用）。
-// 调度器据此不再为该账号生成提交链（submitAll 遍历时 ClientFor 返回不存在即跳过）。
-// 已在跑的链不会被打断（生命周期归调度器 chains 标记管理），但下个 tick 起彻底隔离。
-func (m *Manager) Remove(acct string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// removeLocked 从注册表摘除账号客户端与登录顺序。**调用者必须已持 m.mu**——
+// 两处消费（管理员删号的 Remove、登录失败清理空壳的 LoginByPassword）都已在
+// 锁内调用，拆成独立方法时不得各自再加一层锁。
+func (m *Manager) removeLocked(acct string) {
 	delete(m.clients, acct)
 	for i, a := range m.order {
 		if a == acct {
@@ -132,6 +130,15 @@ func (m *Manager) Remove(acct string) {
 			break
 		}
 	}
+}
+
+// Remove 移除账号客户端与登录顺序（管理员删除账号后调用）。
+// 调度器据此不再为该账号生成提交链（submitAll 遍历时 ClientFor 返回不存在即跳过）。
+// 已在跑的链不会被打断（生命周期归调度器 chains 标记管理），但下个 tick 起彻底隔离。
+func (m *Manager) Remove(acct string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeLocked(acct)
 }
 
 // AnyClient 返回任一已登录账号客户端（课程数据全校共享，任一账号可探测）。
@@ -263,13 +270,7 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 		// 失效交给调度器现有失效检测 + 自动重登链处理，远优于直接失联。
 		if wasShell {
 			m.mu.Lock()
-			delete(m.clients, acct)
-			for i, a := range m.order {
-				if a == acct {
-					m.order = append(m.order[:i], m.order[i+1:]...)
-					break
-				}
-			}
+			m.removeLocked(acct)
 			m.mu.Unlock()
 		}
 		return "", err

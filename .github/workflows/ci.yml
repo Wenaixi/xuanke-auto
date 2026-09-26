@@ -47,6 +47,7 @@ jobs:
           npm ci
           npm run build
           npm run guard
+          npm test
 
       - name: Setup Go environment
         uses: actions/setup-go@v4

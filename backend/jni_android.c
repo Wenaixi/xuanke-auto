@@ -15,6 +15,7 @@
 //go:build android
 
 #include <jni.h>
+#include <android/log.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,6 +38,26 @@ static void stop(JNIEnv *env, jclass clazz) {
     XuankeStop();
 }
 
+
+// Android logcat 桥：Go c-shared 的 stderr 不接 logcat（log.Printf 全部丢失，
+// 引擎启动失败时进程秒退且日志无痕，无从排查）。暴露一个给 Go 侧调用的写入
+// 入口，把每行日志经 __android_log_print 打进 logcat（tag 固定 XuanKe，
+// `adb logcat -s XuanKe` 即可过滤）。__android_log_print 由 bionic libc 提供，
+// 无需额外链接。
+static int logcat_fd = -2; // -2=未初始化，-1=打开失败，>=0=已打开
+
+void XuankeLogToAndroid(const char *msg) {
+    if (logcat_fd == -2) {
+        logcat_fd = __android_log_open("XuanKe",
+                                       ANDROID_LOG_INFO,
+                                       1024, /* buffer size */
+                                       false /* for committer */);
+    }
+    if (logcat_fd < 0) {
+        return; // logcat 不可用：静默降级，绝不让日志失败影响引擎
+    }
+    __android_log_write(logcat_fd, msg);
+}
 // 方法表：Java native 方法 → C 桩 → Go 导出
 static const JNINativeMethod methods[] = {
     {"setDataDir", "(Ljava/lang/String;)V", (void *)setDataDir},

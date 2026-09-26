@@ -16,6 +16,11 @@ package main
 // locate symbol）。Go 1.19+ gofmt 会把 `//export` 规范成 `// export` 破坏导出
 // （golang/go#63123），故本文件 export 行须保持原样，且 CI 有检查兜底。
 
+
+/*
+// jni_android.c 提供的 logcat 写入桥（Android 上 Go 的 stderr 不可见）。
+void XuankeLogToAndroid(const char *msg);
+*/
 import "C"
 
 import (
@@ -25,6 +30,23 @@ import (
 
 	"xuanke-auto/backend/internal/config"
 )
+
+// Android 上 c-shared 的 stderr 不接 logcat：Go 的 log.Printf 全部丢失，
+// 引擎启动失败时进程秒退且日志无痕，无从排查。这里把标准 log 重定向到
+// jni_android.c 的 XuankeLogToAndroid（经 __android_log_print 进 logcat，
+// tag 固定 XuanKe，`adb logcat -s XuanKe` 过滤）。init 早于任何业务日志。
+func init() {
+	log.SetOutput(androidLogWriter{})
+	log.SetFlags(0) // 去掉时间戳前缀：logcat 自带时间
+}
+
+// androidLogWriter 把每行日志转交 C 侧写入 logcat；C 函数声明（cgo 前言）。
+type androidLogWriter struct{}
+
+func (androidLogWriter) Write(p []byte) (int, error) {
+	C.XuankeLogToAndroid(C.CString(string(p)))
+	return len(p), nil
+}
 
 //export XuankeSetDataDir
 // 注入 App 沙箱数据目录（Java filesDir）：config.dataDir 即 <filesDir>/data。

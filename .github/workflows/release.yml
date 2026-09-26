@@ -390,7 +390,10 @@ jobs:
       - name: Setup Go environment
         uses: actions/setup-go@v4
         with:
-          go-version: 'stable'
+          # 钉 1.26.x：Go 1.27 的 c-shared 有已知回归（golang/go#81051）会静默产出
+          # UNDEF 动态符号，dlopen 期才炸（正是本项目 v0.2.2 闪退的同类根因）。
+          # 1.26.6 实证 c-shared 导出正常；修复上游后即可放开。
+          go-version: '1.26.x'
           cache-dependency-path: 'backend/go.sum'
 
       # Android SDK/NDK + JDK（Wails v3 ANDROID.md 同款依赖：API 35 + NDK 26.3 + JDK 21）
@@ -434,12 +437,13 @@ jobs:
           # 符号，产出的 .so 里 XuankeSetDataDir/XuankeStart/XuankeStop 全是 UNDEF
           # 引用 —— dlopen 直接失败：UnsatisfiedLinkError: cannot locate symbol
           # "XuankeSetDataDir"（点击图标即闪退）。故：只留 -w（去 DWARF，不动符号），
-          # 并经 -ldflags 里的 -extld=-Wl,--export-dynamic 让 lld 强制导出全局符号
-          # （-extld 是 go build 转发给外部链接器的前缀，不是独立的 -extldflags flag）。
+          # 并经 -ldflags 里的 -extldflags=-Wl,--export-dynamic 让 lld 强制导出全局符号
+          # （-extldflags 必须放在 -ldflags 内部；单独写 -extldflags= 会被 go build 拒绝，
+          #  写成 -extld= 也会被当成「用该值当链接器可执行文件」而 exec 失败）。
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
-            -ldflags="-w -extld=-Wl,--export-dynamic" \
+            -ldflags="-w -extldflags=-Wl,--export-dynamic" \
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
           # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
           # UNDEF 会在装机 dlopen 阶段炸（此前正是此坑闪退），构建期即拦。

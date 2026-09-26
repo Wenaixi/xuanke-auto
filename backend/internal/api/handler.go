@@ -112,6 +112,18 @@ func (d *Deps) secureEncrypt(v string) (string, error) {
 	return "enc:" + enc, nil
 }
 
+// logAudit 审计日志落库单点（与 scheduler.appendLog 对称，同一"落库失败必须
+// 记日志绝不静默吞错"契约——本包六处业务点曾各手抄三层 if，收口后契约由
+// module 强制，新增审计点无需再记得写 log.Printf）。
+func (d *Deps) logAudit(acct string, classID int, action, result string, isOK bool) {
+	if d.Store == nil {
+		return
+	}
+	if err := d.Store.AppendLog(acct, classID, action, result, isOK); err != nil {
+		log.Printf("[api] 账号 %s 课程 %d %s 日志落库失败: %v", acct, classID, action, err)
+	}
+}
+
 // writeJSON 统一 JSON 响应：{"code":0,"data":...,"msg":""}
 // apiResponse 响应体显式 struct（替代 map[string]any 装箱）：
 // 编译期已知字段 → json 反射 struct（有序）而非 map 无序遍历，装箱从 3 次降到 0；
@@ -175,9 +187,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// 管理员登录低频操作，300ms 无感；撞库者无法再靠"这个账号返回快=口令对"定位管理员口令。
 		time.Sleep(loginTimingFlat)
 		sess := d.Sessions.CreateAdmin(adminName)
-		if err := d.Store.AppendLog(adminName, 0, "login", "管理员登录成功", true); err != nil {
-			log.Printf("[api] 管理员登录日志落库失败: %v", err)
-		}
+		d.logAudit(adminName, 0, "login", "管理员登录成功", true)
 		writeJSON(w, 0, map[string]string{"token": sess, "account": adminName, "adminName": adminName}, "管理员登录成功")
 		return
 	}
@@ -276,9 +286,7 @@ func (d *Deps) issueSession(w http.ResponseWriter, acct string) {
 	// 失败（Vision 故障/无保存账密）导致 tokenValid 卡在失效，手动重新登录是本系统的
 	// 另一条合法恢复路径，恢复后前端 /state 立即回"有效"（不再永久"已失效·自动恢复中"）。
 	d.Sched.MarkTokenValid(acct)
-	if err := d.Store.AppendLog(acct, 0, "login", "账号 "+acct+" 登录成功", true); err != nil {
-		log.Printf("[api] 账号登录日志落库失败: %v", err)
-	}
+	d.logAudit(acct, 0, "login", "账号 "+acct+" 登录成功", true)
 	writeJSON(w, 0, map[string]string{"token": sess, "account": acct}, "登录成功")
 }
 
@@ -459,9 +467,7 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "保存目标失败: "+err.Error())
 		return
 	}
-	if err := d.Store.AppendLog(acct, 0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true); err != nil {
-		log.Printf("[api] 目标保存日志落库失败: %v", err)
-	}
+	d.logAudit(acct, 0, "set_targets", fmt.Sprintf("账号 %s：%d 门目标课程", acct, len(req.Targets)), true)
 	writeJSON(w, 0, req.Targets, "目标已保存")
 }
 
@@ -511,9 +517,7 @@ func (d *Deps) handleLogout(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	tok := sessionToken(r)
 	d.Sessions.Delete(tok)
-	if err := d.Store.AppendLog(acct, 0, "logout", "账号 "+acct+" 注销会话", false); err != nil {
-		log.Printf("[api] 注销日志落库失败: %v", err)
-	}
+	d.logAudit(acct, 0, "logout", "账号 "+acct+" 注销会话", false)
 	writeJSON(w, 0, nil, "已注销")
 }
 
@@ -760,9 +764,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 1, nil, "没有可应用的有效配置项")
 			return
 		}
-		if err := d.Store.AppendLog(d.AdminNameValue(), 0, "config", "更新配置: "+strings.Join(changed, ", "), true); err != nil {
-			log.Printf("[api] 配置更新日志落库失败: %v", err)
-		}
+		d.logAudit(d.AdminNameValue(), 0, "config", "更新配置: "+strings.Join(changed, ", "), true)
 		writeJSON(w, 0, AdminConfigView{
 			ActivationEnabled:  cfg.ActivationEnabled,
 			VisionBaseURL:      cfg.VisionBaseURL,
@@ -963,9 +965,7 @@ func (d *Deps) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) 
 	// 吊销该账号签发的全部会话：被删账号既有浏览器令牌立即失效，
 	// 等不到 12h TTL——"删除"对已持有 token 的客户端不再形同虚设。
 	d.Sessions.RevokeAccount(acct)
-	if err := d.Store.AppendLog(d.AdminNameValue(), 0, "delete_account", "删除账号 "+acct, true); err != nil {
-		log.Printf("[api] 删除账号日志落库失败: %v", err)
-	}
+	d.logAudit(d.AdminNameValue(), 0, "delete_account", "删除账号 "+acct, true)
 	writeJSON(w, 0, nil, "已删除账号 "+acct)
 }
 

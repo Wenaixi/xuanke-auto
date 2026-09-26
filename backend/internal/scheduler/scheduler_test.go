@@ -95,9 +95,9 @@ func TestStoreFailuresLogged(t *testing.T) {
 
 	// 触发 SaveSuccess 失败：手动标记成功（spawnChain 成功分支的网络 mock 复杂，直接走
 	// MarkDone——同一落库路径，1326/1706 同款 `_ =` 吞错）
-	s.MarkDone("acct1", 1, "健美操", "选课成功")
+	s.MarkDone("acct1", 1, "健美操", "选课成功", nil)
 	// 触发 SaveRefused 失败：手动退选（RemoveDone 的 SaveRefused 落库失败）
-	_ = s.RemoveDone("acct1", 1)
+	_ = s.RemoveDone("acct1", 1, nil)
 
 	logMu.Lock()
 	out := logs.String()
@@ -181,6 +181,7 @@ type fakeClient struct {
 	syncCalls   int    // 时钟对齐发起次数（失败退避测试断言"失败期不反复发起"）
 	fullBlock   func() // IsClassFull 阻塞钩子（模拟慢网络，持锁复核测试用）
 	selectBlock func() // SelectClass 阻塞钩子（模拟慢网络，在飞竞态测试用）
+	exitBlock   func() // ExitClass 阻塞钩子（模拟慢网络，手动退选在飞竞态测试用）
 	fullErr     error  // 实时人数复核错误（命中 token 失效测试用）
 	findBlock   func() // FindElectives 阻塞钩子（模拟慢网络，在飞探测身份切换测试用）
 }
@@ -254,6 +255,12 @@ func (f *fakeClient) SelectClass(classID int) (string, error) {
 
 func (f *fakeClient) ExitClass(classID int) (string, error) {
 	f.mu.Lock()
+	if f.exitBlock != nil {
+		exitBlock := f.exitBlock
+		f.mu.Unlock()
+		exitBlock() // 锁外阻塞：模拟真实网络往返耗时，不持 fakeClient.mu
+		f.mu.Lock()
+	}
 	defer f.mu.Unlock()
 	return "退选成功", nil
 }
@@ -2101,7 +2108,7 @@ func TestManualDoneClearsInflight(t *testing.T) {
 	s.mu.Unlock()
 
 	// 手动报名成功 → MarkDone 必须清掉 inflight 位
-	if err := s.MarkDone(acct, classID, "健美操", "手动报名成功"); err != nil {
+	if err := s.MarkDone(acct, classID, "健美操", "手动报名成功", nil); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -2118,7 +2125,7 @@ func TestManualDoneClearsInflight(t *testing.T) {
 	}
 	s.inflight[acct][classID] = true
 	s.mu.Unlock()
-	if err := s.RemoveDone(acct, classID); err != nil {
+	if err := s.RemoveDone(acct, classID, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
@@ -2206,7 +2213,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	classID := 61115
 	courseName := "健美操"
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
-	err := s.MarkDone("acct1", classID, courseName, "手动报名成功")
+	err := s.MarkDone("acct1", classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("预置 MarkDone 失败: %v", err)
 	}
@@ -2217,7 +2224,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	fa.mu.Unlock()
 
 	// 账号已删除后到账手动报名成功 → MarkDone 不得写任何内存状态与库行
-	err = s.MarkDone("acct1", classID, courseName, "手动报名成功")
+	err = s.MarkDone("acct1", classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("MarkDone 不应报错（静默放弃落库）: %v", err)
 	}
@@ -2244,7 +2251,7 @@ func TestDeletedAccountManualInFlightDropsState(t *testing.T) {
 	}
 
 	// 删除后到账手动退选 → RemoveDone 不得落库 refused 行
-	err = s.RemoveDone("acct1", classID)
+	err = s.RemoveDone("acct1", classID, nil)
 	if err != nil {
 		t.Fatalf("RemoveDone 不应报错（静默放弃落库）: %v", err)
 	}
@@ -2292,7 +2299,7 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 
 	// 2. 验证 MarkDone 手动报名成功同步
 	s.SetTargetsForAccount(acct, []Target{{PublishID: 1, ClassID: classID, CourseName: courseName, Priority: 0}})
-	err := s.MarkDone(acct, classID, courseName, "手动报名成功")
+	err := s.MarkDone(acct, classID, courseName, "手动报名成功", nil)
 	if err != nil {
 		t.Fatalf("MarkDone 失败: %v", err)
 	}
@@ -2305,7 +2312,7 @@ func TestSchedulerManualSyncAndSubmitMutex(t *testing.T) {
 	}
 
 	// 3. 验证 RemoveDone 手动退选同步
-	err = s.RemoveDone(acct, classID)
+	err = s.RemoveDone(acct, classID, nil)
 	if err != nil {
 		t.Fatalf("RemoveDone 失败: %v", err)
 	}
@@ -2988,7 +2995,7 @@ func TestRealtimeFullRecheckKeepsManualSuccess(t *testing.T) {
 // markDoneTestHelper 手动报名成功的内联助手：在复核回调（已持 fakeClient 锁外的时机）
 // 里调用 MarkDone——这里是测试唯一需在回调里调 Scheduler 方法的地方，故抽出来。
 func (s *Scheduler) markDoneTestHelper(acct string, classID int) error {
-	return s.MarkDone(acct, classID, "健美操", "手动报名成功")
+	return s.MarkDone(acct, classID, "健美操", "手动报名成功", nil)
 }
 
 // TestRealtimeFullRecheckWithNoManualDoneMarksFull 对偶守卫：复核"真满"且没有手动成功介入时，

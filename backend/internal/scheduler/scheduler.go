@@ -1886,16 +1886,24 @@ func (s *Scheduler) TryAcquireSubmit(acct string, classID int) (release func(), 
 
 // MarkDone 手动或外部操作成功后同步调度器状态：记入 done、清 full 与退避、置 success 状态并持久化。
 // 同步清理 inflight 位：手动报名成功前占用的提交锁位必须释放，否则下个自动链/手动操作永久 409。
-// 与 spawnChain 成功分支同款防线——管理员 DeleteAccount（先清凭据/库行 +
-// Accounts.Remove）与在飞手动报名（SelectClass 最长 15s）竞态时，删除完成后本请求才返回成功，
-// 若不复核会把已删账号的 success 行写回，重启后重新登录被 RestoreDone 恢复成"已报名成功"假状态
-// （自动链已根治，手动路径同样竞态整链开放）。账号已删则静默放弃落库，绝不写回。
-func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) error {
+// 身份归属防线：发起方传入 origin（ManualSelect 捕获的客户端指针），非 nil 时在锁内
+// 比对指针身份——管理员 DeleteAccount 与在飞手动报名（SelectClass 最长 15s）竞态时，
+// 删除完成后本请求才返回成功；同名重建（换绑/误删加回）后注册表现指针已换成新客户端，
+// 只判账号名存在会把旧请求的成功写进重建身份（重启后 RestoreDone 恢复成"已报名成功"假状态）。
+// origin 为 nil 表示调用方不持有身份概念（仅测试夹具与外部同步调用），此时只判账号存在。
+func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string, origin Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 删除账号与在飞手动报名竞态防线——账号不再存在于客户端注册表即视为已删，
 	// 放弃全部状态写入（真实平台报名已发生，但账号已删，写回只会制造幽灵 success 行）。
-	if _, ok := s.clients.ClientFor(acct); !ok {
+	// 存在性复核之上叠加指针身份复核：同名重建后新身份确实存在于注册表，
+	// 存在性判据恒通过，必须比对发起时的指针身份才拦得住陈旧写回。
+	if origin != nil {
+		if !s.sameClientFor(acct, origin) {
+			log.Printf("[scheduler] 账号 %s 客户端身份已变更（同名重建/删除），放弃手动报名落库", acct)
+			return nil
+		}
+	} else if _, ok := s.clients.ClientFor(acct); !ok {
 		log.Printf("[scheduler] 账号 %s 已被删除，放弃手动报名落库", acct)
 		return nil
 	}
@@ -1957,13 +1965,22 @@ func (s *Scheduler) MarkDone(acct string, classID int, courseName, msg string) e
 // 同时记入 refused 集合并置"已用户退选"文案：后台 spawnChain 从此对该课程绝不再自动
 // 接管——用户手动退出的课，自动引擎下一 tick（≤1s）就抢回是错误行为，
 // 只有用户重新把它设为目标（SetTargetsForAccount 清空 refused）才恢复自动接管。
-func (s *Scheduler) RemoveDone(acct string, classID int) error {
+// 身份归属防线与 MarkDone 同源：origin 非 nil 时在锁内比对指针身份，
+// 拦删号同名重建后陈旧退选把 refused 写进新身份（重启后该课被恢复成"已手动退选"，
+// 自动引擎对一门用户从未退选的课永久跳过）。origin 为 nil 时只判账号存在。
+func (s *Scheduler) RemoveDone(acct string, classID int, origin Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 与 MarkDone 同款防线——账号已删时手动退选成功同样不能写回
 	// refused 行（DeleteAccount 全量清理 + PurgeAccount 移除后的幽灵 refused 行会让
 	// 重新登录的账号被 RestoreRefused 恢复成"已退选"，自动引擎永久跳过该课）。
-	if _, ok := s.clients.ClientFor(acct); !ok {
+	// 同名重建形态下新身份存在于注册表，存在性判据恒通过，必须比对指针身份。
+	if origin != nil {
+		if !s.sameClientFor(acct, origin) {
+			log.Printf("[scheduler] 账号 %s 客户端身份已变更（同名重建/删除），放弃手动退选落库", acct)
+			return nil
+		}
+	} else if _, ok := s.clients.ClientFor(acct); !ok {
 		log.Printf("[scheduler] 账号 %s 已被删除，放弃手动退选落库", acct)
 		return nil
 	}
@@ -2011,8 +2028,12 @@ func (s *Scheduler) RemoveDone(acct string, classID int) error {
 // 差异（刻意保留，核实确认）：
 //   - CheckClassSelectable 手动专属：无快照/过期快照一律放行交给平台（与自动链的
 //     内联退避判定不同源——手动是"真实用户即时操作"，拿旧数据拦用户是错的）；
-//   - 同步执行（同一请求内持锁网络往返），无跨请求身份顶替窗口——身份防线
-//     由 MarkDone 内部的 ClientFor 复核覆盖（删号竞态写回防线）。
+//   - 同步执行（同一请求内持锁网络往返）——本方法的跨请求身份顶替窗口是
+//     SelectClass 的网络往返（最长 15s），期间管理员可删号并同名重建；
+//     身份防线由 MarkDone 内部的 sameClientFor 指针身份比对覆盖（传入本方法
+//     捕获的 client）。此前此处写的是"无跨请求身份顶替窗口、仅 ClientFor 覆盖"，
+//     与同文件 MarkDone 注释自承的"在飞手动报名（SelectClass 最长 15s）竞态"矛盾，
+//     且同名重建形态下 ClientFor 存在性判据恒通过、拦不住陈旧写回。
 // 补核实挖出的缺口：重登退避期（tokenValidForLocked=false）手动点报名必须短路——
 // 自动链重登退避期内手动路径此前照发 SelectClass 烧平台请求，这里前置检查。
 func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (string, error) {
@@ -2084,7 +2105,8 @@ func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (s
 		return "", err
 	}
 	// 成功：MarkDone（清 refused/inflight/full + 置 success + SaveSuccess + AppendLog）
-	if err := s.MarkDone(acct, classID, courseName, msg); err != nil {
+	// 传入本方法捕获的 client 作为 origin，写回侧据此做指针身份复核。
+	if err := s.MarkDone(acct, classID, courseName, msg, client); err != nil {
 		return "", errors.New("报名成功但状态落库失败: " + err.Error())
 	}
 	return msg, nil
@@ -2138,7 +2160,8 @@ func (s *Scheduler) ManualExit(acct string, classID int) (string, error) {
 		return "", err
 	}
 	// 成功：RemoveDone（清 done/inflight + 记 refused + 置"已退选"状态 + 落库）
-	if err := s.RemoveDone(acct, classID); err != nil {
+	// 传入本方法捕获的 client 作为 origin，写回侧据此做指针身份复核。
+	if err := s.RemoveDone(acct, classID, client); err != nil {
 		return "", errors.New("退选成功但状态落库失败: " + err.Error())
 	}
 	return msg, nil

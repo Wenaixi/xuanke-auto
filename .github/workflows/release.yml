@@ -434,11 +434,12 @@ jobs:
           # 符号，产出的 .so 里 XuankeSetDataDir/XuankeStart/XuankeStop 全是 UNDEF
           # 引用 —— dlopen 直接失败：UnsatisfiedLinkError: cannot locate symbol
           # "XuankeSetDataDir"（点击图标即闪退）。故：只留 -w（去 DWARF，不动符号），
-          # 并显式 -Wl,--export-dynamic 让 lld 强制导出全局符号。
+          # 并经 -ldflags 里的 -extld=-Wl,--export-dynamic 让 lld 强制导出全局符号
+          # （-extld 是 go build 转发给外部链接器的前缀，不是独立的 -extldflags flag）。
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
-            -ldflags="-w" -extldflags="-Wl,--export-dynamic" \
+            -ldflags="-w -extld=-Wl,--export-dynamic" \
             -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
           # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
           # UNDEF 会在装机 dlopen 阶段炸（此前正是此坑闪退），构建期即拦。

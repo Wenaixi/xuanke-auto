@@ -62,7 +62,7 @@ func (f *fakeStore) SaveCredential(acct, passwordEnc, idToken string) error {
 
 func (f *fakeStore) LoadCredentials() ([]Credential, error) { return nil, nil }
 
-// visionSrvManager 构造带显式 Vision 识别引擎的 Manager（C5-2 后 New 不再静默建引擎，
+// visionSrvManager 构造带显式 Vision 识别引擎的 Manager（New 不再静默建引擎，
 // 夹具显式注入——模拟生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→SetRecognizer 通道）。
 func visionSrvManager(_ *testing.T, baseURL string, st Store) *Manager {
 	m := New(baseURL, zhidao.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}, st)
@@ -101,7 +101,7 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string) {
 	t.Helper()
 	c := zhidao.New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	// C5-2 后 zhidao.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
+	// zhidao.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
 	// 显式注入（模拟生产 applyCaptchaRecognizerFor 的 SetRecognizer 通道）
 	c.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
 	c.SetCredentials(acct, "pwd", "tok-valid")

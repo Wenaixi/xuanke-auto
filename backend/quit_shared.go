@@ -4,7 +4,7 @@ package main
 // mQuit 点击 → quitApplication()：先 shutdownServer（srv.Shutdown，让 main 的
 // ListenAndServe 返回 ErrServerClosed 解锁）再 systrayQuit（图标消失）。
 // 顺序绝不可颠倒——先退图标会留下「服务还没关完图标就先没了」的窗口；
-// 只退图标不关服务 = 托盘没了、HTTP 服务活挂后台（M86-01 修复的缺陷形态）。
+// 只退图标不关服务 = 托盘没了、HTTP 服务活挂后台（该缺陷修复后的形态）。
 // 两个注入点均可测试替换；无托盘平台（linux CGO=0 / darwin 占位）恒 nil，
 // quitApplication 判 nil 跳过，绝不 panic。
 

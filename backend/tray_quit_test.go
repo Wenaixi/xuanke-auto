@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// 托盘「退出」语义 = 整进程退出（M86-01 回归钉）。
+// 托盘「退出」语义 = 整进程退出（回归钉）。
 // 修复前：mQuit 分支只 systray.Quit()，systray.Run 返回仅结束非 main goroutine，
 // main 仍阻塞在 ListenAndServe——托盘没了、服务活挂后台、无图标可再打开。
 // 修复后：mQuit 分支先 shutdownServer（srv.Shutdown）再退图标，ListenAndServe

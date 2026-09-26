@@ -71,15 +71,15 @@ type Client struct {
 	cookies   map[string]string // 附加 Cookie（access_limit_cookie / zd_edu_cookie 等）
 	visionCfg VisionConfig
 
-	// loginEngine 登录引擎（C5-3 收权）：登录链路收进 LoginEngine 深模块，
+	// loginEngine 登录引擎（收权）：登录链路收进 LoginEngine 深模块，
 	// Client.Login 改调它；SetRecognizer/SetVision 双驱动保证引擎热切换同步。
 	loginEngine *LoginEngine
 }
 
 // New 创建客户端。绑定全局高性能连接池 sharedTransport。
 // 默认识别引擎为 Vision（跟随配置）；管理员可后续 SetRecognizer 热切换到 ddddocr 本地引擎。
-// C5 调整：登录链路收进 loginEngine（LoginEngine 深模块），New 同时构造登录引擎。
-// 注：识别引擎注入唯一通道 = SetRecognizer / SetVision（C5-2 删静默建 Vision 旁路后，
+// 登录链路收进 loginEngine（LoginEngine 深模块），New 同时构造登录引擎。
+// 注：识别引擎注入唯一通道 = SetRecognizer / SetVision（删静默建 Vision 旁路后，
 // New 不再根据 APIKey 非空静默自建引擎——引擎由 accounts.Manager 按运行时配置显式注入）。
 func New(baseURL string, visionCfg VisionConfig) *Client {
 	return &Client{
@@ -174,7 +174,7 @@ func (c *Client) CurrentRecognizer() CaptchaRecognizer {
 // SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
 // 仅当当前引擎是 Vision 时才重建识别器（ddddocr 本地引擎不受 Vision 配置影响）。
 // 传入的 cfg.recognizer 为 nil 时保留当前引擎：SetVision 只管 Vision 配置，绝不挥动引擎切换。
-// 同时驱动 loginEngine.SetVision——登录引擎与客户端的视觉配置保持一致（C5-4 双驱动）。
+// 同时驱动 loginEngine.SetVision——登录引擎与客户端的视觉配置保持一致（双驱动）。
 func (c *Client) SetVision(cfg VisionConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -193,7 +193,7 @@ func (c *Client) SetVision(cfg VisionConfig) {
 // SetRecognizer 热切换验证码识别引擎（ddddocr 本地 / Vision 二选一，管理员热重载）。
 // 传入 nil 表示当前无识别引擎（登录识别立即报错，直到配置恢复）。
 // 同时驱动 loginEngine.SetRecognizer——否则 SetRecognizer 后登录引擎的识别器恒 nil，
-// 新账号登录识别直接报错（C5-4 双驱动，与 accounts.Manager.SetRecognizer 同款语义）。
+// 新账号登录识别直接报错（双驱动，与 accounts.Manager.SetRecognizer 同款语义）。
 func (c *Client) SetRecognizer(r CaptchaRecognizer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -217,7 +217,7 @@ type YearTerm struct {
 	Selected   bool `json:"selected"`
 }
 
-// Login 完整登录链路（C5-3 收权 LoginEngine 深模块）：编排全在 loginEngine.Login，
+// Login 完整登录链路（LoginEngine 深模块收权）：编排全在 loginEngine.Login，
 // 本方法负责调用 + 成功写回客户端内部态（账密/token/cookie——ReloginIfNeeded 依赖）。
 // 平台限流安全设计（避免触发"登录失败次数过多"熔断，loginEngine 内实现）：
 //   - 识别共 maxCaptchaAttempts 次：识别失败/识别码提交被拒，刷新验证码重新识别；
@@ -493,8 +493,8 @@ func (e *sanitizerErr) Unwrap() error { return e.err }
 
 // sanitizeError 脱敏网络层错误：标准库 http.Client.Do 返回的 *url.Error 文本
 // 原样回放完整请求 URL（doRequest 把会话 token 拼进 ?idToken= URL 参数通道），
-// 该错误经错误包装链进入磁盘日志/库内 task_log/前端回显时完整泄露会话凭证
-// （B101-01）。这里把 url.Error 文本改写为"Op 底层描述"（不含 URL），同时
+// 该错误经错误包装链进入磁盘日志/库内 task_log/前端回显时完整泄露会话凭证。
+// 这里把 url.Error 文本改写为"Op 底层描述"（不含 URL），同时
 // 保留 Unwrap 链到底层错误——判型函数穿透不变。非 url.Error（业务错误/纯文本
 // 错误）原样透传绝不改写（错误文案契约不误伤）；captcha 等静态 URL 路径无
 // token 不需脱敏，只有 doRequest 的 URL 走 token 参数通道。

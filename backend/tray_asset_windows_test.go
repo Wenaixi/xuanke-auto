@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// 托盘 ICO 资产回归钉：R76/R77 两次手写字节失位（1x1 全透明 / IDAT CRC 错误）后，
+// 托盘 ICO 资产回归钉：两次手写字节失位（1x1 全透明 / IDAT CRC 错误）后，
 // 用机器检查固化 ICO 结构合法性与像素语义——未来任何重排/美化字节只要结构或像素
 // 破坏即 FAIL，绝不静默产出坏图标。Windows 托盘链路（systray → LoadImageW →
 // DrawIconEx）与本断言同口径。
@@ -28,7 +28,7 @@ func TestTrayIconAsset(t *testing.T) {
 		t.Fatalf("dwBytesInRes 须 %d, got %d", want, binary.LittleEndian.Uint32(ico[14:18]))
 	}
 	// ICONDIRENTRY[18:22] dwImageOffset 须指向目录后首个数据字节（= 22），
-	// 而非数据区总长——R79 曾把 len(ico)（4286）填入 offset。
+	// 而非数据区总长——曾把 len(ico)（4286）填入 offset。
 	if off := binary.LittleEndian.Uint32(ico[18:22]); off != 22 {
 		t.Fatalf("dwImageOffset 须 22, got %d", off)
 	}

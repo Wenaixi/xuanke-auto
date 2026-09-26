@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest"
 import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave, guardCommit } from "./targetGuard"
 import type { SchedulerState, ClassItem } from "../types"
 
-// C3-1：targetGuard 三纯函数正式单测（把 guard 脚本断言固化，成为 vitest 测试面的第一批）。
-// 语义契约（CLAUDE.md F15/F40/F42/F43）：显式清空≠数据缺席 / 消费时刻读 ref /
+// targetGuard 三纯函数正式单测（把 guard 脚本断言固化，成为 vitest 测试面的第一批）。
+// 语义契约（见根 CLAUDE.md）：显式清空≠数据缺席 / 消费时刻读 ref /
 // 发布重建清理 / 回显未完成推迟。
 
 const cls = (id: number, publishId: number): ClassItem =>

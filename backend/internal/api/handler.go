@@ -267,7 +267,7 @@ func (d *Deps) handleElectives(w http.ResponseWriter, r *http.Request) {
 	// 回退全局帧），管理员被误导以为看到的就是该账号年级的课程——与目标写
 	// 的判据同源（凭据表 = "确实登录过"的更强真理源）。未知账号在目标写路径整体拒绝，
 	// 读路径必须对称：凭据表查无此账号 → 明确"账号不存在"，绝不用全局帧假装成功。
-	// 透传解析收权 resolveAccountForSession（C2）：fallback="core"（无透传回落核心账号）。
+	// 透传解析收权 resolveAccountForSession：fallback="core"（无透传回落核心账号）。
 	acct, handled := d.resolveAccountForSession(w, r, "core", "账号不存在，无法查看课程")
 	if handled {
 		return
@@ -311,7 +311,7 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 	// 缺口：幽灵账号（typo/已删残留）走到 TryAcquireSubmit 占锁 → CheckClassSelectable
 	// 放行 → ClientFor 返回不存在，报"账号会话未建立或未登录"误导文案。凭据表 = "确实登录过"
 	// 的更强真理源（同课程读判据），查无此账号 → 明确拒绝，绝不让操作假装到达平台。
-	// 透传解析收权 resolveAccountForSession（C2）：fallback="self"（不回落，后文守卫兜底）。
+	// 透传解析收权 resolveAccountForSession：fallback="self"（不回落，后文守卫兜底）。
 	acct, handled := d.resolveAccountForSession(w, r, "self", "账号不存在，无法执行报名操作")
 	if handled {
 		return
@@ -331,7 +331,7 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 手动报名收权 ManualSelect（C4）：取排他锁 → 快照复核 → 同账号客户端 →
+	// 手动报名收权 ManualSelect：取排他锁 → 快照复核 → 同账号客户端 →
 	// 平台调用 → 错误分类 → 重登/退避/记 full/落库，全部在调度器内完成。
 	// handler 只做参数解析 + 响应拼装；错误已分类为友好文案（read 类"可能已处理"、
 	// token 失效"自动重登中"、风控/窗口关闭/满员各自文案）。
@@ -347,7 +347,7 @@ func (d *Deps) handleElectiveSelect(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 	acct := sessionAccount(r)
 	// 与 handleElectiveSelect 同款凭据表校验，退选路径对称补齐。
-	// 透传解析收权 resolveAccountForSession（C2）：fallback="self"（不回落，后文守卫兜底）。
+	// 透传解析收权 resolveAccountForSession：fallback="self"（不回落，后文守卫兜底）。
 	acct, handled := d.resolveAccountForSession(w, r, "self", "账号不存在，无法执行退选操作")
 	if handled {
 		return
@@ -367,7 +367,7 @@ func (d *Deps) handleElectiveExit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 手动退选收权 ManualExit（C4，与 ManualSelect 对称）：取排他锁 → 同账号客户端 →
+	// 手动退选收权 ManualExit（与 ManualSelect 对称）：取排他锁 → 同账号客户端 →
 	// 平台调用 → 错误分类 → 重登/落库，全部在调度器内完成。
 	msg, err := d.Sched.ManualExit(acct, req.ClassID)
 	if err != nil {
@@ -387,7 +387,7 @@ const maxTargetsPerAccount = 100
 
 // handleSetTargets 设置目标课程并持久化（账号来自会话绑定；仅管理员会话可跨账号）。
 func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
-	// 透传解析收权 resolveAccountForSession（C2）：fallback="reject"——目标只该属于
+	// 透传解析收权 resolveAccountForSession：fallback="reject"——目标只该属于
 	// 学生账号；管理员未指定学生账号（且无任何有目标账号可兜底）→ 整体拒绝，
 	// 绝不把目标写入管理员账号孤儿行（决策：与 handleElectives/handleState 的
 	// "对齐核心账号"不同，目标是写入操作，无法确定归属时宁可拒绝绝不张冠李戴）。
@@ -425,7 +425,7 @@ func (d *Deps) handleSetTargets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// 目标持久化唯一权威 = 调度器 SetTargetsForAccount（C1 契约）：内部完成
+	// 目标持久化唯一权威 = 调度器 SetTargetsForAccount：内部完成
 	// enrich 发布元数据补全 → 落库 → 重建课程状态 三步合一，且落库失败 error 上抛。
 	// 此处绝不预写 store（旧实现双重写：handler 先写缺元数据版本、调度器再写补全版，
 	// 第一笔纯冗余且让持久化失败路径分裂）。调度器方法已含 store 持久化，
@@ -447,7 +447,7 @@ func (d *Deps) handleState(w http.ResponseWriter, r *http.Request) {
 	// StateForAccount(ghost) 返回空 Courses + token_valid=true 假象，管理员无法分辨
 	// "账号不存在"与"账号没目标"（修掉的"全局帧假装成功"的轻量版）。凭据表
 	// 查无此账号 → 明确拒绝；与手动操作/课程读的?account= 契约全局对齐。
-	// 透传解析收权 resolveAccountForSession（C2）：fallback="core"（无透传回落核心账号）。
+	// 透传解析收权 resolveAccountForSession：fallback="core"（无透传回落核心账号）。
 	acct, handled := d.resolveAccountForSession(w, r, "core", "账号不存在，无法读取状态")
 	if handled {
 		return
@@ -995,7 +995,7 @@ func (d *Deps) allowAccountOverride(r *http.Request) bool {
 	return d.Sessions.IsAdminToken(sessionToken(r))
 }
 
-// resolveAccountForSession 账号透传解析单源（C2 收权：替代 handleElectives/handleElectiveSelect/
+// resolveAccountForSession 账号透传解析单源（收权：替代 handleElectives/handleElectiveSelect/
 // handleElectiveExit/handleState/handleSetTargets 五处内联复制）。核实确认：旧五处行为基本一致、
 // 文案各异，本函数统一实现 + 参数化差异，收权后逐字等价。
 // 四族语义：

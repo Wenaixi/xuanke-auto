@@ -116,7 +116,7 @@ func readyProbe(t *testing.T, baseURL string) {
 func TestLoginRetryWithinLimits(t *testing.T) {
 	srv, captchas, submits := loginMockServer(t, 1, 1) // 识别 1 次失败 + 提交 1 次被拒后成功
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：New 不再静默建引擎，显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // New 不再静默建引擎，显式注入
 
 	tok, err := c.Login("acct", "pwd")
 	if err != nil {
@@ -141,7 +141,7 @@ func TestLoginRetryWithinLimits(t *testing.T) {
 func TestLoginStopsAfterCaptchaExhausted(t *testing.T) {
 	srv, captchas, submits := loginMockServer(t, 99, 99) // 永远失败
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 
 	_, err := c.Login("acct", "pwd")
 	if err == nil {
@@ -165,7 +165,7 @@ func TestLoginNetworkErrorAbortsImmediately(t *testing.T) {
 	// 双保险成族闭环（探活只关心 accept 就绪，500 响应不影响就绪判定）。
 	readyProbe(t, srv.URL)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 	if _, err := c.Login("acct", "pwd"); err == nil {
 		t.Fatal("应报错")
 	}
@@ -323,7 +323,7 @@ func TestReloginIfNeeded(t *testing.T) {
 	// 依赖 SetCredentials 的旧断言（ReloginIfNeeded 手动 SetCredentials 后可用）无法覆盖
 	// 线上真实路径——每次账密登录后自动重登永远报"未登录且无保存账密"。
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 	if _, err := c.Login("acct", "pwd"); err != nil {
 		t.Fatalf("运行时登录失败: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestReloginIfNeeded(t *testing.T) {
 
 	// 重启恢复路径（Restore 经 SetCredentials 注入）：保持原语义回归
 	restoreC := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	restoreC.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	restoreC.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 	restoreC.SetCredentials("acct", "pwd", "old-token")
 	if _, err := restoreC.doRequest(http.MethodPost, "/electives/select", nil, ""); err == nil {
 		t.Fatal("期望失败")
@@ -376,7 +376,7 @@ func TestLoginLogsAttempts(t *testing.T) {
 	srv, _, _ := loginMockServer(t, 1, 1) // 识别 1 次失败 + 提交 1 次被拒后成功
 	t.Cleanup(srv.Close)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 
 	if _, err := c.Login("acct", "pwd"); err != nil {
 		t.Fatalf("登录应成功: %v", err)
@@ -403,7 +403,7 @@ func TestLoginLogsFailureSummary(t *testing.T) {
 	srv, captchas, _ := loginMockServer(t, 99, 99) // 永远失败
 	t.Cleanup(srv.Close)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // C5-2：显式注入
+	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
 
 	if _, err := c.Login("acct", "pwd"); err == nil {
 		t.Fatal("登录应失败")
@@ -448,7 +448,7 @@ func TestLoginRetriesTransientInitError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	// C5-2 后 New 不再静默建 Vision 引擎（唯一注入通道 = SetRecognizer）——显式注入
+	// New 不再静默建 Vision 引擎（唯一注入通道 = SetRecognizer）——显式注入
 	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
 	tok, err := c.Login("acct", "pwd")
 	if err != nil {

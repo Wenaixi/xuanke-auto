@@ -3,9 +3,9 @@ import { api } from "../api/client"
 import { guardCommit, shouldDeferSave } from "./targetGuard"
 import type { Publish, SchedulerState, Target } from "../types"
 
-// useTargetSave 目标自动保存深 hook（C3-2 收权：Select.tsx 保存链逐行搬移，零语义变化）。
+// useTargetSave 目标自动保存深 hook（收权：Select.tsx 保存链逐行搬移，零语义变化）。
 // 收敛内容（原 Select.tsx 413-787 区间）：
-//   - 镜像 ref 配对：selectedRef/revRef/stateDataRef/publishesRef（消费时刻读 ref 纪律，F17/F43）
+//   - 镜像 ref 配对：selectedRef/revRef/stateDataRef/publishesRef（消费时刻读 ref 纪律）
 //   - 保存串行化：lastJson/targetRef/savingRef/dirtyRef + saveNow（飞行中补发，绝不乱序覆盖）
 //   - 退避重发：retryState/resetRetry/scheduleRetry（2/4/8/16/16s，连续 5 次停手）
 //   - 卸载防护：unmountedRef + 挂载复位（StrictMode 双挂载契约）
@@ -129,7 +129,7 @@ export function useTargetSave(opts: {
 
   // 目标集由 [发布 × 已选课程] 联查构建——两个消费点（flushTargets 与防抖 effect）
   // 的唯一差异是 selected 的数据源：前者读消费时刻的 ref 镜像 latestSelected，
-  // 后者读渲染闭包快照 selected（CLAUDE.md 契约 12：async 闭包捕获悖论，
+  // 后者读渲染闭包快照 selected（async 闭包捕获悖论，
   // 消费时刻必须读镜像）。故 selected 由调用方传入，函数内部绝不自行取数。
   // sel 的结构类型逐字沿用 opts.selected（:18），不换用 types.ts 的 ClassItem
   // ——两处写法漂移正是本函数要消灭的那类重复。
@@ -165,7 +165,7 @@ export function useTargetSave(opts: {
   // 守卫尾段共用执行（架构深化 D）：flush 与防抖两处的联查空/id 漂移守卫 +
   // targetRef/savingRef/saveNow 收尾逐字重复（差异只在 selected 数据源：ref 镜像 vs
   // 渲染闭包）。统一收进本函数，两处只传构建好的 targets 与校验数——
-  // 数据源差异保留在调用方（契约 12 消费时刻读镜像纪律），执行骨架单一记忆点。
+  // 数据源差异保留在调用方（消费时刻读镜像纪律），执行骨架单一记忆点。
   const commitTargets = (next: Target[], selectedCount: number, pubs: readonly Publish[]): boolean => {
     // "联查产物为空 = 假清空"——every 校验对空 targets 恒真，必须独立判
     // "selectedCount>0 却产出空集"。仅在发布全缺席的极限情况 selectedCount 可能滞后，
@@ -196,7 +196,7 @@ export function useTargetSave(opts: {
     // guardCommit：判据与顺序各只有一处定义，本处只负责"拦截时要不要提示"。
     //   defer / missingPublishes = 安全拦截的静默跳过（守卫不置 dirtyRef——终局绝不
     //   误报保存失败），等数据到达/发布恢复自愈；stalePublish 是唯一需要提示的一因
-    //   （残留目标用户无法通过界面自行清除，须告知刷新解锁，契约 27）。
+    //   （残留目标用户无法通过界面自行清除，须告知刷新解锁）。
     const verdict = guardCommit(
       stateDataRef.current,
       latestSelectedCount > 0,
@@ -297,8 +297,7 @@ export function useTargetSave(opts: {
     const timer = setTimeout(async () => {
       // 消费时刻守卫三段与 flushTargets 同源（guardCommit）——判据与顺序单点定义。
       // 守卫读 ref 镜像 selectedRef.current（timer 是异步回调，渲染闭包的 selected
-      // 可能是旧快照），而下方 buildTargets 仍用渲染闭包 selected：契约 12 的数据源
-      // 纪律不变，守卫与构建各自保持原有取数方式。
+      // 可能是旧快照），而下方 buildTargets 仍用渲染闭包 selected：数据源
       const selectedCount = Object.values(selectedRef.current).reduce((n, arr) => n + arr.length, 0)
       const verdict = guardCommit(
         stateDataRef.current,

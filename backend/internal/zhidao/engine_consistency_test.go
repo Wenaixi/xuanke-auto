@@ -2,7 +2,7 @@ package zhidao
 
 import "testing"
 
-// TestNewDoesNotSilentlyBuildVision New 不再静默自建 Vision 引擎（C5-2 配置缺陷根治）——
+// TestNewDoesNotSilentlyBuildVision New 不再静默自建 Vision 引擎（配置缺陷根治）——
 // 识别引擎唯一注入通道 = SetRecognizer / SetVision（accounts.Manager 按运行时配置显式注入）。
 // 此前 New 在 recognizer==nil 且 APIKey 非空时静默 NewVisionRecognizer：管理员配置
 // ddddocr+兜底关（本机无引擎=识别不可用）时，新建客户端仍经此旁路全走 Vision（静默计费）。
@@ -16,7 +16,7 @@ func TestNewDoesNotSilentlyBuildVision(t *testing.T) {
 	}
 }
 
-// TestSetRecognizerPropagatesToLoginEngine SetRecognizer 双驱动登录引擎（C5-4）——
+// TestSetRecognizerPropagatesToLoginEngine SetRecognizer 双驱动登录引擎——
 // 否则 SetRecognizer（accounts.Manager 热切换）后登录引擎的识别器恒 nil，
 // 新账号登录识别直接报"验证码识别器未初始化"。
 func TestSetRecognizerPropagatesToLoginEngine(t *testing.T) {

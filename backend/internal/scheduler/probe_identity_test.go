@@ -7,7 +7,7 @@ import (
 	"xuanke-auto/backend/internal/zhidao"
 )
 
-// TestProbeDeletedThenRebuiltSameNameDropsSnapshot（M88-01 回归钉）：
+// TestProbeDeletedThenRebuiltSameNameDropsSnapshot（回归钉）：
 // 删号 + 同名重建 + 在飞探测同帧时，ProbeForAccount 的旧链不得把快照写进
 // 重建后的新账号内存条目（acctData/acctDataAt），也不得覆盖其识别槽。
 // 旧实现：FindElectives 网络往返返回后无任何复核直接写 map——左链（旧身份）与
@@ -109,9 +109,9 @@ func TestProbeDeletedThenRebuiltSameNameDropsSnapshot(t *testing.T) {
 	}
 }
 
-// TestProbeForAccountDropsWriteWhenRemoved（M88-01 已删分支）：
+// TestProbeForAccountDropsWriteWhenRemoved（已删分支）：
 // 在飞探测返回后账号已删（ClientFor 不存在）——回写段必须整体放弃
-// （不写 acctData/acctDataAt/识别槽），与 B43 族"写回侧复核"对称。
+// （不写 acctData/acctDataAt/识别槽），与 ClientFor 复核族"写回侧复核"对称。
 // 触发路径：探测发起后（进入网络段）账号被删，返回后回写段判 ClientFor 不存在。
 func TestProbeForAccountDropsWriteWhenRemoved(t *testing.T) {
 	fc := newFakeClient(true)
@@ -170,7 +170,7 @@ func TestProbeForAccountDropsWriteWhenRemoved(t *testing.T) {
 	}
 }
 
-// TestProbeChainSameClientIdentity（M88-01 身份不变正常路径对偶）：
+// TestProbeChainSameClientIdentity（身份不变正常路径对偶）：
 // 同名重建后新身份的探测正常落新帧、识别槽被新 beginTimes 覆盖——
 // 同身份复核绝不误伤正常路径（无删号时探测照常回写）。
 func TestProbeChainSameClientIdentity(t *testing.T) {

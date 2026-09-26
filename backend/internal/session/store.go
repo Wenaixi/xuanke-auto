@@ -114,7 +114,7 @@ func (s *Store) CreateTicket(account string) string {
 // 票据在激活码校验失败时（无效/用尽/已激活）已被此步占用销毁——
 // 调用方随后返回错误文案且不签发会话，用户必须重新登录拿新票据再试。这是"票据单次、
 // 防重放"的刻意设计决策：宁可输错激活码重登一次，也不让同一票据反复探测不同激活码
-// （票据 5 分钟 TTL 内可被重放穷举）。该契约已在 docs/review-round13.md 与 CLAUDE.md 落盘。
+// （票据 5 分钟 TTL 内可被重放穷举）。该契约已在根 CLAUDE.md 落盘。
 func (s *Store) ConsumeTicket(token, account string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -107,7 +107,7 @@ func init() {
 	}
 }
 
-// resolveLoginTestEngine 登录测试工具本地的引擎解析——C5 下沉后改调
+// resolveLoginTestEngine 登录测试工具本地的引擎解析——下沉后改调
 // zhidao.ResolveCaptchaEngine 单源（与主程序 resolveCaptchaRecognizer 共享决策逻辑，
 // 不再独立复制；配置通道仍走本工具自己的 env/默认值，决策逻辑单源）。
 // 返回 nil 表示无可用引擎。

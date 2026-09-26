@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// C6-1：windowState 状态机独立实例化测试（脱离 scheduler 时序，直测 noteXxx 入账与
+// windowState 状态机独立实例化测试（脱离 scheduler 时序，直测 noteXxx 入账与
 // isClosed 三判据）。迁移等价性的硬基线 = 既有 18 个窗口测试（scheduler_test.go），
 // 本文件只测 struct 自身契约。
 

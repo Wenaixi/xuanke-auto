@@ -9,7 +9,7 @@ import (
 	"xuanke-auto/backend/internal/zhidao"
 )
 
-// C4-2 TDD：ManualSelect / ManualExit 深方法（手动决策树收进调度器）。
+// ManualSelect / ManualExit 深方法（手动决策树收进调度器）的测试。
 // 手动路径此前在 handler 独立实现：取锁→快照复核→ClientFor→平台调用→三失败分支。
 // 收权后调度器内部完成全部，handler 瘦回参数解析；并补核实挖出的缺口——
 // 重登退避期（relogging/tokenValid 失效）手动点报名必须短路，绝不烧平台请求。
@@ -23,7 +23,7 @@ func manualTestSched(t *testing.T, fc *fakeClient) (*Scheduler, *fakeAccts) {
 }
 
 // TestManualSelectSuccessClearsInflightAndRefused 手动报名成功：记 done + 清 inflight +
-// 清 refused（手动重报接管语义，决策 14）+ 清 full + 返回平台 msg。
+// 清 refused（手动重报接管语义）+ 清 full + 返回平台 msg。
 func TestManualSelectSuccessClearsInflightAndRefused(t *testing.T) {
 	fc := newFakeClient(true)
 	s, _ := manualTestSched(t, fc)
@@ -50,7 +50,7 @@ func TestManualSelectSuccessClearsInflightAndRefused(t *testing.T) {
 		t.Fatal("成功应清 inflight")
 	}
 	if s.refused[acct][61115] {
-		t.Fatal("手动重报成功应清 refused（自动引擎恢复接管，决策 14）")
+		t.Fatal("手动重报成功应清 refused（自动引擎恢复接管）")
 	}
 	if s.full[acct][61115] {
 		t.Fatal("成功应清 full")
@@ -153,7 +153,7 @@ func TestManualExitSuccessRemovesDone(t *testing.T) {
 		t.Fatal("退选成功应清 done")
 	}
 	if !s.refused[acct][61115] {
-		t.Fatal("退选成功应记 refused（自动引擎不再接管，决策 14）")
+		t.Fatal("退选成功应记 refused（自动引擎不再接管）")
 	}
 	if s.inflight[acct][61115] {
 		t.Fatal("退选成功应清 inflight")

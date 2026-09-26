@@ -21,7 +21,7 @@ type EngineResolution struct {
 	Note       string
 }
 
-// ResolveCaptchaEngine 识别引擎决策单源纯函数（C5 下沉：api/router.go 的
+// ResolveCaptchaEngine 识别引擎决策单源纯函数（下沉：api/router.go 的
 // resolveCaptchaRecognizer 与 cmd/logintest 的 resolveLoginTestEngine 共用，取代复制）。
 // 无副作用、探测函数注入，便于表驱动测试。
 //

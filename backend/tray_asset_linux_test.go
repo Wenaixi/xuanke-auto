@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// 托盘 PNG 资产回归钉：R76/R77 两次手写字节失位（1x1 全透明 / zlib 头换 CRC 错位）后，
+// 托盘 PNG 资产回归钉：两次手写字节失位（1x1 全透明 / zlib 头换 CRC 错位）后，
 // 用 Go 官方 image/png.Decode（严格校验 chunk CRC）固化像素语义——未来任何重排/美化
 // 字节只要结构或像素破坏即 FAIL。Linux 托盘链路（systray → AppIndicator）与本断言同口径。
 func TestTrayPNGAsset(t *testing.T) {

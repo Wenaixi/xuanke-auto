@@ -390,7 +390,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     setRev((r) => r + 1) // 标记选课改动，触发自动保存防抖
   }
 
-  // 目标自动保存收权 useTargetSave（C3-2）：保存链（镜像 ref/串行化/退避/守卫/防抖/
+  // 目标自动保存收权 useTargetSave：保存链（镜像 ref/串行化/退避/守卫/防抖/
   // handleBack 收敛）全部移入 hook，本组件瘦回渲染职责。echoedRef 仍归回显 effect
   //（渲染态职责），hook 只读它做守卫第三参。
   const save = useTargetSave({

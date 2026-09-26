@@ -10,7 +10,7 @@ import (
 )
 
 // failTargetsStore 带失败开关的目标落库假存储：验证 SetTargetsForAccount
-// 落库失败必须 error 上抛（C1 契约：持久化失败绝不静默吞错，前端要拿到真实失败）。
+// 落库失败必须 error 上抛（持久化失败绝不静默吞错，前端要拿到真实失败）。
 // 与既有 failStore 不同：failStore 只拦 SaveSuccess/SaveRefused（重登/手动路径用），
 // 这里拦 SetTargetsForAccount 本身。
 type failTargetsStore struct {
@@ -25,7 +25,7 @@ func (f *failTargetsStore) SetTargetsForAccount(acct string, targets []Target) e
 	return f.fakeStore.SetTargetsForAccount(acct, targets)
 }
 
-// TestSetTargetsForAccountPropagatesStoreError 落库失败必须 error 上抛（C1-1 TDD 红灯）。
+// TestSetTargetsForAccountPropagatesStoreError 落库失败必须 error 上抛（TDD 红灯）。
 // 背景：scheduler.SetTargetsForAccount 当前无返回、内部只 log（scheduler.go:476-478），
 // handler 预写成功 + 调度器写失败时前端拿"已保存"而库内是缺元数据版本——零吞错契约缺口。
 func TestSetTargetsForAccountPropagatesStoreError(t *testing.T) {
@@ -46,8 +46,8 @@ func TestSetTargetsForAccountPropagatesStoreError(t *testing.T) {
 	}
 }
 
-// TestSetTargetsForAccountSuccessClearsRefusedOnly 重设目标成功路径契约（C1-1 绿灯守卫）：
-// 只清 refused、绝不清 done/full/rateLimited/inflight（决策 6）。落库成功返回 nil。
+// TestSetTargetsForAccountSuccessClearsRefusedOnly 重设目标成功路径契约（绿灯守卫）：
+// 只清 refused、绝不清 done/full/rateLimited/inflight。落库成功返回 nil。
 func TestSetTargetsForAccountSuccessClearsRefusedOnly(t *testing.T) {
 	fc := newFakeClient(true)
 	accts := &fakeAccts{c: fc}
@@ -73,16 +73,16 @@ func TestSetTargetsForAccountSuccessClearsRefusedOnly(t *testing.T) {
 		t.Fatalf("落库成功不应返回错误，got %v", err)
 	}
 	if !s.doneHas("acct1", 61115) {
-		t.Fatal("done 是跨目标持久历史事实，重设目标绝不清 done（决策 6）")
+		t.Fatal("done 是跨目标持久历史事实，重设目标绝不清 done")
 	}
 	if !s.fullHas("acct1", 61115) {
-		t.Fatal("full 是真实满员状态，重设目标绝不清 full（决策 6）")
+		t.Fatal("full 是真实满员状态，重设目标绝不清 full")
 	}
 	if !s.inflightHas("acct1", 61115) {
-		t.Fatal("inflight 防并发双发包，重设目标绝不清 inflight（决策 6）")
+		t.Fatal("inflight 防并发双发包，重设目标绝不清 inflight")
 	}
 	if s.refusedHas("acct1", 61115) {
-		t.Fatal("refused 是唯一应被重设目标清空的状态（决策 6）")
+		t.Fatal("refused 是唯一应被重设目标清空的状态")
 	}
 	// 发布元数据补全契约：落库目标必须带 publish_name/begin_date（关闭≠数据消失）
 	if len(s.acctTargets["acct1"]) != 1 || s.acctTargets["acct1"][0].PublishName != "高二年体育" {

@@ -2,8 +2,8 @@ package zhidao
 
 import "testing"
 
-// TestResolveCaptchaEngine 识别引擎决策单源纯函数（C5-1 TDD 表驱动）。
-// 从 api/router.go:72 resolveCaptchaRecognizer 逐字下沉——契约（CLAUDE.md）：
+// TestResolveCaptchaEngine 识别引擎决策单源纯函数（TDD 表驱动）。
+// 从 api/router.go:72 resolveCaptchaRecognizer 逐字下沉——契约（见根 CLAUDE.md）：
 //   - 兜底关闭：两引擎严格互不回退。配置 ddddocr 但本机无引擎 → Recognizer=nil
 //     （登录报"未配置验证码识别引擎"，绝不静默换云端）；配置 vision 但无密钥 → 同样 nil。
 //   - 兜底开启：双向兜底。ddddocr 不可用 → Vision；Vision 无密钥 → 本机 ddddocr。

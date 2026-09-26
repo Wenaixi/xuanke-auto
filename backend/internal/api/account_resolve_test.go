@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestResolveAccountForSession 账号透传解析收权（C2-1 TDD 红线）。
+// TestResolveAccountForSession 账号透传解析收权（TDD 红线）。
 // 现状：5 处透传块内联复制（electives/select/exit/state/targets），行为靠各点守卫兜底，
 // 无独立 helper 可测。收权后 resolveAccountForSession 成为唯一实现，以下断言全绿且行为逐字等价。
 //

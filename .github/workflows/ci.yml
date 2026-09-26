@@ -7,14 +7,12 @@ on:
       - main
     paths-ignore:
       - '**.md'
-      - 'docs/**'
   pull_request:
     branches:
       - master
       - main
     paths-ignore:
       - '**.md'
-      - 'docs/**'
   workflow_dispatch:
 
 concurrency:
@@ -66,9 +64,9 @@ jobs:
         run: |
           cd backend
           # Windows 宿主下 api/zhidao 登录链路测试偶发 httptest 连接 flake（127.0.0.1
-          # 回环 TIME_WAIT 队列争抢，R46 MAJOR-46-01 起持续多轮）。失败自动重跑一次
+          # 回环 TIME_WAIT 队列争抢，多轮持续出现）。失败自动重跑一次
           # 吸收瞬时 flake——两条命令都强制 -count=1（缓存键一致，重跑侧真实执行，
-          # 不被 (cached) 羽化；R50 MAJOR-50-01 修正 F49-M1 首条无 count=1 的漏洞）。
+          # 不被 (cached) 羽化；首条必须带 count=1，否则重跑会被缓存伪绿）。
           go test -p 1 -count=1 -v ./... || go test -p 1 -count=1 -v ./...
 
       - name: Verify Backend Single-Binary Compilation

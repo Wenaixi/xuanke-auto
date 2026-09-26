@@ -81,9 +81,9 @@ export function shouldDeferSave(
 // （集合为空 + 旧 key 残留），此时真正的主因是数据尚未到达。
 //
 // 返回拦截原因而非仅布尔：调用方据此决定是否提示用户。stalePublish 是唯一
-// 需要提示的一因（残留目标用户无法通过界面自行清除，须告知刷新解锁，契约 27）；
-// defer 与 missingPublishes 均为安全拦截的静默跳过（契约 35 显式清空不等于
-// 数据缺席，用户主动清空绝不判缺席）。
+// 需要提示的一因（残留目标用户无法通过界面自行清除，须告知刷新解锁）；
+// defer 与 missingPublishes 均为安全拦截的静默跳过（显式清空不等于数据缺席，
+// 用户主动清空绝不判缺席）。
 export type CommitBlockReason = "defer" | "missingPublishes" | "stalePublish"
 export type CommitVerdict = { ok: true } | { ok: false; reason: CommitBlockReason }
 

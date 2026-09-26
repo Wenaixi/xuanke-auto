@@ -8,7 +8,7 @@ import (
 )
 
 // platformErrorKind 平台报名错误归一枚举——手动/自动两条提交决策树共用同一分类
-// （C4 收权：取代 handler 与 spawnChain 各自手推 zhidao.ErrUnauthorized /
+// （取代 handler 与 spawnChain 各自手推 zhidao.ErrUnauthorized /
 // zhidao.IsReadErr / net.OpError 文案子串 的重复实现）。
 type platformErrorKind int
 

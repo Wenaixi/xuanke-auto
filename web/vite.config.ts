@@ -16,7 +16,7 @@ export default defineConfig({
   server: {
     proxy: { '/api': 'http://localhost:3091' }, // 开发时代理到后端 3091 端口
   },
-  // C3 测试地基：纯函数 + hook 逻辑测试，无需 jsdom
+  // 测试地基：纯函数 + hook 逻辑测试，无需 jsdom
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],

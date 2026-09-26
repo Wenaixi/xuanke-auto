@@ -6,7 +6,7 @@ import (
 )
 
 // windowState 窗口状态机：把 openTimeDetected / opened / closed / emptyProbeRuns /
-// syncFailStreak 五个状态位与"三判据关闭判定"收进一个 struct（C6 写侧收敛），
+// syncFailStreak 五个状态位与"三判据关闭判定"收进一个 struct（写侧收敛），
 // 写侧只经 setOpened/setClosed/noteProbeEmpty/noteSyncXxx/setOpenTime 入账、
 // 读侧经 isOpened/isClosed 查询——调度器 Scheduler 持一个 ws *windowState
 // 而非裸字段，杜绝写侧多写点各自散落。

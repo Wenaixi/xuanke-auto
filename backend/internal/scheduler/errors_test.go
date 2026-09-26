@@ -9,10 +9,10 @@ import (
 	"xuanke-auto/backend/internal/zhidao"
 )
 
-// TestClassifyPlatformError 平台错误分类纯函数（C4-1 TDD 表驱动）。
+// TestClassifyPlatformError 平台错误分类纯函数（表驱动）。
 // 手动/自动报名决策树合一后共用同一分类：token 失效 / read 中断 / 窗口关闭 /
-// 风控退避 / 普通业务错误 五族归一。文案匹配沿用既有 isRateLimitError /
-// isWindowClosedError 的子串集合（逐字迁移），zhidao.ErrUnauthorized 与 IsReadErr 判定收口。
+// 风控退避 / 普通业务错误 五族归一。文案匹配为逐字迁移的子串集合，
+// zhidao.ErrUnauthorized 与 IsReadErr 判定收口。
 func TestClassifyPlatformError(t *testing.T) {
 	cases := []struct {
 		name string

@@ -149,7 +149,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 
 	accts := accounts.New(zhi.URL, zhidao.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"}, st)
 	sessions := session.New(time.Hour)
-	t.Cleanup(sessions.Close) // 防清扫协程泄漏（O82-01：55 测试 × 高频轮次产生数百常驻协程窗口）
+	t.Cleanup(sessions.Close) // 防清扫协程泄漏（数十测试 × 高频轮次产生数百常驻协程窗口）
 
 	// 开放时间不做任何配置注入：识别槽（平台 beginTimes）是唯一事实源，New 传零值。
 	// 调度器窗口判定/探测/展示全部走自动识别。
@@ -1808,7 +1808,7 @@ func TestHandleElectivesSelectAndExit(t *testing.T) {
 }
 
 // TestManualElectiveFailureAppendsLog 手动报名/退选失败分支必须落库内审计日志
-// （B110-01）——与自动链失败必落 setStateLocked(failed) + AppendLog 对称：手动失败
+// ——与自动链失败必落 setStateLocked(failed) + AppendLog 对称：手动失败
 // 只 writeJSON 回显、零 AppendLog，尤其 read 类「请求已发出结果未知」场景最需留痕
 // 却零库行（事后无法在 /api/logs 核对动作到底成没成）。
 // 修复前此测试红（失败后 /api/logs 查不到该动作）；修复后绿。
@@ -1850,7 +1850,7 @@ func TestManualElectiveFailureAppendsLog(t *testing.T) {
 		}
 	}
 	if !foundSel {
-		t.Fatal("手动报名失败后应落库失败审计日志（B110-01），实际零失败日志行")
+		t.Fatal("手动报名失败后应落库失败审计日志，实际零失败日志行")
 	}
 
 	// 手动退选失败
@@ -1870,13 +1870,13 @@ func TestManualElectiveFailureAppendsLog(t *testing.T) {
 		}
 	}
 	if !foundExit {
-		t.Fatal("手动退选失败后应落库失败审计日志（B110-01），实际零失败日志行")
+		t.Fatal("手动退选失败后应落库失败审计日志，实际零失败日志行")
 	}
 }
 
 // TestManualElectiveReadErrAppendsLog 手动报名/退选 read 类错误（请求已发出、平台
 // 可能已处理）是最需留痕的失败场景——结果未知、事后要能在 /api/logs 核对——必须
-// 落库失败审计日志（B110-01 的 read 类分支）。
+// 落库失败审计日志（read 类分支）。
 // 修复前此测试红；修复后绿。
 func TestManualElectiveReadErrAppendsLog(t *testing.T) {
 	d := newTestDeps(t)
@@ -1936,7 +1936,7 @@ func TestManualElectiveReadErrAppendsLog(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("手动报名 read 类失败后应落库失败审计日志（B110-01 read 类），实际零失败日志行")
+		t.Fatal("手动报名 read 类失败后应落库失败审计日志，实际零失败日志行")
 	}
 }
 
@@ -2212,13 +2212,13 @@ func TestAdminDeleteAccountMemoryFirst(t *testing.T) {
 	if j["code"].(float64) != 0 {
 		t.Fatalf("删除账号失败: %v", j)
 	}
-	// 契约 1（核心）：内存注册表必须先失效——修复前 Remove 在 DeleteAccount 之后执行，
+	// 内存注册表必须先失效——修复前 Remove 在 DeleteAccount 之后执行，
 	// 本断言抓"库行已清但客户端仍在注册表"的半删态（红灯）；修复后 memory-first 为绿。
 	// ClientFor 返回的 (Client, bool)——bool 为 false 才是摘除成功。
 	if c, ok := d.accts.ClientFor("acct1"); ok && c != nil {
 		t.Fatal("删除成功后账号客户端必须已从注册表摘除（memory-first：在飞链复核立即失败）")
 	}
-	// 契约 2：库内凭据同步清空（客户端重建所需凭据不得残留）
+	// 库内凭据同步清空（客户端重建所需凭据不得残留）
 	creds, err := d.store.LoadCredentials()
 	if err != nil {
 		t.Fatal(err)

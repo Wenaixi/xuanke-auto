@@ -1508,7 +1508,7 @@ func TestServerClockAlignment(t *testing.T) {
 }
 
 // TestSnapshotTTLUsesAlignedClock 快照 TTL 判读侧必须与写入侧同用对齐钟
-// （R133-01，与 LOW-132-01 同族反向混用孤岛）：写入侧 acctDataAt 已用
+// （与时钟退避落库同族的反向混用孤岛）：写入侧 acctDataAt 已用
 // nowAligned（:835/:864/:1116/:966），判读侧若用 time.Since（本地钟）则
 // 预置 clockOffset=5s 时节流窗/过期判定差出 5s。断言：快照写入已过 43s
 // （超过 40s TTL）时，对齐钟判读应正确判"已过期"触发刷新，而非本地钟把
@@ -1535,7 +1535,7 @@ func TestSnapshotTTLUsesAlignedClock(t *testing.T) {
 }
 
 // TestClockSyncFailureBackoffUsesAlignedClock 时钟失败退避的时间基必须与判读侧一致
-// （LOW-132-01 契约打磨）：lastSyncFailAt 落库用对齐钟 nowAlignedLocked，而非本地钟
+// （契约打磨）：lastSyncFailAt 落库用对齐钟 nowAlignedLocked，而非本地钟
 // time.Now()——判读侧 maybeSyncClock:342 用 `now.Sub(lastSyncFailAt)`（now 为调用方
 // 传入的 nowAligned），若写入用本地钟则同一退避窗口出现 ~clockOffset 的基准混用孤岛。
 // 断言：预置 clockOffset=5s 后触发一次失败同步落地，lastSyncFailAt 应 ≈ nowAligned
@@ -1876,7 +1876,7 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 		t.Fatal("前置：EmptyProbeRuns=3 + 从未开窗 + 已过开窗点应视同关闭")
 	}
 	if !s1.StateForAccount("acct1").WindowClosed {
-		t.Fatal("幽灵窗口兜底（EmptyProbeRuns=3）必须镜像进 StateForAccount.window_closed（B29-02）")
+		t.Fatal("幽灵窗口兜底（EmptyProbeRuns=3）必须镜像进 StateForAccount.window_closed")
 	}
 
 	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间已过）
@@ -1888,9 +1888,9 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 		t.Fatal("前置：syncFailStreak=3 + 开放时间已过应视同关闭")
 	}
 	if !s2.StateForAccount("acct1").WindowClosed {
-		t.Fatal("时钟兜底（syncFailStreak=3）必须镜像进 StateForAccount.window_closed（B29-02）")
+		t.Fatal("时钟兜底（syncFailStreak=3）必须镜像进 StateForAccount.window_closed")
 	}
-	// 场景 2b 反向断言：同一时钟失败形态但开放时间在未来——绝不能视同关闭（32-01）。
+	// 场景 2b 反向断言：同一时钟失败形态但开放时间在未来——绝不能视同关闭。
 	// 判据2 原实现只查"开放时间非零"，未来开窗点 + 平台故障恢复后黄金期提交被挂起。
 	s2b := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
 	s2b.mu.Lock()
@@ -2779,7 +2779,7 @@ func TestReloginBackoffWindowBlocksManualTriggers(t *testing.T) {
 }
 
 // TestReloginFailureKeepsBackoff 重登失败后 reloginFail 计数必须保留增长（不无条件复位为 1），
-// 指数退避表才能逐次拉长，Vision 持续故障时登录频率越来越低（C1）。
+// 指数退避表才能逐次拉长，Vision 持续故障时登录频率越来越低。
 // 修复前：发起时 1→2，失败后无条件复位 1，计数恒 1→2→1→2 振荡，退避表永不增长。
 func TestReloginFailureKeepsBackoff(t *testing.T) {
 	fc := newFakeClient(false)
@@ -3257,14 +3257,14 @@ func TestDeletedAccountRebuiltSameNameChainDropsRelogin(t *testing.T) {
 	relogCalls := oldClient.relogCalls
 	oldClient.mu.Unlock()
 	if relogCalls != 0 {
-		t.Fatalf("同名重建后陈旧旧链命中失效不得触发自动重登（B42-02），实际 %d 次", relogCalls)
+		t.Fatalf("同名重建后陈旧旧链命中失效不得触发自动重登，实际 %d 次", relogCalls)
 	}
 	// 重建身份的 reloginFail 不得有残留计数（PurgeAccount 已清空，旧链不得写回）
 	s.mu.Lock()
 	_, hasFail := s.reloginFail["acct1"]
 	s.mu.Unlock()
 	if hasFail {
-		t.Fatal("同名重建后 reloginFail 不得残留（B42-02）")
+		t.Fatal("同名重建后 reloginFail 不得残留")
 	}
 }
 
@@ -3567,7 +3567,7 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 		relogCalls := oldClient.relogCalls
 		oldClient.mu.Unlock()
 		if relogCalls != 0 {
-			t.Fatalf("同名重建后陈旧旧链实时复核命中失效不得触发自动重登（B43-02），实际 %d 次", relogCalls)
+			t.Fatalf("同名重建后陈旧旧链实时复核命中失效不得触发自动重登，实际 %d 次", relogCalls)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -3576,12 +3576,12 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 	_, hasFail := s.reloginFail["acct1"]
 	s.mu.Unlock()
 	if hasFail {
-		t.Fatal("同名重建后 reloginFail 不得残留（B43-02）")
+		t.Fatal("同名重建后 reloginFail 不得残留")
 	}
 	// 重建身份状态行不得被旧链覆写（PurgeAccount 已清空课程行，旧链不得重建 failed）
 	for _, c := range s.StateForAccount("acct1").Courses {
 		if c.Status == "failed" {
-			t.Fatalf("同名重建后陈旧旧链不得写回 failed 状态（B43-02），课程 %d 实际 %s", c.ClassID, c.Status)
+			t.Fatalf("同名重建后陈旧旧链不得写回 failed 状态，课程 %d 实际 %s", c.ClassID, c.Status)
 		}
 	}
 }

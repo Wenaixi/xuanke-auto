@@ -38,7 +38,7 @@ func fixedRecognizer(text string) *fakeRecognizer {
 	return &fakeRecognizer{text: text}
 }
 
-// TestLoginEngineRoundTrip 登录链路深模块首次可测（C5-3 TDD 红灯）：
+// TestLoginEngineRoundTrip 登录链路深模块首次可测（TDD 红灯）：
 // 用 httptest 起最小登录平台（/login /login/captcha /login/doLogin 三态），
 // 注入固定识别引擎，断言 LoginEngine.Login 完整走通并返回平台 token。
 func TestLoginEngineRoundTrip(t *testing.T) {

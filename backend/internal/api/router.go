@@ -19,7 +19,7 @@ var captchaSemInit bool
 // 幂等只护"并发信号量"（进程级单例）；识别引擎注入 applyCaptchaRecognizerFor 必须
 // **每次 Register 都跑**——每个 Register 的 accounts.Manager 是自己的实例，若被
 // captchaSemInit 短路跳掉，第二个及以后的 Register 的 Manager 模板零识别器，
-// ensure 新建客户端识别器恒 nil（"验证码识别器未初始化"）。此缺陷在 C5-2 删
+// ensure 新建客户端识别器恒 nil（"验证码识别器未初始化"）。此缺陷在删
 // zhidao.New 静默建 Vision 旁路后被暴露（此前客户端级旁路掩盖了模板级缺失）。
 func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
 	if !captchaSemInit {
@@ -59,7 +59,7 @@ type captchaResolution struct {
 	note   string
 }
 
-// resolveCaptchaRecognizer 识别引擎解析（C5 下沉后为 zhidao.ResolveCaptchaEngine 的薄适配：
+// resolveCaptchaRecognizer 识别引擎解析（下沉后为 zhidao.ResolveCaptchaEngine 的薄适配：
 // 组装 EngineConfig + 注入探测函数 + 把 EngineResolution 转回 api 包内 captchaResolution）。
 // 契约（兜底开关、双引擎互不回退、探测成本）全在 zhidao 单源，表驱动测试在 zhidao/engine_test.go。
 func resolveCaptchaRecognizer(

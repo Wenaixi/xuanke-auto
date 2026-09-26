@@ -25,7 +25,7 @@ func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
 	if !captchaSemInit {
 		captchaSemInit = true
 		cfg := rt.Get()
-		zhidao.NewCaptchaSemaphore(cfg.CaptchaConcurrency)
+		zhidao.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
 	}
 	applyCaptchaRecognizerFor(rt, accts)
 }

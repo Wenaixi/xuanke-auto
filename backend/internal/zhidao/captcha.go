@@ -93,10 +93,6 @@ func SetCaptchaConcurrency(n int) {
 	getGlobalLimiter().SetLimit(n)
 }
 
-// NewCaptchaSemaphore 初始化识别并发信号量（默认并发 1，启动时调用一次）。
-func NewCaptchaSemaphore(concurrency int) {
-	getGlobalLimiter().SetLimit(concurrency)
-}
 
 // withConcurrency 在信号量许可下执行识别（串行化识别请求，返回识别结果）。
 func withConcurrency(fn func() (string, error)) (string, error) {

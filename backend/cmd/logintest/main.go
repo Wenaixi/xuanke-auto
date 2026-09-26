@@ -60,7 +60,7 @@ func main() {
 	if recognizer == nil {
 		log.Fatalf("识别不可用：无可用识别引擎（配置 %s，兜底 %v）。请安装 ddddocr 或配置 SF_API_KEY。", config.CaptchaEngineDefault(), fallback)
 	}
-	zhidao.NewCaptchaSemaphore(1) // 识别并发限流 1（与主程序默认一致）
+	zhidao.SetCaptchaConcurrency(1) // 识别并发限流 1（与主程序默认一致）
 
 	var passed, failed int
 	// 参数边界防御——-limit ≤0 或超账号数时收敛到真实账号数（杜绝 slice 越界 panic）

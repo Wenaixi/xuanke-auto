@@ -10,7 +10,7 @@ import (
 
 func init() {
 	// 测试信号量：识别并发上限为 2（验证并发限流行为），全局初始化一次
-	NewCaptchaSemaphore(2)
+	SetCaptchaConcurrency(2)
 }
 
 func TestRecognizeCaptcha(t *testing.T) {
@@ -48,7 +48,7 @@ func TestRecognizeCaptchaNoKey(t *testing.T) {
 // TestCaptchaConcurrency 验证信号量并发限流：并发 10 个识别请求，
 // 但同一时刻实际进入识别核心的至多 2 个（并发上限）。
 func TestCaptchaConcurrency(t *testing.T) {
-	NewCaptchaSemaphore(2) // 上限 2
+	SetCaptchaConcurrency(2) // 上限 2
 	socketPreheat()        // 端口预加热（同 client_test）
 
 	var mu sync.Mutex
@@ -102,7 +102,7 @@ func TestCaptchaConcurrency(t *testing.T) {
 
 // TestSetCaptchaConcurrencyConcurrent 验证高并发下动态热调整并发度不会导致死锁或竞态（验证码并发度）。
 func TestSetCaptchaConcurrencyConcurrent(t *testing.T) {
-	NewCaptchaSemaphore(2)
+	SetCaptchaConcurrency(2)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})

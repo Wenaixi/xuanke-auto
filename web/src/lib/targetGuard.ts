@@ -1,4 +1,4 @@
-import type { SchedulerState } from "../types"
+import type { SchedulerState, Target } from "../types"
 
 // 目标自动保存前置守卫（TDD 纯函数，供 Select.tsx 防抖回调与 flushTargets 两处消费时刻
 // 复用，与回显 effect 的 currentIds 过滤同判据）：
@@ -107,6 +107,65 @@ export function guardCommit(
   // 后端旧目标（数据丢失）。空数组键 = 用户主动清空，绝不判过期。
   if (selectedHasStalePublish(selected, publishes)) {
     return { ok: false, reason: "stalePublish" }
+  }
+  return { ok: true }
+}
+
+// 目标集构建：由 [发布 × 已选课程] 联查生成后端 PUT 用的目标数组。
+// priority 取课程在该发布内的下标（前端 Tab 内顺序即优先级）。
+// 两个消费点（flushTargets 与防抖 effect）的唯一差异是 selected 的数据源
+// （ref 镜像 vs 渲染闭包），故 sel 由调用方传入，函数内部绝不自行取数——
+// 消费时刻必须读调用方的镜像，这是「async 闭包捕获悖论」的防线。
+export function buildTargets(
+  pubs: readonly { publish_id: number }[],
+  sel: Record<number, { id: number; publish_id: number; course_name: string }[]>
+): Target[] {
+  const targets: Target[] = []
+  for (const p of pubs) {
+    const list = sel[p.publish_id] ?? []
+    list.forEach((cls, i) => {
+      targets.push({
+        publish_id: p.publish_id,
+        class_id: cls.id,
+        course_name: cls.course_name,
+        priority: i,
+      })
+    })
+  }
+  return targets
+}
+
+// 校验目标集的 publish_id 全属当前发布集——防「渲染→回调」窗口内平台重建
+// 发布集合造成的错位（此时联查会静默产出只含新发布的目标，整包 PUT 覆盖删除
+// 后端旧目标）。
+// 空 targets 时 every 恒真——空集防御不在这里，而在「联查产物为空 + 已有选中
+// = 假清空」那条独立判据（见 commitTargetsGuards）。
+export function targetsUseCurrentPublishes(
+  targets: readonly { publish_id: number }[],
+  pubs: readonly { publish_id: number }[]
+): boolean {
+  const ids = new Set(pubs.map((p) => p.publish_id))
+  return targets.every((t) => ids.has(t.publish_id))
+}
+
+// 联查产物的两条错位防线，返回拦截原因供调用方决定是否提示（均静默跳过，
+// 不置 dirtyRef——终局绝不误报保存失败）。
+export type BuildBlockReason = "emptyWithSelection" | "stalePublishId"
+
+export function commitTargetsGuards(
+  next: readonly Target[],
+  selectedCount: number,
+  pubs: readonly { publish_id: number }[]
+): { ok: true } | { ok: false; reason: BuildBlockReason } {
+  // "联查产物为空 = 假清空"——every 校验对空集恒真，必须独立判
+  // 「selectedCount>0 却产出空集」。仅在发布全缺席的极限情况 selectedCount 可能滞后，
+  // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
+  if (next.length === 0 && selectedCount > 0) {
+    return { ok: false, reason: "emptyWithSelection" }
+  }
+  // 发布 id 漂移：回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
+  if (!targetsUseCurrentPublishes(next, pubs)) {
+    return { ok: false, reason: "stalePublishId" }
   }
   return { ok: true }
 }

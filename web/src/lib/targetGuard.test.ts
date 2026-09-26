@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest"
-import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave, guardCommit } from "./targetGuard"
+import {
+  selectedHasStalePublish,
+  cleanStaleSelected,
+  shouldDeferSave,
+  guardCommit,
+  buildTargets,
+  targetsUseCurrentPublishes,
+  commitTargetsGuards,
+} from "./targetGuard"
 import type { SchedulerState, ClassItem } from "../types"
 
 // targetGuard 三纯函数正式单测（把 guard 脚本断言固化，成为 vitest 测试面的第一批）。
@@ -94,5 +102,66 @@ describe("guardCommit", () => {
   it("hasSelected 由调用方按 selected 归约得出，本函数不自行取数", () => {
     // 空 selected + 有发布 → 无残留、无缺席，放行（对应用户尚未勾选任何课）
     expect(guardCommit(st([]), false, true, {}, pubs)).toEqual({ ok: true })
+  })
+})
+
+describe("buildTargets", () => {
+  it("按 [发布 × 已选] 联查产出目标，priority 取发布内下标", () => {
+    const sel = { 1: [cls(10, 1), cls(11, 1)], 2: [cls(20, 2)] }
+    expect(buildTargets([{ publish_id: 1 }, { publish_id: 2 }], sel)).toEqual([
+      { publish_id: 1, class_id: 10, course_name: "x", priority: 0 },
+      { publish_id: 1, class_id: 11, course_name: "x", priority: 1 },
+      { publish_id: 2, class_id: 20, course_name: "x", priority: 0 },
+    ])
+  })
+  it("发布顺序决定产出顺序（不按 selected 键序）", () => {
+    const sel = { 2: [cls(20, 2)], 1: [cls(10, 1)] }
+    expect(buildTargets([{ publish_id: 1 }, { publish_id: 2 }], sel).map((t) => t.publish_id)).toEqual([1, 2])
+  })
+  it("已选课程所属发布不在当前发布集 → 不产出（交由漂移守卫拦发布侧问题）", () => {
+    expect(buildTargets([{ publish_id: 1 }], { 999: [cls(99, 999)] })).toEqual([])
+  })
+  it("空发布集或空选中 → 空目标集", () => {
+    expect(buildTargets([], { 1: [cls(10, 1)] })).toEqual([])
+    expect(buildTargets([{ publish_id: 1 }], {})).toEqual([])
+  })
+})
+
+describe("targetsUseCurrentPublishes", () => {
+  it("全部目标属当前发布集 → 通过", () => {
+    expect(targetsUseCurrentPublishes([{ publish_id: 1 }], [{ publish_id: 1 }, { publish_id: 2 }])).toBe(true)
+  })
+  it("携带漂移 publish_id → 不通过", () => {
+    expect(targetsUseCurrentPublishes([{ publish_id: 1 }, { publish_id: 999 }], [{ publish_id: 1 }])).toBe(false)
+  })
+  it("空目标集恒真（空集防御不在此处，见 commitTargetsGuards）", () => {
+    expect(targetsUseCurrentPublishes([], [])).toBe(true)
+  })
+})
+
+describe("commitTargetsGuards", () => {
+  it("联查为空但有选中 = 假清空 → 拦截（绝不整包 PUT [] 覆盖删除后端目标）", () => {
+    expect(commitTargetsGuards([], 3, [{ publish_id: 1 }])).toEqual({
+      ok: false,
+      reason: "emptyWithSelection",
+    })
+  })
+  it("联查为空且无选中 = 用户显式清空 → 放行", () => {
+    expect(commitTargetsGuards([], 0, [{ publish_id: 1 }])).toEqual({ ok: true })
+  })
+  it("携带漂移 publish_id → 拦截", () => {
+    expect(commitTargetsGuards([{ publish_id: 999, class_id: 1, course_name: "x" }], 1, [{ publish_id: 1 }])).toEqual({
+      ok: false,
+      reason: "stalePublishId",
+    })
+  })
+  it("两因同时成立时取 emptyWithSelection（联查空是更根本的形态）", () => {
+    // 顺序契约：先判空集再判漂移——空集时 every 恒真，漂移判据无意义
+    expect(commitTargetsGuards([], 2, [])).toEqual({ ok: false, reason: "emptyWithSelection" })
+  })
+  it("正常路径放行", () => {
+    expect(commitTargetsGuards([{ publish_id: 1, class_id: 10, course_name: "x", priority: 0 }], 1, [{ publish_id: 1 }])).toEqual({
+      ok: true,
+    })
   })
 })

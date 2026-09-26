@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react"
 import { api } from "../api/client"
-import { guardCommit, shouldDeferSave } from "./targetGuard"
+import { buildTargets, commitTargetsGuards, guardCommit, shouldDeferSave } from "./targetGuard"
 import type { Publish, SchedulerState, Target } from "../types"
 
 // useTargetSave 目标自动保存深 hook（收权：Select.tsx 保存链逐行搬移，零语义变化）。
@@ -127,55 +127,19 @@ export function useTargetSave(opts: {
   }
 
 
-  // 目标集由 [发布 × 已选课程] 联查构建——两个消费点（flushTargets 与防抖 effect）
-  // 的唯一差异是 selected 的数据源：前者读消费时刻的 ref 镜像 latestSelected，
-  // 后者读渲染闭包快照 selected（async 闭包捕获悖论，
-  // 消费时刻必须读镜像）。故 selected 由调用方传入，函数内部绝不自行取数。
-  // sel 的结构类型逐字沿用 opts.selected（:18），不换用 types.ts 的 ClassItem
-  // ——两处写法漂移正是本函数要消灭的那类重复。
-  const buildTargets = (
-    pubs: readonly Publish[],
-    sel: Record<number, { id: number; publish_id: number; course_name: string }[]>
-  ): Target[] => {
-    const targets: Target[] = []
-    for (const p of pubs) {
-      const list = sel[p.publish_id] ?? []
-      list.forEach((cls, i) => {
-        targets.push({
-          publish_id: p.publish_id,
-          class_id: cls.id,
-          course_name: cls.course_name,
-          priority: i,
-        })
-      })
-    }
-    return targets
-  }
-
-  // 目标集由 [publishes × selected] 联查构建——任一为空即 targets=[] 是"假清空"。
-  // 校验目标 publish_id 全属当前发布集（防"渲染→回调"窗口内发布重建的错位假清空）。
-  const targetsUseCurrentPublishes = (targets: Target[], pubs: readonly Publish[]) => {
-    const ids = new Set(pubs.map((p) => p.publish_id))
-    // 空 targets 时 every 恒真——空集防御已由各消费点的
-    // "联查产物为空 + 已有选中 = 假清空"守卫覆盖（防抖回调 + flushTargets 双闸）。
-    return targets.every((t) => ids.has(t.publish_id))
-  }
 
 
-  // 守卫尾段共用执行（架构深化 D）：flush 与防抖两处的联查空/id 漂移守卫 +
-  // targetRef/savingRef/saveNow 收尾逐字重复（差异只在 selected 数据源：ref 镜像 vs
-  // 渲染闭包）。统一收进本函数，两处只传构建好的 targets 与校验数——
-  // 数据源差异保留在调用方（消费时刻读镜像纪律），执行骨架单一记忆点。
+  // 守卫尾段共用执行：flush 与防抖两处的联查空/id 漂移守卫逐字重复，现由纯函数
+  // commitTargetsGuards 承担（判据可单测）；本壳只保留与 React 状态耦合的收尾——
+  // targetRef/savingRef/dirtyRef/saveNow。两处消费点的 selected 数据源差异
+  // （ref 镜像 vs 渲染闭包）保留在调用方（消费时刻读镜像纪律）。
   const commitTargets = (next: Target[], selectedCount: number, pubs: readonly Publish[]): boolean => {
-    // "联查产物为空 = 假清空"——every 校验对空 targets 恒真，必须独立判
-    // "selectedCount>0 却产出空集"。仅在发布全缺席的极限情况 selectedCount 可能滞后，
-    // 为用户误伤守卫（仅多等一次防抖），安全方向；真实假清空绝不放过。
-    if (next.length === 0 && selectedCount > 0) {
-      return false // 联查为空：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    // 发布 id 漂移：回调窗口内发布重建会让 next 携带漂移 id，错位假清空绝不 PUT。
-    if (!targetsUseCurrentPublishes(next, pubs)) {
-      return false // 发布 id 漂移：错位假清空安全拦截；守卫不置 dirtyRef——终局绝不误报保存失败
+    // 拦截原因不外传：两条都属"安全拦截的静默跳过"，不置 dirtyRef（终局绝不误报
+    // 保存失败），等数据到达/发布恢复自愈。emptyWithSelection = 联查为空（假清空，
+    // selectedCount 滞后时属误伤守卫，多等一次防抖，安全方向）；stalePublishId =
+    // 发布 id 漂移（错位假清空）。
+    if (!commitTargetsGuards(next, selectedCount, pubs).ok) {
+      return false
     }
     targetRef.current = next
     if (savingRef.current) {

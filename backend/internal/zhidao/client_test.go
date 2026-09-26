@@ -506,6 +506,116 @@ func TestExitClassFailsOnCodeNotZero(t *testing.T) {
 	}
 }
 
+// TestSelectClass 验证报名接口：路径/请求体与真实 HAR 一致（form classId）。
+// 报名此前零测试覆盖，与退选共用同一份响应处理（classOp）后由本测试兜住
+// "报名侧未因抽取而漂移"。
+func TestSelectClass(t *testing.T) {
+	socketPreheat()
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(r.Body)
+		gotPath = r.URL.Path
+		gotBody = string(body)
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": true, "msg": "选课成功！"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	msg, err := c.SelectClass(61115)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "选课成功！" {
+		t.Fatalf("期望返回平台消息，实际 %q", msg)
+	}
+	if gotPath != "/electives/select/selectElectivesClass" {
+		t.Fatalf("路径错误: %s", gotPath)
+	}
+	if gotBody != "classId=61115" {
+		t.Fatalf("请求体错误: %s", gotBody)
+	}
+}
+
+// TestSelectClassFailsOnCodeNotZero 验证报名业务失败（code!=0 或 isOk=false）时报错，
+// 且错误消息带上动作名，便于管理员从日志区分是报名还是退选被拒。
+func TestSelectClassFailsOnCodeNotZero(t *testing.T) {
+	socketPreheat()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"code": 1, "isOk": false, "msg": "选课处理中，请勿重复操作！"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	_, err := c.SelectClass(61115)
+	if err == nil {
+		t.Fatal("期望业务失败时报错")
+	}
+	if !strings.Contains(err.Error(), "报名失败") {
+		t.Fatalf("错误消息应含动作名，实际 %q", err.Error())
+	}
+}
+
+// TestSelectClassIsOkFalseWithCodeZeroFails 报名侧的"isOk 假"判据覆盖——与退选侧
+// TestClassOpIsOkFalseWithCodeZeroFails 对称。平台双布尔契约任一为假即失败；抽取
+// 共享响应处理后此判据只有一处，两侧都必须被钉住（否则改坏报名侧无人发现）。
+// 变异验证：删掉 SelectClass 判据里的 !j.IsOk 后，本测试先红、修复后绿。
+func TestSelectClassIsOkFalseWithCodeZeroFails(t *testing.T) {
+	socketPreheat()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": false, "msg": "选课处理中，请勿重复操作！"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	if _, err := c.SelectClass(61115); err == nil {
+		t.Fatal("报名侧 code=0 但 isOk=false 必须判失败")
+	}
+}
+
+// TestClassOpIsOkFalseWithCodeZeroFails 锁定"code=0 但 isOk=false"也判失败——平台
+// 双布尔契约中任一为假即失败（真实 select.js 的 isOk/isFail 判型依据）。抽取共享
+// 响应处理后，此判据只有一处，此测试钉死它不被改松。
+func TestClassOpIsOkFalseWithCodeZeroFails(t *testing.T) {
+	socketPreheat()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"code": 0, "isOk": false, "msg": "已满员"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	if _, err := c.ExitClass(61115); err == nil {
+		t.Fatal("code=0 但 isOk=false 必须判失败")
+	}
+}
+
+// TestClassOpPropagatesUnauthorized 锁定 code=-1 走 doRequest 的 ErrUnauthorized 通道，
+// 不被当作普通业务失败吞掉——调度器据此触发自动重登（契约 31/37 身份防线的前提）。
+func TestClassOpPropagatesUnauthorized(t *testing.T) {
+	socketPreheat()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"code": -1, "msg": "您未登录,请刷新页面重新登录"})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	c.SetCredentials("acct", "pwd", "tok")
+	if _, err := c.SelectClass(61115); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("期望 ErrUnauthorized，实际 %v", err)
+	}
+	if _, err := c.ExitClass(61115); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("退选也应返回 ErrUnauthorized，实际 %v", err)
+	}
+}
+
 // TestParseElectives 用 HAR 真实响应片段验证解析
 func TestParseElectives(t *testing.T) {
 	// 精简的 findElectivesData 响应（字段与真实一致）

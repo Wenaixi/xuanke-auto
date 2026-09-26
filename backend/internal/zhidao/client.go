@@ -693,11 +693,15 @@ func parseElectives(body []byte) (*ElectivesData, error) {
 	return out, nil
 }
 
-// SelectClass 报名。返回平台消息（isOk 时含成功信息）。
-func (c *Client) SelectClass(classID int) (string, error) {
+// classOp 表单单键操作（报名/退选共用）：平台两个接口的请求体与响应判据逐字相同，
+// 唯一差异是路径与动作名。收在一处使两条平台契约各只有一份实现——"code!=0 或
+// !isOk 即失败"与"code=-1 走 doRequest 的 ErrUnauthorized 通道"改一处即两处生效，
+// 不再依赖两份手抄保持同步。action 进错误文案，管理员可从日志区分是报名还是
+// 退选被平台拒绝。
+func (c *Client) classOp(path string, classID int, action string) (string, error) {
 	form := url.Values{}
 	form.Set("classId", fmt.Sprintf("%d", classID))
-	body, err := c.doRequest(http.MethodPost, "/electives/select/selectElectivesClass",
+	body, err := c.doRequest(http.MethodPost, path,
 		[]byte(form.Encode()), "application/x-www-form-urlencoded")
 	if err != nil {
 		return "", err
@@ -711,34 +715,21 @@ func (c *Client) SelectClass(classID int) (string, error) {
 		return "", err
 	}
 	if j.Code != 0 || !j.IsOk {
-		return "", fmt.Errorf("报名失败: %s", j.Msg)
+		return "", fmt.Errorf("%s失败: %s", action, j.Msg)
 	}
 	return j.Msg, nil
 }
 
+// SelectClass 报名。返回平台消息（isOk 时含成功信息）。
+func (c *Client) SelectClass(classID int) (string, error) {
+	return c.classOp("/electives/select/selectElectivesClass", classID, "报名")
+}
+
 // ExitClass 退选。请求体与报名一致（form classId），路径为 exitElectivesClass。
 // doRequest 对 code=-1 已统一返回 ErrUnauthorized（服务端会话过期），
-// 本函数与 SelectClass 仅需把 code!=0 的其余业务错误原样回传，无需特判。
+// classOp 对其余 code!=0 业务错误原样回传，无需特判。
 func (c *Client) ExitClass(classID int) (string, error) {
-	form := url.Values{}
-	form.Set("classId", fmt.Sprintf("%d", classID))
-	body, err := c.doRequest(http.MethodPost, "/electives/select/exitElectivesClass",
-		[]byte(form.Encode()), "application/x-www-form-urlencoded")
-	if err != nil {
-		return "", err
-	}
-	var j struct {
-		Code int    `json:"code"`
-		IsOk bool   `json:"isOk"`
-		Msg  string `json:"msg"`
-	}
-	if err := json.Unmarshal(body, &j); err != nil {
-		return "", err
-	}
-	if j.Code != 0 || !j.IsOk {
-		return "", fmt.Errorf("退选失败: %s", j.Msg)
-	}
-	return j.Msg, nil
+	return c.classOp("/electives/select/exitElectivesClass", classID, "退选")
 }
 
 // CountEntry 实时人数（findElectivesStudentCount）。

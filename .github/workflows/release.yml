@@ -489,8 +489,11 @@ jobs:
           # （-P 注入属性在 defaultConfig 阶段取到 null，AGP 抛 Value is null，
           #  七轮 CI 实测未中；providers.gradleProperty 同样取 null）。
           GRADLE=app/build.gradle
-          sed -i "s|^\( *\)versionCode .*|\1versionCode $CODE|" "$GRADLE"
-          sed -i "s|^\( *\)versionName .*|\1versionName \"$NAME\"|" "$GRADLE"
+          # 只匹配真正的赋值行：versionCode 后接数字，versionName 后接引号。
+          # 排除注释行——注释里也含 "versionCode" 字样，宽松正则会把注释改坏
+          # 导致 gradle 文件语法损坏（CI 实证注释行被改成 versionCode 1）。
+          sed -i "s|^\( *\)versionCode [0-9].*|\1versionCode $CODE|" "$GRADLE"
+          sed -i "s|^\( *\)versionName \".*\"|\1versionName \"$NAME\"|" "$GRADLE"
           grep -E 'versionCode|versionName' "$GRADLE" | sed 's/^/  [gradle] /'
           # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；
           # gradle 8.5 已 apt 安装，AGP 8.5.2 与其匹配）

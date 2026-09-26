@@ -77,15 +77,15 @@ cp -L "$FOUND" "$ASSETS_DIR/$OUT"
 # AARCH64=0xB7(183) / x86_64=0x3E(62)。架构错配只在装机 dlopen 时才炸
 # （Go 侧 dlopen 报 EM_X86_64 instead of EM_AARCH64），必须在构建期拦住。
 case "$OUT" in
-  *android_arm64*) WANT_MACHINE="b7 3e 00 00" ;; # 0xB7 LE = b7 3e
-  *linux_amd64*)   WANT_MACHINE="3e 00 00 00" ;;
-  *linux_arm64*)   WANT_MACHINE="b7 3e 00 00" ;;
+  *android_arm64*|*linux_arm64*|*darwin_arm64*) WANT_MACHINE="b7 00" ;;
+  *linux_amd64*)   WANT_MACHINE="3e 00" ;;
   *) WANT_MACHINE="" ;;
 esac
 if [ -n "$WANT_MACHINE" ]; then
   GOT_MACHINE="$(od -An -tx1 -j 18 -N 2 "$ASSETS_DIR/$OUT" | tr -s ' ' | sed 's/^ //;s/ $//')"
   if [ "$GOT_MACHINE" != "$WANT_MACHINE" ]; then
     echo "[fetch-onnxruntime] 架构错配！期望 e_machine=$WANT_MACHINE 实际=$GOT_MACHINE（文件 $OUT）" >&2
+    echo "  hint: AARCH64=b700 x86_64=3e00；错配通常源于 aar 内多 ABI 取错目录" >&2
     exit 1
   fi
   echo "[fetch-onnxruntime] 架构校验通过: $OUT e_machine=$GOT_MACHINE"

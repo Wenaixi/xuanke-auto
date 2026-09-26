@@ -843,7 +843,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             Tab 到按钮；与取消按钮同逻辑，退选中（actionLoading）不响应防误关 */}
         {exitModalClass && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-150"
             role="dialog"
             aria-modal="true"
             aria-labelledby="exit-modal-title"

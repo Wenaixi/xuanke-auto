@@ -13,10 +13,12 @@ android {
     defaultConfig {
         applicationId "com.xuanke.android"
         minSdk 26
-        // 版本号由 CI 从 git tag 注入（-PversionName/x.y.z -PversionCode=N），
+        // 版本号由 CI 从 git tag 注入（-PversionName=0.2.8 -PversionCode=28），
         // 避免硬编码导致所有发布都显示同一个 0.2.0。本地构建无注入时回退默认值。
-        versionCode (project.hasProperty('versionCode') ? project.versionCode : 1)
-        versionName (project.hasProperty('versionName') ? project.versionName : '0.2.0')
+        // 用 findProperty 而非 hasProperty+project.versionX：后者在 Gradle 8.7
+        // 下 project.versionCode 解析为 null 导致 "Value is null" 构建失败。
+        versionCode (project.findProperty('versionCode') ?: 1)
+        versionName (project.findProperty('versionName') ?: '0.2.0')
         ndk {
             // 只发 arm64-v8a（覆盖 99% 真机；emulator x86 不发布，侧载仅 arm64）
             abiFilters 'arm64-v8a'

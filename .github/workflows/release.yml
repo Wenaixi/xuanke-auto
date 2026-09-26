@@ -473,9 +473,13 @@ jobs:
             CODE=1
           else
             NAME="${TAG#v}"
-            # 0.2.7 → 27（x*10+y），保证 versionCode 随版本递增
-            MAJOR="${NAME%%.*}"; REST="${NAME#*.}"; MINOR="${REST%%.*}"
-            CODE=$(( MAJOR * 100 + MINOR ))
+            # 三段全用：0.2.8 → 0*10000 + 2*100 + 8 = 208，保证 patch 递增
+            # 也映射为递增 versionCode（此前只取 major.minor，0.2.7/0.2.8 都是 2，
+            # 同 versionCode 无法覆盖安装）。
+            MAJ="${NAME%%.*}"; REST="${NAME#*.}"
+            MIN="${REST%%.*}"; PAT="${REST#*.}"
+            PAT="${PAT%%[^0-9]*}"   # 去掉 pre-release 后缀（-rc1 等）
+            CODE=$(( MAJ * 10000 + MIN * 100 + ${PAT:-0} ))
           fi
           echo "::notice::APK 版本注入: versionName=$NAME versionCode=$CODE"
           # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；

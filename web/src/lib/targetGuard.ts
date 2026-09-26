@@ -70,3 +70,43 @@ export function shouldDeferSave(
   if (echoed) return false
   return (stateData.courses?.length ?? 0) > 0 && hasSelected
 }
+
+// 消费时刻守卫编排：把 flushTargets 与防抖 effect 两条保存路径上逐字重复的
+// 三段前置守卫（回显未完成 → 发布缺席 → 旧 publish_id 残留）收成单一判据，
+// 使"判据顺序"与"拦截语义"各自只有一处定义。
+//
+// 顺序是契约而非实现细节：defer 优先于其余两因——/state 数据缺席时任何拦截都
+// 属"等自愈"，此时弹 stale 提示会把一次正常等待误报成"发布已更新"；而
+// missingPublishes 优先于 stalePublish，因为发布集合整体重建会同时造成两种形态
+// （集合为空 + 旧 key 残留），此时真正的主因是数据尚未到达。
+//
+// 返回拦截原因而非仅布尔：调用方据此决定是否提示用户。stalePublish 是唯一
+// 需要提示的一因（残留目标用户无法通过界面自行清除，须告知刷新解锁，契约 27）；
+// defer 与 missingPublishes 均为安全拦截的静默跳过（契约 35 显式清空不等于
+// 数据缺席，用户主动清空绝不判缺席）。
+export type CommitBlockReason = "defer" | "missingPublishes" | "stalePublish"
+export type CommitVerdict = { ok: true } | { ok: false; reason: CommitBlockReason }
+
+export function guardCommit(
+  stateData: SchedulerState | undefined,
+  hasSelected: boolean,
+  echoed: boolean,
+  selected: Record<number, unknown[]>,
+  publishes: readonly { publish_id: number }[]
+): CommitVerdict {
+  if (shouldDeferSave(stateData, hasSelected, echoed)) {
+    return { ok: false, reason: "defer" }
+  }
+  // "发布缺席 + 已有选中" = 数据缺席绝非用户清空意图，保留脏绝不 PUT [] 假清空；
+  // selectedCount 偏保守安全。无选中时属用户主动清空，放行。
+  if (publishes.length === 0 && hasSelected) {
+    return { ok: false, reason: "missingPublishes" }
+  }
+  // 发布集合整体重建后 selected 残留旧 publish_id 的非空条目——build() 只
+  // 遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
+  // 后端旧目标（数据丢失）。空数组键 = 用户主动清空，绝不判过期。
+  if (selectedHasStalePublish(selected, publishes)) {
+    return { ok: false, reason: "stalePublish" }
+  }
+  return { ok: true }
+}

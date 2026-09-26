@@ -6,7 +6,7 @@
 // shouldDeferSave：防抖保存"回显未完成"守卫（/state 首帧未到或首帧携带旧目标时，
 // 后端旧目标尚未经回显合并进 selected，整包 PUT 会覆盖删除——置脏跳过等自愈）。
 // 用法：node --import jiti/register scripts/target-guard-check.ts（退出码非 0 即断言失败）
-import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave } from "../src/lib/targetGuard"
+import { selectedHasStalePublish, cleanStaleSelected, shouldDeferSave, guardCommit } from "../src/lib/targetGuard"
 import type { SchedulerState } from "../src/types"
 
 let failed = 0
@@ -35,6 +35,12 @@ const pubs = [
 // 后端旧目标尚未经回显合并进 selected，此刻整包 PUT 会覆盖删除（"加一门"变"替换全部"）。
 // courses 空 = 确证后端无旧目标（回显已完成语义）→ 放行（返回 false）。
 const deferAssert = (name: string, got: boolean, want: boolean) => {
+  const ok = got === want
+  console.log(`${ok ? "  ✓" : "  ✗"} ${name}${ok ? "" : `（期望 ${want}，实际 ${got}）`}`)
+  if (!ok) failed++
+}
+// verdictAssert 断言守卫编排的判定结果（"ok" 或拦截原因字符串）
+const verdictAssert = (name: string, got: string, want: string) => {
   const ok = got === want
   console.log(`${ok ? "  ✓" : "  ✗"} ${name}${ok ? "" : `（期望 ${want}，实际 ${got}）`}`)
   if (!ok) failed++
@@ -124,6 +130,64 @@ cleanAssert(
   "无变更 → 返回原引用",
   cleanStaleSelected(original, currentIds) === original ? original : { __changed__: true },
   original
+)
+
+// guardCommit 断言——消费时刻守卫三段（回显未完成 → 发布缺席 → 旧 publish_id 残留）
+// 的编排单点。flushTargets 与防抖 effect 两处消费点共用，判据顺序即契约：
+// defer 优先（/state 数据缺席时任何拦截都属"等自愈"，此刻弹 stale 提示会把一次
+// 正常等待误报成"发布已更新"）；missingPublishes 优先于 stalePublish（发布集合
+// 重建会同时造成两种形态，真正主因是数据未到）。拦截原因须回报给调用方决定
+// 是否提示——只有 stalePublish 需要 toast，defer/missingPublishes 必须静默。
+const verdict = (
+  state: SchedulerState | undefined,
+  hasSelected: boolean,
+  echoed: boolean,
+  sel: Record<number, unknown[]>,
+  ps: readonly { publish_id: number }[]
+) => {
+  const v = guardCommit(state, hasSelected, echoed, sel, ps)
+  return v.ok ? "ok" : v.reason
+}
+const live = { 9: [{ id: 11 }] }
+const pubIds = [{ publish_id: 9 }]
+// 独立命名避开本文件上方 shouldDeferSave 断言段已有的 emptyState 常量
+const noOldTargets: SchedulerState = { courses: [] } as SchedulerState
+const hasOldTargets: SchedulerState = { courses: [{}] } as SchedulerState
+
+verdictAssert("正常路径放行", verdict(noOldTargets, true, true, live, pubIds), "ok")
+verdictAssert("回显未完成 → defer", verdict(hasOldTargets, true, false, live, pubIds), "defer")
+verdictAssert("首帧未到 → defer（无条件）", verdict(undefined, true, false, live, pubIds), "defer")
+verdictAssert(
+  "发布缺席 + 有选中 → missingPublishes",
+  verdict(noOldTargets, true, true, live, []),
+  "missingPublishes"
+)
+verdictAssert(
+  "发布缺席 + 显式全清空 → 放行（清空≠数据缺席）",
+  verdict(noOldTargets, false, true, {}, []),
+  "ok"
+)
+verdictAssert(
+  "残留旧 publish_id → stalePublish（唯一需提示的一因）",
+  verdict(noOldTargets, true, true, { 1: [{ id: 2 }] }, pubIds),
+  "stalePublish"
+)
+verdictAssert(
+  "旧 key 为空数组 → 放行（清空语义绝不复活）",
+  verdict(noOldTargets, true, true, { 1: [] }, pubIds),
+  "ok"
+)
+// 顺序契约：三种拦截同时成立时必须取 defer 首因
+verdictAssert(
+  "三因同时成立 → 取 defer 首因（不误报发布已更新）",
+  verdict(undefined, true, false, { 1: [{ id: 2 }] }, []),
+  "defer"
+)
+// 顺序契约：发布重建同时造成"集合为空 + 旧 key 残留"时，主因是数据未到
+verdictAssert(
+  "缺席 + 残留同时成立 → 取 missingPublishes（真主因是发布未到）",
+  verdict(noOldTargets, true, true, { 1: [{ id: 2 }] }, []),
+  "missingPublishes"
 )
 
 if (failed > 0) {

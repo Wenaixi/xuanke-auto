@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react"
 import { api } from "../api/client"
-import { selectedHasStalePublish, shouldDeferSave } from "./targetGuard"
+import { guardCommit, shouldDeferSave } from "./targetGuard"
 import type { Publish, SchedulerState, Target } from "../types"
 
 // useTargetSave 目标自动保存深 hook（C3-2 收权：Select.tsx 保存链逐行搬移，零语义变化）。
@@ -192,31 +192,20 @@ export function useTargetSave(opts: {
     const latestRev = revRef.current
     const latestSelectedCount = Object.values(latestSelected).reduce((n, arr) => n + arr.length, 0)
     if (latestRev === 0) return
-    // 回显未完成守卫：/state 首帧未到达（stateData===undefined）或首帧携带旧目标
-    // （courses 非空）时，后端旧目标尚未经回显 effect 合并进 selected，此刻 flush 拿
-    // "只含用户新改动"的 selected 整包 PUT 会把后端旧目标覆盖删除（"加一门"变
-    // "替换全部"）。handleBack 的 5s 等待只保证"等待期间合并完成"——/state 首帧持续
-    // 失败超时后，守卫在这里兜住：置脏跳过、不 PUT，脏块保留在内存 selected（守卫不置
-    // dirtyRef——终局绝不误报保存失败），下次进入/刷新/回显完成后再落库
-    // （安全方向：绝不静默丢改动）。判据为纯数据（shouldDeferSave 不依赖 echoedRef）：
-    // /state 数据到达触发防抖 effect 重跑自愈，唯一解锁不求刷新。
-    // 第三参数 echoedRef.current——已回显完成的稳态（courses 永驻非空）下
-    // 编辑不闷死（selected 已含后端旧目标，整包 PUT 与后端一致），未回显仍推迟。
-    if (shouldDeferSave(stateDataRef.current, latestSelectedCount > 0, echoedRef.current)) {
-      return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
-    }
-    // "发布缺席 + 已有选中"= 数据缺席绝非用户清空意图，保留脏绝不 PUT [] 假清空；
-    // selectedCount 偏保守安全。
-    if (publishesRef.current.length === 0 && latestSelectedCount > 0) {
-      return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-    }
-    // 发布集合整体重建后 selected 仍残留旧 publish_id 的非空条目——build()
-    // 只遍历当前发布集合会静默丢弃它们，产出"仅含新发布课程"的整包 PUT 覆盖删除
-    // 后端已保存的旧目标（数据丢失）。前置守卫判有过期条目即置脏跳过；空数组键 =
-    // 用户主动清空（清空语义绝不复活），不判过期。命中给明确提示（发布重建路径已在
-    // 回显 effect 随建随清为首选出路，此处 toast 兜底"清理未覆盖到的旧残留"）。
-    if (selectedHasStalePublish(latestSelected, publishesRef.current)) {
-      if (!unmountedRef.current) {
+    // 消费时刻守卫三段（回显未完成 → 发布缺席 → 旧 publish_id 残留）编排收口到
+    // guardCommit：判据与顺序各只有一处定义，本处只负责"拦截时要不要提示"。
+    //   defer / missingPublishes = 安全拦截的静默跳过（守卫不置 dirtyRef——终局绝不
+    //   误报保存失败），等数据到达/发布恢复自愈；stalePublish 是唯一需要提示的一因
+    //   （残留目标用户无法通过界面自行清除，须告知刷新解锁，契约 27）。
+    const verdict = guardCommit(
+      stateDataRef.current,
+      latestSelectedCount > 0,
+      echoedRef.current,
+      latestSelected,
+      publishesRef.current
+    )
+    if (!verdict.ok) {
+      if (verdict.reason === "stalePublish" && !unmountedRef.current) {
         toast({
           title: "发布已更新",
           description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
@@ -306,23 +295,20 @@ export function useTargetSave(opts: {
     // 用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
     resetRetry()
     const timer = setTimeout(async () => {
-      // 回显未完成守卫：判据为纯数据（shouldDeferSave 不依赖 echoedRef）——
-      // /state 数据到达触发 effect 重跑自愈，唯一解锁不求整页刷新。
-      // 第三参数 echoedRef.current——已回显完成的稳态下防抖保存不闷死。
+      // 消费时刻守卫三段与 flushTargets 同源（guardCommit）——判据与顺序单点定义。
+      // 守卫读 ref 镜像 selectedRef.current（timer 是异步回调，渲染闭包的 selected
+      // 可能是旧快照），而下方 buildTargets 仍用渲染闭包 selected：契约 12 的数据源
+      // 纪律不变，守卫与构建各自保持原有取数方式。
       const selectedCount = Object.values(selectedRef.current).reduce((n, arr) => n + arr.length, 0)
-      if (shouldDeferSave(stateDataRef.current, selectedCount > 0, echoedRef.current)) {
-        return // 回显未完成：置脏跳过不 PUT，等 /state 到达自愈（守卫不置 dirtyRef——终局绝不误报保存失败）
-      }
-      // "发布缺席 + 已有选中"= 数据缺席绝非用户意图，跳过本次保存保留脏
-      //（等发布恢复/下次改动再落库）；selectedCount 只可能偏保守，绝不放过真实假清空。
-      if (publishesRef.current.length === 0 && selectedCount > 0) {
-        return // 发布缺席：安全拦截绝不假清空覆盖；守卫不置 dirtyRef——终局绝不误报保存失败
-      }
-      // 防抖消费时刻同款前置守卫——发布集合整体重建后 selected 残留旧 publish_id
-      // 非空条目时，build() 只产出新发布课程，整包 PUT 覆盖删除后端已保存的旧目标。
-      // 空数组键 = 用户主动清空（清空语义绝不复活），不判过期。
-      if (selectedHasStalePublish(selectedRef.current, publishesRef.current)) {
-        if (!unmountedRef.current) {
+      const verdict = guardCommit(
+        stateDataRef.current,
+        selectedCount > 0,
+        echoedRef.current,
+        selectedRef.current,
+        publishesRef.current
+      )
+      if (!verdict.ok) {
+        if (verdict.reason === "stalePublish" && !unmountedRef.current) {
           toast({
             title: "发布已更新",
             description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",

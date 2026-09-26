@@ -13,15 +13,14 @@ android {
     defaultConfig {
         applicationId "com.xuanke.android"
         minSdk 26
-        // 版本号由 CI 从 git tag 注入。**必须用 providers.gradleProperty**：
-        // gradle 8.7 + AGP 8.5.2 下 project.findProperty('xxx') 在 defaultConfig
-        // 求值阶段返回 null，AGP 抛 IllegalArgumentException: Value is null 且
-        // 报的行号正是下一行（--stacktrace 实测）。providers 是 Gradle 官方注入
-        // 通道，配置阶段即可读。属性名带 apk 前缀，避开 Project 内置 versionX 遮蔽。
-        def apkVerCode = providers.gradleProperty('apkVersionCode').getOrElse('1')
-        def apkVerName = providers.gradleProperty('apkVersionName').getOrElse('0.2.0')
-        versionCode apkVerCode.toString().toInteger()
-        versionName apkVerName.toString()
+        // 版本号由 CI 在构建前用 sed 直接改写下面两行（见 release.yml 的
+        // CI-VERSION-ANCHOR 段），不走 Gradle 属性注入：gradle 8.7 + AGP 8.5.2 下
+        // -P 注入属性在 defaultConfig 求值阶段取到 null（AGP 抛
+        // IllegalArgumentException: Value is null，报的行号正是紧邻的 versionCode 行，
+        // --stacktrace 实测七轮未中），providers.gradleProperty 同样取到 null。
+        // sed 改写绕开 Gradle DSL 求值，是当前工具链下唯一可靠路径。
+        versionCode 1
+        versionName "0.2.0"
         ndk {
             // 只发 arm64-v8a（覆盖 99% 真机；emulator x86 不发布，侧载仅 arm64）
             abiFilters 'arm64-v8a'

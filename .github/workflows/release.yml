@@ -485,9 +485,16 @@ jobs:
             CODE=1
           fi
           echo "::notice::APK 版本注入: versionName=$NAME versionCode=$CODE"
+          # 版本号用 sed 直接改写 app/build.gradle 的两行，绕开 Gradle DSL 求值
+          # （-P 注入属性在 defaultConfig 阶段取到 null，AGP 抛 Value is null，
+          #  七轮 CI 实测未中；providers.gradleProperty 同样取 null）。
+          GRADLE=app/build.gradle
+          sed -i "s|^\( *\)versionCode .*|\1versionCode $CODE|" "$GRADLE"
+          sed -i "s|^\( *\)versionName .*|\1versionName \"$NAME\"|" "$GRADLE"
+          grep -E 'versionCode|versionName' "$GRADLE" | sed 's/^/  [gradle] /'
           # 系统 gradle 直接构建（不生成 gradlew——wrapper 脚本不提交；
           # gradle 8.5 已 apt 安装，AGP 8.5.2 与其匹配）
-          gradle assembleRelease --no-daemon --stacktrace -PapkVersionName="$NAME" -PapkVersionCode="$CODE"
+          gradle assembleRelease --no-daemon
           # 构建后核对 APK 内实际版本——注入失效要在这里暴露，不能等装机才发现
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
           APK=app/build/outputs/apk/release/app-release.apk

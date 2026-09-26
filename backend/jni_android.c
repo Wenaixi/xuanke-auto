@@ -15,7 +15,6 @@
 //go:build android
 
 #include <jni.h>
-#include <android/log.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,26 +37,23 @@ static void stop(JNIEnv *env, jclass clazz) {
     XuankeStop();
 }
 
-
 // Android logcat 桥：Go c-shared 的 stderr 不接 logcat（log.Printf 全部丢失，
-// 引擎启动失败时进程秒退且日志无痕，无从排查）。暴露一个给 Go 侧调用的写入
-// 入口，把每行日志经 __android_log_print 打进 logcat（tag 固定 XuanKe，
-// `adb logcat -s XuanKe` 即可过滤）。__android_log_print 由 bionic libc 提供，
-// 无需额外链接。
-static int logcat_fd = -2; // -2=未初始化，-1=打开失败，>=0=已打开
+// 引擎启动失败时进程秒退且日志无痕，无从排查）。把每行日志经
+// __android_log_print 打进 logcat（tag 固定 XuanKe，`adb logcat -s XuanKe`）。
+//
+// **不 #include <android/log.h>**：Go 的 cgo 编译 .c 时 include 路径里没有
+// NDK sysroot，<android/log.h> 找不到（报 undeclared function/__android_log_open
+// 与未定义标识符 false）。__android_log_print 由 bionic libc 提供、签名十年
+// 稳定（prio 为 int 常量，格式串走 printf 规则），故在此自声明原型。
+// ANDROID_LOG_INFO = 4（android_LogPriority 枚举值，见 <android/log.h>）。
+enum { XUANKE_LOG_INFO = 4 };
+extern int __android_log_print(int prio, const char *tag, const char *fmt, ...);
 
 void XuankeLogToAndroid(const char *msg) {
-    if (logcat_fd == -2) {
-        logcat_fd = __android_log_open("XuanKe",
-                                       ANDROID_LOG_INFO,
-                                       1024, /* buffer size */
-                                       false /* for committer */);
-    }
-    if (logcat_fd < 0) {
-        return; // logcat 不可用：静默降级，绝不让日志失败影响引擎
-    }
-    __android_log_write(logcat_fd, msg);
+    // %s 传原串：Go 侧日志含 % 字符时不会被当格式串误解析
+    __android_log_print(XUANKE_LOG_INFO, "XuanKe", "%s", msg);
 }
+
 // 方法表：Java native 方法 → C 桩 → Go 导出
 static const JNINativeMethod methods[] = {
     {"setDataDir", "(Ljava/lang/String;)V", (void *)setDataDir},

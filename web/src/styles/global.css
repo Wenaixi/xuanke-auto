@@ -137,30 +137,29 @@ body {
   background-color: var(--surface-soft);
 }
 
-/* 面板（原"磨砂玻璃"）：实色深灰面板。
- * 不再用 backdrop-filter——Android WebView 对 backdrop-filter 捕获透明背景
- * 时渲染成黑块（react-native-webview#3469 / JDK-8268397 同证：blur 合成器把
- * 透明当黑处理），页面背景透明时大面积玻璃面板整体发黑；桌面 Chrome 合成器
- * 正确模糊水墨背景故浏览器正常。改实色后：Dashboard 黑块消失、与 Select
- * 主体实色卡片风格统一、桌面观感从磨砂玻璃变为实色面板（设计本意的
- * "透出水墨"在 WebView 不可实现，退化为与其余 UI 一致的实色）。 */
+/* 面板（磨砂玻璃）：半透明白底，保留设计质感。
+ * backdrop-filter 已移除：Android WebView 对它捕获透明背景时渲染成黑块
+ * （react-native-webview#3469 / JDK-8268397 同证），页面背景透明时大面积
+ * 玻璃面板整体发黑。移除后半透明底 rgba(255,255,255,0.06) 直接叠加在
+ * 画布背景上 = 6% 白 + 94% 背景，面板可读且不黑；桌面保留半透明观感、
+ * 仅失去模糊，两平台一致。 */
 .glass {
-  background-color: #16161a;
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 /* 更实的面板：底部固定栏等需要更强可读性的区域 */
 .glass-strong {
-  background-color: #1c1c20;
+  background-color: rgba(18, 18, 22, 0.72);
 }
 
-/* 弹窗遮罩：足够暗保证弹窗内容可读（遮罩无需模糊，实色黑即可） */
+/* 弹窗遮罩：足够暗保证弹窗内容可读 */
 .glass-overlay {
   background-color: rgba(0, 0, 0, 0.6);
 }
 
-/* 输入框 / 下拉表面：暗色实底，与面板同源 */
+/* 输入框 / 下拉表面：暗色半透明玻璃 */
 .glass-input {
-  background-color: #141417;
+  background-color: rgba(0, 0, 0, 0.35);
 }
 
 /* 基础交互重置 */

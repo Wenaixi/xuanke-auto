@@ -2,6 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.xuanke.android">
 
+    <!-- 网络权限（必需，缺了引擎连本机 127.0.0.1:3091 都起不来）：
+         ① Go 引擎 listen tcp :3091 —— Android 无 INTERNET 权限时 socket 创建
+            直接返回 EPERM，日志实证「服务启动失败: listen tcp :3091: socket:
+            operation not permitted」，runServer 走 log.Fatal → 进程秒退崩溃循环；
+         ② WebView 加载 http://127.0.0.1:3091 前端（同受该权限管辖）；
+         ③ 访问教务平台 https://www.zhidao.fj.cn 与验证码识别接口。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 网络状态查询（引擎预热/探测阶段判断连通性，缺失不影响启动） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- 前台服务保活：抢课引擎随进程常驻（后台也能提交） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+：前台服务声明 dataSync 类型需对应 type 权限（漏了 startForeground 直接 SecurityException） -->

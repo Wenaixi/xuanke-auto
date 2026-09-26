@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+/* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，
+   恒定压过 @layer utilities 内的 Tailwind 工具类（Card 自带 bg-[var(--surface)]
+   被 .glass 抢走底色，Dashboard 卡面退化为 6% 半透明——黑块根源之一）。
+   放进 components 层后与 utilities 同级裁决，Card 底色恢复、玻璃只做点缀。 */
+@layer components {
 :root {
   /* 瑞士国际主义与高级黑白极简艺术调色板 (Monochrome Fine Art) */
   --bg: #000000;
@@ -212,3 +217,5 @@ a {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.24);
 }
+}
+

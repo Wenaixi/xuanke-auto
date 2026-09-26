@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS success (
   PRIMARY KEY (account, class_id)
 );
 
--- 已手动退选课程（B9-02：重启后自动引擎仍绝不抢回；重设目标时由调度器清行）
+-- 已手动退选课程（重启后自动引擎仍绝不抢回；重设目标时由调度器清行）
 CREATE TABLE IF NOT EXISTS refused (
   account TEXT NOT NULL,
   class_id INTEGER NOT NULL,

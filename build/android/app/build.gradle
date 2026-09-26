@@ -15,13 +15,13 @@ android {
         minSdk 26
         // 版本号由 CI 从 git tag 注入（-PapkVersionName=0.2.9 -PapkVersionCode=209），
         // 避免硬编码导致所有发布都显示同一个 0.2.0。
-        //
-        // **属性名必须带 apk 前缀**：Gradle 的 Project 内置了 version/versionName/
-        // versionCode 等只读属性（AGP 场景下解析为 null），用 -PversionName 注入
-        // 会被内置空值遮蔽，findProperty('versionName') 同样拿到 null，
-        // 表现为构建期 "A problem occurred evaluating project ':app'. Value is null"。
-        versionCode (project.findProperty('apkVersionCode') ?: 1)
-        versionName (project.findProperty('apkVersionName') ?: '0.2.0')
+        // 属性名带 apk 前缀：Gradle Project 内置 version/versionName/versionCode
+        // 等只读属性，用 -PversionName 注入会被遮蔽（findProperty 拿到 null）。
+        // 注意类型：versionCode 期望 int，findProperty 返回的字符串需显式转；
+        // 直接把 ?: 的结果交给 versionCode 时 Gradle 8.7 求值为 null
+        // （line 23 "Value is null"，--stacktrace 定位）。用 String 后再 toInteger。
+        versionCode (project.findProperty('apkVersionCode') ?: '1').toString().toInteger()
+        versionName (project.findProperty('apkVersionName') ?: '0.2.0').toString()
         ndk {
             // 只发 arm64-v8a（覆盖 99% 真机；emulator x86 不发布，侧载仅 arm64）
             abiFilters 'arm64-v8a'

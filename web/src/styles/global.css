@@ -2,6 +2,12 @@
 @plugin "tailwindcss-animate";
 
 :root {
+  /* 声明站点本身即深色主题（而非"未指定"）。缺这一行时 Android WebView 的
+     算法变暗（algorithmic darkening，Android 13+ 默认开）会把本就纯黑的
+     页面再反色加深一层——表现为"App 里 UI 特别黑、浏览器打开却正常"。
+     显式声明后浏览器/WebView 知道无需变暗，滚动条、表单控件等原生 UI
+     也自动取深色，与本项目纯黑白极简设计一致。 */
+  color-scheme: dark;
   /* 瑞士国际主义与高级黑白极简艺术调色板 (Monochrome Fine Art) */
   --bg: #000000;
   --surface: #0c0c0e;

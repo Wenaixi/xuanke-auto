@@ -60,6 +60,16 @@ public class MainActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        // 关闭 WebView 强制暗化：Android 13+ 的算法变暗会把本就纯黑的页面
+        // 再反色加深一层（App 里 UI 特别黑、浏览器打开正常）。页面侧已在
+        // global.css 声明 color-scheme: dark，此处显式关闭作为双保险。
+        // setForceDark(FORCE_DARK_OFF) 在 API 29+ 已废弃（算法变暗由
+        // isAlgorithmicDarkeningAllowed 控制），按版本分别设置。
+        if (Build.VERSION.SDK_INT >= 33) {
+            web.setAlgorithmicDarkeningAllowed(false);
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            s.setForceDark(WebSettings.FORCE_DARK_OFF);
+        }
         // 仅加载本机引擎，禁止 WebView 跳转外部（避免被劫持到任意站点）
         web.setWebViewClient(new WebViewClient() {
             @Override

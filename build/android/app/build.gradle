@@ -13,9 +13,10 @@ android {
     defaultConfig {
         applicationId "com.xuanke.android"
         minSdk 26
-        targetSdk 35
-        versionCode 1
-        versionName "0.2.0"
+        // 版本号由 CI 从 git tag 注入（-PversionName/x.y.z -PversionCode=N），
+        // 避免硬编码导致所有发布都显示同一个 0.2.0。本地构建无注入时回退默认值。
+        versionCode (project.hasProperty('versionCode') ? project.versionCode : 1)
+        versionName (project.hasProperty('versionName') ? project.versionName : '0.2.0')
         ndk {
             // 只发 arm64-v8a（覆盖 99% 真机；emulator x86 不发布，侧载仅 arm64）
             abiFilters 'arm64-v8a'

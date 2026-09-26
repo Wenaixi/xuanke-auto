@@ -1666,33 +1666,45 @@ func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Durat
 	s.rateLimited[acct][classID] = s.nowAlignedLocked().Add(d)
 }
 
-// classFullInSnapshot 快照人数确认满员（需持锁）。优先匹配该账号专属快照，无快照时回退全局快照。
-// 满员判定用快照级字段 max_count/selected_count（findElectivesData 课程级，真实 select.js 实证，
-// 表列定义 max_count/selected_count/audited_count 同屏）——这是调度器"真满员退避"的实证主路径；
-// 实时接口 findElectivesStudentCount 未实证 maxCount（CountEntry 注释），实时复核实际不可判满员。
+// classFullInSnapshot 快照人数确认满员（需持锁）。查找收 findClassInSnapshot
+// 回退 seam（专属帧优先、全校帧兜底）；课程不在快照中（nil）视为不满员放行。
+// 满员判定用快照级字段 max_count/selected_count（findElectivesData 课程级，真实
+// select.js 实证，表列定义 max_count/selected_count/audited_count 同屏）——这是
+// 调度器"真满员退避"的实证主路径；实时接口 findElectivesStudentCount 未实证
+// maxCount（CountEntry 注释），实时复核实际不可判满员。
 func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
+	c := s.findClassInSnapshot(acct, classID)
+	return c != nil && c.ClassFull
+}
+
+// findClassInSnapshot 按 classID 在课程快照中查找课程（需持锁）。
+// 回退链单一实现：专属帧 acctData[acct] 优先，缺失回退全校帧 lastData；
+// 两帧都无 / 快照为 nil / 课程不存在返回 nil——找不到的决策（放行/保守保持/
+// 判不满）由调用方各自表达，本函数只承载"怎么找到这门课"这步导航。
+// 快照形状变更（字段/层级）只改本函数一处，与手册"满员判据单一记忆点"同族。
+func (s *Scheduler) findClassInSnapshot(acct string, classID int) *zhidao.Class {
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			for _, p := range d.Publishes {
 				for _, c := range p.Classes {
 					if c.ID == classID {
-						return c.ClassFull
+						return &c
 					}
 				}
 			}
 		}
 	}
 	if s.lastData == nil {
-		return false
+		return nil
 	}
 	for _, p := range s.lastData.Publishes {
 		for _, c := range p.Classes {
 			if c.ID == classID {
-				return c.ClassFull
+				return &c
 			}
 		}
 	}
-	return false
+	return nil
 }
 
 // classFullRealtime 实时人数复核（锁外调用，禁止持锁时发起网络请求）。
@@ -1730,32 +1742,21 @@ func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	if !s.fullHas(acct, classID) {
 		return
 	}
-	data := s.acctData[acct]
-	if data == nil {
-		data = s.lastData
-	}
-	if data == nil || len(data.Publishes) == 0 {
-		// 无快照或快照为空（窗口关闭特征）：无法确认余量，保持 full 不解封
+	// 查找收 findClassInSnapshot 回退 seam。课程不在快照中（nil，含空快照——
+	// 窗口关闭后平台清空课程列表）一律保持 full 不解封，否则窗口关闭后 spawnChain
+	// 每个 tick 都因 full 被解封重新打报名接口（窗口关闭防轰炸残留）。
+	c := s.findClassInSnapshot(acct, classID)
+	if c == nil || c.ClassFull {
+		// 无快照/查不到（无法确认余量）或明确仍满员：保持 full 不解封
 		return
 	}
-	for _, p := range data.Publishes {
-		for _, c := range p.Classes {
-			if c.ID == classID {
-				// 明确有余量才解封（!ClassFull）；课程不在快照中（未知）也保持 full
-				if c.ClassFull {
-					return
-				}
-				delete(s.full[acct], classID)
-				idx := s.statusIndexLocked(acct, classID)
-				if idx >= 0 {
-					s.state.Courses[idx].Status = "pending"
-					s.state.Courses[idx].Result = ""
-				}
-				return
-			}
-		}
+	// 明确有余量才解封（!ClassFull）
+	delete(s.full[acct], classID)
+	idx := s.statusIndexLocked(acct, classID)
+	if idx >= 0 {
+		s.state.Courses[idx].Status = "pending"
+		s.state.Courses[idx].Result = ""
 	}
-	// 课程不在快照中：无法判断，保持 full（保守不解封）
 }
 
 func (s *Scheduler) fullHas(acct string, classID int) bool {

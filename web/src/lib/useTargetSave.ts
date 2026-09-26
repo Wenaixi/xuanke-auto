@@ -149,6 +149,35 @@ export function useTargetSave(opts: {
     void saveNow()
     return true
   }
+
+  // 守卫消费 + 提示单点：flush 与防抖两处逐字重复「调 guardCommit → 按 reason 决定
+  // 是否 toast → 判 unmounted」，收进本闭包。判据与顺序仍由 guardCommit 单点定义
+  // （本壳只消费 verdict）；数据源差异（传 selectedRef 镜像还是渲染闭包 selected）
+  // 保留在调用方——消费时刻读镜像纪律是契约 50/51，不在此统一。
+  const runCommitGuard = (
+    currentSelected: Record<number, { id: number; publish_id: number; course_name: string }[]>,
+    currentSelectedCount: number
+  ): boolean => {
+    const verdict = guardCommit(
+      stateDataRef.current,
+      currentSelectedCount > 0,
+      echoedRef.current,
+      currentSelected,
+      publishesRef.current
+    )
+    if (verdict.ok) return true
+    // stalePublish 是唯一需要提示的一因（残留目标用户无法通过界面自行清除，
+    // 须告知刷新解锁）；defer/missingPublishes 均静默跳过（安全拦截，不置 dirtyRef，
+    // 终局绝不误报保存失败）。卸载后不轰炸。
+    if (verdict.reason === "stalePublish" && !unmountedRef.current) {
+      toast({
+        title: "发布已更新",
+        description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
+        variant: "warning",
+      })
+    }
+    return false
+  }
   const flushTargets = () => {
     // 消费时刻读 ref：handleBack 等待循环内用户新改动后，渲染闭包的 rev/selected
     // 是旧快照，必须取 ref 里的最新值——否则等待窗口内新增的课程被忽略。
@@ -161,23 +190,7 @@ export function useTargetSave(opts: {
     //   defer / missingPublishes = 安全拦截的静默跳过（守卫不置 dirtyRef——终局绝不
     //   误报保存失败），等数据到达/发布恢复自愈；stalePublish 是唯一需要提示的一因
     //   （残留目标用户无法通过界面自行清除，须告知刷新解锁）。
-    const verdict = guardCommit(
-      stateDataRef.current,
-      latestSelectedCount > 0,
-      echoedRef.current,
-      latestSelected,
-      publishesRef.current
-    )
-    if (!verdict.ok) {
-      if (verdict.reason === "stalePublish" && !unmountedRef.current) {
-        toast({
-          title: "发布已更新",
-          description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
-          variant: "warning",
-        })
-      }
-      return
-    }
+    if (!runCommitGuard(latestSelected, latestSelectedCount)) return
     const targets = buildTargets(publishesRef.current, latestSelected)
     // 联查空/id 漂移守卫 + targetRef/savingRef/saveNow 收尾（架构深化 D：与防抖共用）
     commitTargets(targets, latestSelectedCount, publishesRef.current)
@@ -259,27 +272,11 @@ export function useTargetSave(opts: {
     // 用户新改动接管——中断失败重发退避，下一轮保存由正常防抖路径驱动
     resetRetry()
     const timer = setTimeout(async () => {
-      // 消费时刻守卫三段与 flushTargets 同源（guardCommit）——判据与顺序单点定义。
       // 守卫读 ref 镜像 selectedRef.current（timer 是异步回调，渲染闭包的 selected
-      // 可能是旧快照），而下方 buildTargets 仍用渲染闭包 selected：数据源
+      // 可能是旧快照）——runCommitGuard 内部统一消费守卫；下方 buildTargets 仍用
+      // 渲染闭包 selected：数据源差异刻意保留（契约 50，消费时刻读镜像纪律）。
       const selectedCount = Object.values(selectedRef.current).reduce((n, arr) => n + arr.length, 0)
-      const verdict = guardCommit(
-        stateDataRef.current,
-        selectedCount > 0,
-        echoedRef.current,
-        selectedRef.current,
-        publishesRef.current
-      )
-      if (!verdict.ok) {
-        if (verdict.reason === "stalePublish" && !unmountedRef.current) {
-          toast({
-            title: "发布已更新",
-            description: "旧批次目标已失效，已停止保存。请刷新页面重新选择",
-            variant: "warning",
-          })
-        }
-        return
-      }
+      if (!runCommitGuard(selectedRef.current, selectedCount)) return
       const next = buildTargets(publishesRef.current, selected)
       // 联查空/id 漂移守卫 + targetRef/savingRef/saveNow 收尾（架构深化 D：与 flush 共用）
       commitTargets(next, selectedCount, publishesRef.current)

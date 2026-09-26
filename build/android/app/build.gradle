@@ -30,7 +30,12 @@ android {
     // signingConfigs.debug 会得到 null，报 "Value is null"（且不会提示是哪一行）。
     signingConfigs {
         debug {
-            storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+            // keystore 路径可由 CI 用 -PdebugKeystore 注入（CI runner 上
+            // ~/.android/debug.keystore 不存在，需先 keytool 生成）；
+            // 未注入时回退默认路径（本地 Android Studio 会自动生成）。
+            def ksPath = project.findProperty('debugKeystore')
+                    ?: "${System.properties['user.home']}/.android/debug.keystore"
+            storeFile file(ksPath)
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'

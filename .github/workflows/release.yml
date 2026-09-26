@@ -485,6 +485,19 @@ jobs:
             CODE=1
           fi
           echo "::notice::APK 版本注入: versionName=$NAME versionCode=$CODE"
+          # 侧载 debug 签名：CI runner 上 ~/.android/debug.keystore 不存在
+          # （AGP 不会像本地那样自动生成），validateSigningRelease 直接失败。
+          # 这里显式用 keytool 生成标准 debug keystore（口令/别名均为
+          # android，与 Android SDK 默认一致），保证任何 runner 都能出包。
+          KS="$HOME/.android/debug.keystore"
+          if [ ! -f "$KS" ]; then
+            mkdir -p "$(dirname "$KS")"
+            keytool -genkeypair -v -keystore "$KS" -storepass android \
+              -alias androiddebugkey -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA -keysize 2048 -validity 10000
+            echo "::notice::已生成 debug keystore: $KS"
+          fi
           # 版本号用 sed 直接改写 app/build.gradle 的两行，绕开 Gradle DSL 求值
           # （-P 注入属性在 defaultConfig 阶段取到 null，AGP 抛 Value is null，
           #  七轮 CI 实测未中；providers.gradleProperty 同样取 null）。

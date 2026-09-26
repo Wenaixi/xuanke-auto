@@ -427,10 +427,28 @@ jobs:
           # jniLibs 目录提前建好（go build -o 不自动建父目录）
           mkdir -p ../build/android/app/src/main/jniLibs/arm64-v8a
           # c-shared：Go 导出 + JNI_OnLoad 桥（jni_android.c）同编进 libxuanke.so
+          #
+          # 导出符号铁律（踩坑固化）：c-shared 的 //export 符号要进 .dynsym 必须由
+          # 外部 C 链接器（Android 用 NDK lld）写出。此前 -ldflags="-w -s" 里的
+          # -s 剥离了符号表，lld 的 -rdynamic（Go 对 c-shared 注入）因此拿不到任何
+          # 符号，产出的 .so 里 XuankeSetDataDir/XuankeStart/XuankeStop 全是 UNDEF
+          # 引用 —— dlopen 直接失败：UnsatisfiedLinkError: cannot locate symbol
+          # "XuankeSetDataDir"（点击图标即闪退）。故：只留 -w（去 DWARF，不动符号），
+          # 并显式 -Wl,--export-dynamic 让 lld 强制导出全局符号。
           CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
             CC="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             go build -buildmode=c-shared -tags production,android \
-            -ldflags="-w -s" -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
+            -ldflags="-w" -extldflags="-Wl,--export-dynamic" \
+            -o ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so .
+          # 导出符号自检：三个 //export 符号必须是已定义(T)而非未定义(U)，
+          # UNDEF 会在装机 dlopen 阶段炸（此前正是此坑闪退），构建期即拦。
+          NM="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for sym in XuankeSetDataDir XuankeStart XuankeStop; do
+            if ! "$NM" -D --defined-only ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | grep -q " $sym$"; then
+              echo "::error::导出符号 $sym 未定义（UND），装机将 dlopen 失败闪退"; exit 1
+            fi
+          done
+          "$NM" -D --defined-only ../build/android/app/src/main/jniLibs/arm64-v8a/libxuanke.so | grep -E 'Xuanke|JNI_OnLoad'
 
       - name: Assemble Release APK
         run: |

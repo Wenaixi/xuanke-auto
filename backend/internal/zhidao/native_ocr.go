@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/yangbin1322/go-ddddocr/ddddocr"
+
+	"xuanke-auto/backend/internal/config"
 )
 
 // 跨平台公共模型与字符集（所有 native 平台共用，随 Q：平台文件经 //go:embed 各自注入 dll）。
@@ -30,7 +32,9 @@ var nativeDllFilename = func() string { return "onnxruntime.bin" }
 // 运行原理：
 //  1. 模型（common_old.onnx，13MB）、字符集（charsets_old.json，56KB）和各平台 ONNX Runtime
 //     （dll/so/dylib，16MB）均通过 //go:embed 原生编译进单个可执行文件内部；
-//  2. 运行时若本地不存在，以毫秒级自动从内存释放到系统临时目录；
+//  2. 运行时若本地不存在，以毫秒级自动从内存释放到**应用私有可写目录**
+//     （config.WritableDir：Android 为 filesDir/data；桌面为系统临时目录——
+//     Android 的 os.TempDir() 指向无写权限的 /data/local/tmp，不可用于释出）；
 //  3. 使用 ONNX Runtime 引擎在当前进程执行推理，单次识别 5~10 毫秒，宿主机零依赖。
 type NativeDdddOcrRecognizer struct {
 	mu     sync.Mutex
@@ -49,9 +53,14 @@ func NewNativeDdddOcrRecognizer() *NativeDdddOcrRecognizer {
 // 平台库名（dll/so/dylib）由当前平台文件经 nativeDllFilename 提供，与内嵌切片配套。
 func (r *NativeDdddOcrRecognizer) ensureInit() error {
 	r.initMu.Do(func() {
-		dir := filepath.Join(os.TempDir(), "xuanke_ddddocr_assets")
+		// 资源目录必须落在「应用私有可写目录」——config.WritableDir 在 Android 上
+		// 返回 filesDir/data（App 沙箱内可写），桌面返回 os.TempDir()。
+		// **不能用 os.TempDir()**：Android 的 TMPDIR=/data/local/tmp 属系统目录、
+		// 普通 app 无写权限，fallback 的 /tmp 亦属 shell 用户，实测两者均导致
+		// 「创建 ddddocr 资源目录失败」——且该错误直到首次识别才暴露。
+		dir := filepath.Join(config.WritableDir(), "xuanke_ddddocr_assets")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			r.err = fmt.Errorf("创建 ddddocr 资源目录失败: %w", err)
+			r.err = fmt.Errorf("创建 ddddocr 资源目录失败（目录 %s）: %w", dir, err)
 			return
 		}
 

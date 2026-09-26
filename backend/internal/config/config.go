@@ -146,6 +146,21 @@ func SetDataDirForPlatform(dir string) {
 	forcedDataDir.Store(dir)
 }
 
+// WritableDir 返回应用私有、可写的资源释出目录（供内嵌资源落地磁盘）。
+//
+// **Android 上绝不能用 os.TempDir()**：其返回 /data/local/tmp（系统目录，
+// 普通 app 无写权限，实测 TMPDIR 环境变量即指向此处），fallback 的 /tmp 属
+// shell 用户同样不可写——两者都会让「创建资源目录失败」。故 Android 走
+// SetDataDirForPlatform 注入的 filesDir/data（App 沙箱内可读写）；
+// 未注入时（理论上不该发生）退回 "." 交由调用方报错而非静默写到系统目录。
+// 桌面/服务器不注入，os.TempDir() 语义正确，保持原样。
+func WritableDir() string {
+	if forced := forcedDataDir.Load(); forced != nil {
+		return filepath.Join(forced.(string), "data")
+	}
+	return os.TempDir()
+}
+
 // ensureEnvFile 确保 .env 存在：不存在则自动生成随机管理员口令与默认配置。
 // 已存在（含真实环境变量）一律不改动，保证冰封可复现配置。
 func ensureEnvFile(path string) {

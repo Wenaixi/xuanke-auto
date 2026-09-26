@@ -73,22 +73,35 @@ else
 fi
 cp -L "$FOUND" "$ASSETS_DIR/$OUT"
 
-# **架构自检（关键）**：ELF e_machine 在偏移 0x12（ELF64 little-endian）。
-# AARCH64=0xB7(183) / x86_64=0x3E(62)。架构错配只在装机 dlopen 时才炸
-# （Go 侧 dlopen 报 EM_X86_64 instead of EM_AARCH64），必须在构建期拦住。
+# **架构自检（关键）**：架构错配只在装机 dlopen 时才炸（Go 侧报
+# "for EM_X86_64 (62) instead of EM_AARCH64 (183)"），必须在构建期拦住。
+# 两种二进制格式要分别读：
+#   ELF（linux/android 的 .so）：e_machine 在偏移 0x12，2 字节 little-endian
+#     AARCH64=0xB7 / x86_64=0x3E / x86=0x03
+#   Mach-O（darwin 的 .dylib）：magic 0xFEEDFACF，cputype 在偏移 4，4 字节
+#     little-endian（CPU_TYPE_ARM64=0x0100000C / x86_64=0x01000007）
+#     ——偏移 0x12 对 Mach-O 无意义，早期版本把 darwin 混入 ELF 校验导致
+#     Linux/macOS job 全红（CI 实证 exit 1）。
 case "$OUT" in
-  *android_arm64*|*linux_arm64*|*darwin_arm64*) WANT_MACHINE="b7 00" ;;
-  *linux_amd64*)   WANT_MACHINE="3e 00" ;;
-  *) WANT_MACHINE="" ;;
+  *android_arm64*|*linux_arm64*) WANT="elf:b7 00" ;;
+  *linux_amd64*)                WANT="elf:3e 00" ;;
+  *darwin_arm64*)               WANT="macho:0c 00 00 01" ;;
+  *) WANT="" ;;
 esac
-if [ -n "$WANT_MACHINE" ]; then
-  GOT_MACHINE="$(od -An -tx1 -j 18 -N 2 "$ASSETS_DIR/$OUT" | tr -s ' ' | sed 's/^ //;s/ $//')"
-  if [ "$GOT_MACHINE" != "$WANT_MACHINE" ]; then
-    echo "[fetch-onnxruntime] 架构错配！期望 e_machine=$WANT_MACHINE 实际=$GOT_MACHINE（文件 $OUT）" >&2
-    echo "  hint: AARCH64=b700 x86_64=3e00；错配通常源于 aar 内多 ABI 取错目录" >&2
+if [ -n "$WANT" ]; then
+  FMT="${WANT%%:*}"; EXPECT="${WANT#*:}"
+  if [ "$FMT" = "elf" ]; then
+    GOT="$(od -An -tx1 -j 18 -N 2 "$ASSETS_DIR/$OUT" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  else
+    GOT="$(od -An -tx1 -j 4 -N 4 "$ASSETS_DIR/$OUT" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  fi
+  if [ "$GOT" != "$EXPECT" ]; then
+    echo "[fetch-onnxruntime] 架构错配！期望 $FMT $EXPECT 实际 $GOT（文件 $OUT）" >&2
+    echo "  hint: ELF AARCH64=b700 x86_64=3e00；Mach-O arm64=0c000001" >&2
+    echo "  hint: aar 内多 ABI 取错目录亦会致此错（应按 ABI 目录精确定位）" >&2
     exit 1
   fi
-  echo "[fetch-onnxruntime] 架构校验通过: $OUT e_machine=$GOT_MACHINE"
+  echo "[fetch-onnxruntime] 架构校验通过: $OUT ($FMT) =$GOT"
 fi
 
 # 体积粗校验（>10MB 视为非空库；精确 sha256 由 CI/后续加固）

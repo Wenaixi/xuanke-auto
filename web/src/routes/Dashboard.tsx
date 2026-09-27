@@ -1,4 +1,4 @@
-﻿import { memo, useMemo, useState, useEffect, useId } from "react"
+import { memo, useMemo, useState, useEffect, useId } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ApiError, api } from "../api/client"
 import type { Account, CourseStatus, ElectivesData, LogEntry, SchedulerState } from "../types"
@@ -299,7 +299,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
   }, [expandedDates, dateGroups])
 
   return (
-    <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-24 sm:pb-8">
+    <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-8">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
         {/* 顶部纯黑白极简控制台顶栏 */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
@@ -734,29 +734,6 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
         </section>
       </div>
 
-      {/* 手机移动端底部悬浮操作栏 */}
-      <div className="sm:hidden fixed bottom-4 inset-x-4 z-40 glass-strong border border-neutral-700 rounded-[var(--radius-lg)] p-3 flex items-center justify-between shadow-none">
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-white" />
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-white">
-              {state?.window_closed ? "窗口已关闭" : state?.window_opened ? "窗口开放中" : "系统待命中"}
-            </span>
-            <span className="text-3xs text-neutral-500 font-mono">
-              {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}
-            </span>
-          </div>
-        </div>
-        <Button
-          variant="dark"
-          size="sm"
-          onClick={onGoSelect}
-          className="h-8 px-3 text-xs"
-        >
-          <BookOpen className="h-3.5 w-3.5 mr-1 text-white" />
-          <span>选课大厅</span>
-        </Button>
-      </div>
     </div>
   )
 }

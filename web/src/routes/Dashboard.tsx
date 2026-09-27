@@ -4,6 +4,7 @@ import { ApiError, api } from "../api/client"
 import type { Account, CourseStatus, ElectivesData, LogEntry, SchedulerState } from "../types"
 import { Button } from "../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card"
+import { EmptyState } from "../components/ui/EmptyState"
 import { Badge } from "../components/ui/Badge"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
 import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
@@ -523,15 +524,17 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
 
           <div className="space-y-3">
             {dateGroups.length === 0 && (
-              <div className="rounded-[var(--radius-lg)] border border-neutral-800 border-dashed glass p-8 text-center flex flex-col items-center justify-center gap-3">
-                <HelpCircle className="h-7 w-7 text-neutral-600" />
-                <p className="text-xs text-neutral-400">
-                  当前未添加任何预选课程
-                </p>
-                <Button variant="outline" size="sm" onClick={onGoSelect}>
-                  前往挑选课程
-                </Button>
-              </div>
+              /* 全站空态/失败态样式唯一来源 = EmptyState（透明磨砂 + 虚线边框） */
+              <EmptyState
+                icon={<HelpCircle className="h-7 w-7 text-neutral-600" />}
+                action={
+                  <Button variant="outline" size="sm" onClick={onGoSelect}>
+                    前往挑选课程
+                  </Button>
+                }
+              >
+                当前未添加任何预选课程
+              </EmptyState>
             )}
 
             {dateGroups.map((g) => {
@@ -683,23 +686,25 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             </div>
 
             <div className="p-4 max-h-64 overflow-y-auto text-xs space-y-2">
-              {/* 失败/加载独立态：/logs 查询失败与加载期绝不伪装成"无日志"（OBSERVE-106-02）——
-              网络挂断/服务端不可达时应显加载失败提示而非 NO RECENT LOGS（调度日志静默隐身）。 */}
+              {/* 失败/加载独立态：/logs 查询失败与加载期绝不伪装成"无日志"——
+              网络挂断/服务端不可达时应显加载失败提示而非 NO RECENT LOGS（调度日志静默隐身）。
+              失败态补「重试」出口：/logs 失败后靠 30s 降频轮询自愈，无主动重试则网络恢复后
+              最长干等 30s 才自动重拉。 */}
               {logsErr ? (
-                <div className="py-8 text-center text-xs font-mono text-neutral-300 flex flex-col items-center gap-3">
-                  <span>日志加载失败（网络异常或服务端不可达）</span>
-                  {/*
-                    失败态补「重试」出口（OBSERVE-107-01）：/logs 失败后靠 30s 自动降频轮询
-                    自愈但无主动重试——网络恢复后需干等最长 30s 才自动重拉；对照 Admin 五 Tab
-                    失败态全有 refetch 重试按钮，学生端补齐同款（display 级无行为面）。
-                  */}
-                  <button
-                    onClick={() => refetchLogs()}
-                    className="text-neutral-400 hover:text-white transition-colors"
-                  >
-                    重试
-                  </button>
-                </div>
+                <EmptyState
+                  className="py-8"
+                  icon={<XCircle className="h-6 w-6 text-neutral-600" />}
+                  action={
+                    <button
+                      onClick={() => refetchLogs()}
+                      className="text-neutral-400 hover:text-white transition-colors"
+                    >
+                      重试
+                    </button>
+                  }
+                >
+                  日志加载失败（网络异常或服务端不可达）
+                </EmptyState>
               ) : !logs ? (
                 <div className="py-8 text-center text-neutral-600 text-xs font-mono">
                   日志加载中...
@@ -722,9 +727,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   </div>
                 ))
               ) : (
-                <div className="py-8 text-center text-neutral-600 text-xs font-mono">
-                  NO RECENT LOGS
-                </div>
+                <EmptyState className="py-8">NO RECENT LOGS</EmptyState>
               )}
             </div>
           </Card>

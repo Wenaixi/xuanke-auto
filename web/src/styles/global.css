@@ -2,16 +2,22 @@
 @plugin "tailwindcss-animate";
 
 /* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，
-   恒定压过 @layer utilities 内的 Tailwind 工具类（Card 自带 bg-[var(--surface)]
-   被 .glass 抢走底色，Dashboard 卡面退化为 6% 半透明——黑块根源之一）。
-   放进 components 层后与 utilities 同级裁决，Card 底色恢复、玻璃只做点缀。 */
+   恒定压过 @layer utilities 内的 Tailwind 工具类。放进 components 层后与 utilities
+   同级裁决——**且 utilities 在层序中更靠后，故 Card 自带 bg-[var(--surface)] 依旧胜出**，
+   在卡片上再挂 .glass 是无效点缀。全站玻璃质感因此由 --surface 三个半透明变量承载：
+   改这一处，Card / Input / Tabs / Toast / Button(secondary) 一起透出水墨背景。 */
 @layer components {
 :root {
   /* 瑞士国际主义与高级黑白极简艺术调色板 (Monochrome Fine Art) */
   --bg: #000000;
-  --surface: #0c0c0e;
-  --surface-soft: #141417;
-  --surface-muted: #1c1c20;
+  /* 面板底：6% 白 = 与 .glass 同值，半透明到能透出画布背景。
+     面板下方始终压着 .canvas-bg-mask 的 38%~72% 深黑渐变，白字对比度由遮罩而非面板保证——
+     若某处白字在亮背景区域读不清，先加厚遮罩，不要把面板改回实色。 */
+  --surface: rgba(255, 255, 255, 0.06);
+  --surface-soft: rgba(255, 255, 255, 0.10);
+  /* 凹陷/悬停档刻意取暗而非更白：唯二消费方是进度条槽与默认按钮 hover——进度条槽若也跟着
+     变白，白色填充（进度本体）就糊进槽底失去对比。 */
+  --surface-muted: rgba(0, 0, 0, 0.35);
   --border: rgba(255, 255, 255, 0.12);
   --border-hover: rgba(255, 255, 255, 0.24);
   --border-strong: rgba(255, 255, 255, 0.5);
@@ -152,9 +158,10 @@ body {
   background-color: rgba(255, 255, 255, 0.06);
 }
 
-/* 更实的面板：底部固定栏等需要更强可读性的区域 */
+/* 更实的面板：底部固定栏 / 弹窗面板等文字直接压在画面上的区域。
+   仍是透明玻璃，只比 .glass 厚一档（10% 白），保证密集白字不糊在亮背景上。 */
 .glass-strong {
-  background-color: rgba(18, 18, 22, 0.72);
+  background-color: rgba(255, 255, 255, 0.10);
 }
 
 /* 弹窗遮罩：足够暗保证弹窗内容可读 */

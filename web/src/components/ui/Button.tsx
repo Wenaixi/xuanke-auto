@@ -18,7 +18,9 @@ const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
   secondary: "bg-[var(--surface)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-soft)] hover:border-[var(--border-hover)]",
   ghost: "bg-transparent text-[var(--fg-muted)] border-transparent hover:bg-[var(--surface-soft)] hover:text-[var(--fg)]",
   invert: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 shadow-sm",
-  dark: "bg-black text-white border border-white/25 font-medium hover:bg-neutral-900 hover:border-white/50",
+  // dark：曾是 bg-black 实色底（唯一不随 --surface 走的按钮变体，全站透明化后它就是唯一的黑块）。
+  // 改透明玻璃 + 更亮的描边：靠边框与全大写白字保持存在感，而不是靠一块实色面板。
+  dark: "glass text-white border border-white/35 font-medium hover:border-white/70 hover:bg-white/10",
 }
 
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {

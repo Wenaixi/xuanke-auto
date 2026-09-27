@@ -5,6 +5,7 @@ import type { Account, ClassItem, ElectivesData, SchedulerState } from "../types
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent } from "../components/ui/Card"
+import { EmptyState } from "../components/ui/EmptyState"
 import { Badge } from "../components/ui/Badge"
 import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
@@ -823,9 +824,12 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                     })}
 
                     {filteredClasses.length === 0 && (
-                      <div className="col-span-full rounded-[var(--radius-lg)] border border-dashed border-neutral-700 bg-black/10 p-10 text-center text-xs text-neutral-400">
+                      <EmptyState
+                        className="col-span-full p-10"
+                        icon={<Search className="h-6 w-6 text-neutral-600" />}
+                      >
                         没有符合当前搜索或筛选条件的选修课程
-                      </div>
+                      </EmptyState>
                     )}
                   </div>
                 </TabsContent>
@@ -853,7 +857,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               }
             }}
           >
-            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
+            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 glass-strong p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
                   <AlertTriangle className="h-4 w-4" />

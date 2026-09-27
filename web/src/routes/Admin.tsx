@@ -12,6 +12,7 @@ import type {
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
+import { EmptyState } from "../components/ui/EmptyState"
 import { Badge } from "../components/ui/Badge"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
@@ -224,7 +225,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
               if (e.key === "Escape" && !deleting) setPendingDelete(null)
             }}
           >
-            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 bg-[#09090b] p-5 shadow-2xl space-y-4">
+            <div className="relative w-full max-w-sm rounded-[var(--radius-lg)] border border-neutral-800 glass-strong p-5 shadow-2xl space-y-4">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
                   <AlertTriangle className="h-4 w-4" />
@@ -456,12 +457,16 @@ function CodesTab({
       {codesQuery.isLoading ? (
         <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
       ) : codesQuery.isError ? (
-        <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
-          <span>激活码加载失败（网络异常或服务端不可达）</span>
-          <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-            重试
-          </button>
-        </div>
+        <EmptyState
+          icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
+          action={
+            <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              重试
+            </button>
+          }
+        >
+          激活码加载失败（网络异常或服务端不可达）
+        </EmptyState>
       ) : codesQuery.data && codesQuery.data.length > 0 ? (
         <div className="max-h-64 overflow-y-auto rounded-[var(--radius-lg)] border border-neutral-900 divide-y divide-neutral-900">
           {codesQuery.data.map((c) => {
@@ -488,9 +493,9 @@ function CodesTab({
           })}
         </div>
       ) : (
-        <div className="p-8 text-center text-xs text-neutral-600 rounded-[var(--radius-lg)] border border-dashed border-neutral-900">
+        <EmptyState icon={<KeyRound className="h-6 w-6 text-neutral-600" />}>
           暂无激活码，生成后即可分发
-        </div>
+        </EmptyState>
       )}
     </div>
   )
@@ -839,12 +844,16 @@ function StatsTab({ account, sessionToken, activeTab }: { account: Account; sess
             </div>
           </div>
         ) : statsQuery.isError ? (
-          <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-neutral-800">
-            <span>运行状态加载失败（网络异常或服务端不可达）</span>
-            <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-              重试
-            </button>
-          </div>
+          <EmptyState
+            icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
+            action={
+              <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+                重试
+              </button>
+            }
+          >
+            运行状态加载失败（网络异常或服务端不可达）
+          </EmptyState>
         ) : (
           <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
         )}
@@ -949,14 +958,18 @@ function AccountsTab({
           </table>
         </div>
       ) : accountsQuery.isError ? (
-        <div className="p-8 text-center text-xs text-neutral-300 flex flex-col items-center gap-3">
-          <span>账号数据加载失败（网络异常或服务端不可达）</span>
-          <button onClick={() => accountsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-            重试
-          </button>
-        </div>
+        <EmptyState
+          icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
+          action={
+            <button onClick={() => accountsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              重试
+            </button>
+          }
+        >
+          账号数据加载失败（网络异常或服务端不可达）
+        </EmptyState>
       ) : (
-        <div className="p-8 text-center text-xs text-neutral-600">暂无账号</div>
+        <EmptyState icon={<Users className="h-6 w-6 text-neutral-600" />}>暂无账号</EmptyState>
       )}
     </Card>
   )
@@ -996,14 +1009,18 @@ function LogsTab({ account, sessionToken, activeTab }: { account: Account; sessi
             </div>
           ))
         ) : logsQuery.isError ? (
-          <div className="py-8 text-center text-neutral-300 flex flex-col items-center gap-3">
-            <span className="font-mono">日志加载失败（网络异常或服务端不可达）</span>
-            <button onClick={() => logsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-              重试
-            </button>
-          </div>
+          <EmptyState
+            icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
+            action={
+              <button onClick={() => logsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+                重试
+              </button>
+            }
+          >
+            日志加载失败（网络异常或服务端不可达）
+          </EmptyState>
         ) : (
-          <div className="py-8 text-center text-neutral-600 font-mono">暂无日志</div>
+          <EmptyState icon={<FileText className="h-6 w-6 text-neutral-600" />}>暂无日志</EmptyState>
         )}
       </div>
     </Card>

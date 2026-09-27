@@ -197,6 +197,12 @@ body {
   position: absolute;
   top: 0;
   left: 0;
+  /* 显式定层（不用默认 z-index:auto）：App.tsx 会给这张图写内联 transform（滚动冻结），
+     它因此成为独立合成层；真机实测 Android WebView 会把该合成层画在**无 z-index 的兄弟
+     遮罩之上**，导致 .canvas-bg-mask 整层消失、背景原图直出（实测 APK 截图/源图像素比
+     恒为 1.000，同一页面 Chrome 为 0.5→0.22→0.5 遮罩曲线）。层级绝不能依赖 DOM 顺序
+     与合成层重叠判定——图 0、遮罩 1，见下条。 */
+  z-index: 0;
   width: 180%;
   max-width: none;
   height: auto;
@@ -214,6 +220,9 @@ body {
 .canvas-bg-mask {
   position: absolute;
   inset: 0;
+  /* z-index:1 压在图片合成层（z-index:0）之上——见 .canvas-bg-img 的实测记录：
+     不显式定层时 Android WebView 会把带内联 transform 的图片画到遮罩之上。 */
+  z-index: 1;
   background: linear-gradient(rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.22) 45%, rgba(0, 0, 0, 0.5) 100%);
 }
 

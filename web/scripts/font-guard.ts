@@ -44,11 +44,11 @@ check(
 )
 check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(cssCode))
 
-// 3. 三个字体包必须被引入
+// 3. 三个字体包必须被引入（中文于 2026-09-27 由 Noto Sans SC 换为 MiSans VF）
 for (const pkg of [
   "@fontsource-variable/geist",
   "@fontsource-variable/geist-mono",
-  "@fontsource-variable/noto-sans-sc",
+  "misans-vf/lib/MiSans.min.css",
 ]) {
   check(`main.tsx 引入 ${pkg}`, main.includes(pkg))
 }
@@ -70,8 +70,9 @@ for (const token of [
 
 // 5. 无效排版声明必须缺席。这些声明曾经写过，但 fontTools 实测证明字体不支持：
 //    Geist Mono 的 GSUB 只有 ccmp/dnom/frac/locl/numr（无 liga/calt/tnum/zero），
-//    Noto Sans SC 只有 ccmp/liga/locl/vert/vrt2（无 halt/chws）；
+//    当时的 Noto Sans SC 只有 ccmp/liga/locl/vert/vrt2（无 halt/chws）；
 //    且 text-spacing-trim 与 text-autospace 的 normal 均为 CSS 初始值。加回来等于虚假承诺。
+//    中文现已换为 MiSans VF——要加任何 OpenType 特性声明前，同样先解析字体文件实测。
 check(
   "global.css 不含已被实测否定的无效声明（font-feature-settings / text-spacing-trim / text-autospace）",
   !/font-feature-settings|text-spacing-trim|text-autospace/.test(cssCode),

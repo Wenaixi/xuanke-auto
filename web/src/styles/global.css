@@ -3,13 +3,17 @@
 
 /* 字体栈令牌：--font-* 命名空间会生成 font-sans / font-mono 工具类。
    拉丁字体在前（其 @font-face 只声明拉丁区段），中文自定义字体居中，
-   系统中文兜底在后——负责承接 Noto 分包不含的 CJK 扩展 B 区生僻字，避免方块。
-   中英混排由各 @font-face 的 unicode-range 自动分工，无需切分文案。 */
+   系统中文兜底在后——负责承接 MiSans 分包不含的 CJK 扩展 B 区生僻字，避免方块。
+   中英混排由各 @font-face 的 unicode-range 自动分工，无需切分文案。
+   中文用 MiSans（小米 HyperOS 默认字体，免费商用、可变 150–700、实测 5.21MB/98 片），
+   比思源黑体更几何、更现代；西文与数字仍走 Geist（只声明拉丁区段，各管各的）。
+   注意 family 名以 misans-vf 包内 CSS 的声明为准 = **"MiSans"**（文件内部名是 "MiSans VF"，
+   写成后者匹配不到任何 @font-face，中文会静默掉进系统字体兜底——踩过一次）。 */
 @theme {
-  --font-sans: "Geist Variable", "Noto Sans SC Variable", -apple-system,
+  --font-sans: "Geist Variable", "MiSans", -apple-system,
     BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-mono: "Geist Mono Variable", "Noto Sans SC Variable", ui-monospace,
+  --font-mono: "Geist Mono Variable", "MiSans", ui-monospace,
     SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI",
     "Microsoft YaHei", monospace;
 

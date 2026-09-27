@@ -2,20 +2,18 @@
 @plugin "tailwindcss-animate";
 
 /* 字体栈令牌：--font-* 命名空间会生成 font-sans / font-mono 工具类。
-   拉丁字体在前（其 @font-face 只声明拉丁区段），中文自定义字体居中，
-   系统中文兜底在后——负责承接 MiSans 分包不含的 CJK 扩展 B 区生僻字，避免方块。
-   中英混排由各 @font-face 的 unicode-range 自动分工，无需切分文案。
-   中文用 MiSans（小米 HyperOS 默认字体，免费商用、可变 150–700、实测 5.21MB/98 片），
-   比思源黑体更几何、更现代；西文与数字仍走 Geist（只声明拉丁区段，各管各的）。
-   注意 family 名以 misans-vf 包内 CSS 的声明为准 = **"MiSans"**（文件内部名是 "MiSans VF"，
-   写成后者匹配不到任何 @font-face，中文会静默掉进系统字体兜底——踩过一次）。 */
+   **中英数统一在 MiSans 一个超家族上**（小米 HyperOS 默认字体，免费商用，可变轴 150–700，
+   实测 5.21MB / 98 片，同一套分片里既有汉字也有 A-Z/0-9/标点）——不再中英两套字体，
+   字形气质自然一致。系统字体只作兜底，负责 MiSans 分包不含的 CJK 扩展 B 区生僻字。
+   mono 栈刻意保留 Geist Mono：**MiSans 数字是比例宽度且无 `tnum`**
+   （实测 1111=79 / 0000=107），倒计时与 ID 若用它会对不齐，而本项目视觉语言本来就是「等宽数字」。 */
 @theme {
-  --font-sans: "Geist Variable", "MiSans", -apple-system,
-    BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
-    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-mono: "Geist Mono Variable", "MiSans", ui-monospace,
-    SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI",
-    "Microsoft YaHei", monospace;
+  --font-sans: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC",
+    sans-serif;
+  --font-mono: "Geist Mono Variable", "MiSans", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    monospace;
 
   /* 微标签层：只设字号与字距，刻意不定义 --line-height，
      生成的 text-3xs / text-2xs 只设置 font-size，行高继续继承父级，

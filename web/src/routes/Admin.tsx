@@ -1010,7 +1010,7 @@ function AccountsTab({
                 return (
                   <tr key={a.account} className="border-b border-neutral-900 hover:bg-white/5 transition-colors">
                     <td className="p-3 sm:p-4 align-middle text-white font-mono">{a.account}</td>
-                    <td className="p-3 sm:p-4 align-middle text-neutral-300 tabular-nums">
+                    <td className="p-3 sm:p-4 align-middle text-neutral-300 font-mono tabular-nums">
                       {targets.length > 0 ? (
                         <span className="flex flex-wrap gap-1.5">
                           {targets.map((t) => (

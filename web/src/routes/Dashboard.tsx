@@ -93,19 +93,19 @@ function CountdownMatrix({ days, hours, minutes, seconds }: { days: string; hour
   return (
     <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{days}</span>
+        <span className="text-2xl sm:text-4xl font-light font-mono tabular-nums tracking-tight text-white">{days}</span>
         <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">天</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{hours}</span>
+        <span className="text-2xl sm:text-4xl font-light font-mono tabular-nums tracking-tight text-white">{hours}</span>
         <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">时</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
-        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{minutes}</span>
+        <span className="text-2xl sm:text-4xl font-light font-mono tabular-nums tracking-tight text-white">{minutes}</span>
         <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">分</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-700 glass-strong p-3 sm:p-5 flex flex-col items-center">
-        <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{seconds}</span>
+        <span className="text-2xl sm:text-4xl font-light font-mono tabular-nums tracking-tight text-white">{seconds}</span>
         <span className="text-2xs text-neutral-400 font-mono uppercase mt-1">秒</span>
       </div>
     </div>

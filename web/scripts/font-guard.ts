@@ -44,9 +44,8 @@ check(
 )
 check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(cssCode))
 
-// 3. 三个字体包必须被引入（中文于 2026-09-27 由 Noto Sans SC 换为 MiSans VF）
+// 3. 字体包必须被引入（中英数统一在 MiSans 上；Geist Mono 只负责等宽数字）
 for (const pkg of [
-  "@fontsource-variable/geist",
   "@fontsource-variable/geist-mono",
   "misans-vf/lib/MiSans.min.css",
 ]) {

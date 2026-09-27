@@ -12,6 +12,47 @@
   --font-mono: "Geist Mono Variable", "Noto Sans SC Variable", ui-monospace,
     SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI",
     "Microsoft YaHei", monospace;
+
+  /* 微标签层：只设字号与字距，刻意不定义 --line-height，
+     生成的 text-3xs / text-2xs 只设置 font-size，行高继续继承父级，
+     因此组件里 36 处任意值字号替换为零布局位移。 */
+  --text-3xs: 0.625rem;
+  --text-3xs--letter-spacing: 0.02em;
+  --text-2xs: 0.6875rem;
+  --text-2xs--letter-spacing: 0.015em;
+
+  /* 辅助文字层：行高由 Tailwind 默认 1.333 小幅放松至 1.45 */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.45;
+  --text-xs--letter-spacing: 0.01em;
+
+  /* UI 正文层：行高由默认 1.4286 小幅放松至 1.5 */
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-sm--letter-spacing: 0.005em;
+
+  /* 正文层 */
+  --text-base: 1rem;
+  --text-base--line-height: 1.6;
+  --text-base--letter-spacing: 0;
+
+  /* 标题层：字号越大越紧，字距转负（瑞士排版基本规则） */
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.45;
+  --text-lg--letter-spacing: -0.01em;
+
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.35;
+  --text-xl--letter-spacing: -0.015em;
+
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.25;
+  --text-2xl--letter-spacing: -0.018em;
+
+  /* 倒计时大数字：收紧行高与字距，使数字块紧凑有力 */
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 1.05;
+  --text-4xl--letter-spacing: -0.02em;
 }
 
 /* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，

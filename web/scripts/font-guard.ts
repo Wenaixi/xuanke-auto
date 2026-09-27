@@ -44,10 +44,10 @@ check(
 )
 check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(cssCode))
 
-// 3. 字体包必须被引入（中英数统一在 MiSans 上；Geist Mono 只负责等宽数字）
+// 3. 字体包必须被引入（界面 = 霞鹜文楷；Geist Mono 只负责等宽数字）
 for (const pkg of [
   "@fontsource-variable/geist-mono",
-  "misans-vf/lib/MiSans.min.css",
+  "lxgw-wenkai-webfont/lxgwwenkai-regular.css",
 ]) {
   check(`main.tsx 引入 ${pkg}`, main.includes(pkg))
 }

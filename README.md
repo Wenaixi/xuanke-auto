@@ -100,3 +100,14 @@ Android 包是自制薄壳：Go 引擎以 c-shared 编入 `libxuanke.so`，Java 
 - 敏感配置只进 `data/.env`（已被忽略），代码里没有硬编码密钥，日志只打 token/密码前 8 位。
 - 凭据用 AES-256-GCM 加密落库。`data/` 整个目录（db + .env + .master_key）随部署一起备份迁移。
 - 提交前对照 `SECURITY.md` 的红线清单与 `CONTRIBUTING.md` 的校验要求。涉及平台契约的改动，要说明与真实站点行为的对应关系。
+
+## 七、界面字体
+
+界面全部使用自托管开源字体（均为 SIL OFL 1.1，许可证随包分发，来源与版权见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)）：
+
+- **正文与全部界面文字**：[霞鹜文楷 LXGW WenKai](https://github.com/lxgw/LxgwWenKai)，只打包 400 / 700 两个字重，按 `unicode-range` 分包按需加载。
+- **左上角标题**：[jf open 粉圓](https://github.com/justfont/open-huninn-font) 的 11KB 派生子集（只含标题实际用字）。该字体是繁体优先，不含「选课择统」等简体字，这部分自动回退到文楷，不会出现豆腐块。
+- **等宽数字**（倒计时、课程 ID、统计表格）：Geist Mono——文楷数字是比例宽度且无 `tnum`，用它会导致数字跳动、列不齐。
+
+字体只在 `web/src/styles/global.css` 的 `--font-*` 三个令牌里定义，组件一律用 `font-sans` / `font-mono` / `font-title` 工具类；`npm run guard`（font-guard）会拦下组件层手写的 `font-family`。
+

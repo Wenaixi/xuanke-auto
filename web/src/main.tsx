@@ -1,10 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/geist-mono'
-// 中英数统一字体：MiSans（小米，免费商用）——同一套 98 片分片里既有汉字也有拉丁与数字。
-// 包内 CSS 漏写 font-weight，由 vite.config.ts 的 misans-vf-weight-range 插件在构建期补区间
-// （否则 500/600 会被合成假粗体）。等宽数字（倒计时/ID）仍走上面的 Geist Mono。
-import 'misans-vf/lib/MiSans.min.css'
+// 界面字体：霞鹜文楷（SIL OFL 1.1，免费商用）。只引 400/700 两个字重——300 用不到，
+// 省下约 5MB；只给这里两个入口是为了让未使用的字重分片不进构建产物。
+import 'lxgw-wenkai-webfont/lxgwwenkai-regular.css'
+import 'lxgw-wenkai-webfont/lxgwwenkai-bold.css'
 import './styles/global.css'
 import App from './App.tsx'
 

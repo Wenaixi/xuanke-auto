@@ -423,7 +423,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
               <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
-              <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
+              <h1 className="font-title text-lg sm:text-xl font-medium tracking-tight text-white">
                 选择课程
               </h1>
             </div>

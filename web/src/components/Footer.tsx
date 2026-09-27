@@ -33,9 +33,6 @@ export function Footer() {
           </a>
           <span className="text-neutral-600">·</span>
           <span>MIT License</span>
-          <span className="text-neutral-600">·</span>
-          {/* MiSans 许可协议要求「在软件中特别注明使用了 MiSans 字体」，此署名即在履行该义务。 */}
-          <span>字体 MiSans</span>
         </div>
         <div className="flex items-center gap-3">
           <span>开发者：炼天</span>

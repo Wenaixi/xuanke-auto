@@ -1,19 +1,23 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
-/* 字体栈令牌：--font-* 命名空间会生成 font-sans / font-mono 工具类。
-   **中英数统一在 MiSans 一个超家族上**（小米 HyperOS 默认字体，免费商用，可变轴 150–700，
-   实测 5.21MB / 98 片，同一套分片里既有汉字也有 A-Z/0-9/标点）——不再中英两套字体，
-   字形气质自然一致。系统字体只作兜底，负责 MiSans 分包不含的 CJK 扩展 B 区生僻字。
-   mono 栈刻意保留 Geist Mono：**MiSans 数字是比例宽度且无 `tnum`**
-   （实测 1111=79 / 0000=107），倒计时与 ID 若用它会对不齐，而本项目视觉语言本来就是「等宽数字」。 */
+/* 字体栈令牌：--font-* 命名空间会生成 font-sans / font-mono / font-title 工具类。
+   **界面正文字体 = 霞鹜文楷 LXGW WenKai**（SIL OFL 1.1，免费商用，可嵌入 exe/APK；
+   npm 包 lxgw-wenkai-webfont 每字重 97 片分包、按需加载）。楷体温润、中文辨识度高。
+   只引 400/700 两个真字重（300 用量仅 4 处且都在等宽数字上，省下 5MB）——
+   `font-medium`(500) 会落到 400、`font-semibold`(600) 落到 700，都是真字形，不出合成假粗体。
+   **标题字体 = jf open 粉圓**（justfont 开源，OFL）：只用在一个 10.7KB 的子集里
+   （public/fonts/jf-openhuninn-title.woff2，仅含标题实际出现过的字），
+   分包里没有的简体字（实测粉圓缺「选课择统」）自动回退到文楷，不出豆腐。
+   mono 栈保留 Geist Mono：文楷数字是比例宽度且无 tnum，倒计时/ID 用它会对不齐。 */
 @theme {
-  --font-sans: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+  --font-sans: "LXGW WenKai", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC",
     sans-serif;
-  --font-mono: "Geist Mono Variable", "MiSans", ui-monospace, SFMono-Regular,
-    Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
-    monospace;
+  --font-mono: "Geist Mono Variable", "LXGW WenKai", ui-monospace,
+    SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", monospace;
+  --font-title: "Title Round", "LXGW WenKai", sans-serif;
 
   /* 微标签层：只设字号与字距，刻意不定义 --line-height，
      生成的 text-3xs / text-2xs 只设置 font-size，行高继续继承父级，
@@ -148,6 +152,19 @@ html {
 #root {
   background-color: transparent;
   position: relative;
+}
+
+/* 标题字体：jf open 粉圓（justfont 开源，OFL 1.1）的**子集**——只加载 public/fonts 里那份
+   11KB 子集。family 名刻意叫 "Title Round" 而不是原名：该字体的 OFL 声明了
+   Reserved Font Names（'open huninn' 等），派生版本按协议不得沿用保留名（内部名也已改为
+   JF Open Huninn Title）。子集外的字（粉圓本身没有的简体，实测缺「选课择统」）自动回退到
+   第二顺位文楷，不出豆腐；许可证文本随包放在 public/fonts/jf-openhuninn-OFL.txt。 */
+@font-face {
+  font-family: "Title Round";
+  src: url("/fonts/jf-openhuninn-title.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
 
 body {

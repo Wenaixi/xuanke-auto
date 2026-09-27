@@ -23,15 +23,20 @@ React 19、Vite、TypeScript、Tailwind CSS 4、Radix Primitives、TanStack Quer
 
 ### 内嵌字体
 
-界面使用三套自托管可变字体，均为 **SIL Open Font License 1.1**，随包保留各自的 LICENSE 即满足该许可的要求，界面本身无需再作声明：
+界面字体全部自托管、随包分发，均为 **SIL Open Font License 1.1**：
 
-| 包 | 字体 | 版权 |
-| --- | --- | --- |
-| `@fontsource-variable/geist` | Geist Variable | The Geist Project Authors（https://github.com/vercel/geist-font） |
-| `@fontsource-variable/geist-mono` | Geist Mono Variable | The Geist Project Authors（https://github.com/vercel/geist-font） |
-| `@fontsource-variable/noto-sans-sc` | Noto Sans SC Variable | Google Inc. |
+| 包 / 文件 | 字体 | 用途 | 版权 |
+| --- | --- | --- | --- |
+| `lxgw-wenkai-webfont` | LXGW WenKai（霞鹜文楷） | 全站界面正文（400 / 700 两个字重） | 落霞孤鹜 LXGW（https://github.com/lxgw/LxgwWenKai） |
+| `web/public/fonts/jf-openhuninn-title.woff2` | jf open 粉圓 的**派生子集** | 仅左上角标题 | Copyright (c) 2010 MOTOYA CO.,LTD.；2011-2016 The Varela Round Project Authors；2020-2024 justfont Co., LTD.（https://github.com/justfont/open-huninn-font） |
+| `@fontsource-variable/geist-mono` | Geist Mono Variable | 等宽数字（倒计时、课程 ID、统计表格） | The Geist Project Authors（https://github.com/vercel/geist-font） |
 
-中文分包不覆盖 CJK 扩展 B 区（U+20000 以上），这部分字形由字体栈末尾的系统中文兜底。
+- 标题子集由 `jf-openhuninn-2.1.ttf` 用 fontTools 按标题实际用字切出（11KB）。该字体的许可声明了
+  **Reserved Font Names**（`open huninn` 等），故派生子集**不使用保留名**：内部字体名已改为
+  `JF Open Huninn Title`，CSS family 名为 `Title Round`。许可证全文随包放在
+  `web/public/fonts/jf-openhuninn-OFL.txt`（会随 `public/` 一起进入 dist、打进 exe/APK）。
+- 粉圓子集不含部分简体字（实测缺「选课择统」），这些字由字体栈第二顺位文楷承接，不会出现豆腐块。
+- 文楷中文分包不覆盖 CJK 扩展 B 区（U+20000 以上），这部分字形由字体栈末尾的系统中文兜底。
 
 ## 模型与运行时
 

@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "guard": "node --import jiti/register scripts/perf-countdown-guard.ts && node --import jiti/register scripts/target-guard-check.ts && node --import jiti/register scripts/admin-auth-check.ts && node --import jiti/register scripts/unauthorized-check.ts && node --import jiti/register scripts/lazy-route-guard.ts"
+    "guard": "node --import jiti/register scripts/perf-countdown-guard.ts && node --import jiti/register scripts/target-guard-check.ts && node --import jiti/register scripts/admin-auth-check.ts && node --import jiti/register scripts/unauthorized-check.ts && node --import jiti/register scripts/lazy-route-guard.ts && node --import jiti/register scripts/font-guard.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

@@ -310,7 +310,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             <div className="flex items-center gap-2.5">
               <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
               <h1 className="font-title text-lg sm:text-xl font-medium tracking-tight text-white">
-                选课助手
+                選課助手
               </h1>
             </div>
             <p className="text-xs text-neutral-400">

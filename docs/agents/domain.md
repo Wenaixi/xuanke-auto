@@ -4,26 +4,28 @@ How the engineering skills should consume this repo's domain documentation when 
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root, or
-- **`CONTEXT-MAP.md`** at the repo root if it exists: it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **`CONTEXT.md`** at the repo root: 本仓库的领域词汇表（单上下文）。文档、issue、ADR、命名一律用它定义的词。
+- **`docs/adr/`**: read ADRs that touch the area you're about to work in. 现有 `0001`（前端产物 embed 进单二进制）、`0002`（按教务账号隔离会话与课程快照）、`0003`（开窗时间由平台 beginTimes 自动识别，不可配置）。
+- 本仓库**没有** `CONTEXT-MAP.md`：只有一个上下文，不存在 `src/<context>/docs/adr/`。
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+这两个落点都已经建立（2026-09-27）。维护方式：新术语写进 `CONTEXT.md`；新的架构决策按 `docs/adr/NNNN-短横线标题.md` 取最大编号 +1，四段 `Status` / `Context` / `Decision` / `Consequences`，结论必须能指回核对的源文件路径。写入者仍是 `/domain-modeling`（经 `/grill-with-docs` 与 `/improve-codebase-architecture` 到达）。
 
 ## File structure
 
-Single-context repo (most repos):
+本仓库属于单上下文形态（下表第一段），`CONTEXT.md` 在根目录，决策在 `docs/adr/`。
+
+Single-context repo (this repo):
 
 ```
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
+│   ├── 0001-single-binary-embed-web.md
+│   └── 0002-per-account-isolation.md
+└── backend/, web/, build/            ← 本仓库没有 src/，代码在 backend/ 与 web/
 ```
 
-Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
+Multi-context repo (presence of `CONTEXT-MAP.md` at the root) — 本仓库不适用，仅作形态参考：
 
 ```
 /

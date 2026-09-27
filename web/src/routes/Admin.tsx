@@ -129,7 +129,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
             <div className="flex items-center gap-2.5">
               <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
               <h1 className="font-title text-lg sm:text-xl font-medium tracking-tight text-white">
-                系统管理
+                系統管理
               </h1>
               <Badge variant="primary" className="text-3xs uppercase font-mono tracking-wider">
                 ADMIN

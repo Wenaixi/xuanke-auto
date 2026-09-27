@@ -12,6 +12,17 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-## 本仓库已确认采用默认五标签
+## 本仓库现状（2026-09-27 实测）
 
-2026-09-26 主人确认：保留上表默认命名，标签名与角色名一致。首次使用 `triage` 贴标签前，先确认这五个标签在 GitHub 仓库中已存在（`gh label list`），缺失则 `gh label create` 补齐——`gh issue edit --add-label` 不会自动创建标签，写不存在的标签会静默失败或报错。
+采用上表默认命名，标签名与角色名一致。**但 GitHub 仓库里目前只有 `wontfix` 一个角色标签**——`gh label list` 实测共 10 个标签，其余是 GitHub 自带的 `bug` / `enhancement` / `documentation` / `duplicate` / `good first issue` / `help wanted` / `invalid` / `question` / `accessibility`。另外四个角色标签还没建，首次使用 `triage` 之前必须先补：
+
+```bash
+gh label create needs-triage    --description "Maintainer needs to evaluate this issue"
+gh label create needs-info      --description "Waiting on reporter for more information"
+gh label create ready-for-agent --description "Fully specified, ready for an AFK agent"
+gh label create ready-for-human --description "Requires human implementation"
+```
+
+`gh issue edit --add-label` 不会自动创建标签，贴一个仓库里不存在的标签会失败。
+
+另：`triage` 技能在 `wontfix` 的 enhancement 分支会写仓库根的 `.out-of-scope/`。该目录当前不存在，也未被 `.gitignore` 忽略，首次触发时会以未跟踪文件的形式出现。

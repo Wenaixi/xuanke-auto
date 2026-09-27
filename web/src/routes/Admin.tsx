@@ -165,24 +165,27 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
           {/* 窄屏等分五列、全露（图标在上文字在下）：五个标签在 375px 下总宽 460px，
               横滑方案实测用户不习惯，改为一次看全、一指点中、零滚动；桌面恢复紧凑横排。
               图标在窄屏放大到 h-4，与 40px 级的触控目标匹配。 */}
-          <TabsList className="grid w-full grid-cols-5 sm:inline-flex sm:w-auto">
-            <TabsTrigger value="codes" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+          {/* h-auto：TabsList 基类固定 h-10（40px），而窄屏是「图标上文字下」的竖排，
+              内容 52px 必然溢出壳层 → 标签被压扁并与下方内容打架。移动端交出行高由
+              内容决定，桌面（sm 起横排单行）回到 40px 紧凑档。 */}
+          <TabsList className="grid w-full grid-cols-5 h-auto sm:h-10 sm:inline-flex sm:w-auto">
+            <TabsTrigger value="codes" className="flex-col gap-1 px-1 py-3 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
               <KeyRound className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>激活码</span>
             </TabsTrigger>
-            <TabsTrigger value="config" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+            <TabsTrigger value="config" className="flex-col gap-1 px-1 py-3 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
               <Settings className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>系统配置</span>
             </TabsTrigger>
-            <TabsTrigger value="stats" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+            <TabsTrigger value="stats" className="flex-col gap-1 px-1 py-3 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
               <Activity className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>运行状态</span>
             </TabsTrigger>
-            <TabsTrigger value="accounts" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+            <TabsTrigger value="accounts" className="flex-col gap-1 px-1 py-3 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
               <Users className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>账号管理</span>
             </TabsTrigger>
-            <TabsTrigger value="logs" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+            <TabsTrigger value="logs" className="flex-col gap-1 px-1 py-3 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
               <FileText className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>日志总览</span>
             </TabsTrigger>
@@ -334,6 +337,15 @@ function CodesTab({
     refetchInterval: activeTab === "codes" ? 5000 : false,
   })
 
+  // 失败态必须区分「机制关闭」与「真加载失败」：激活码机制默认关闭
+  // （XUANKE_ACTIVATION 未设 = off），此时后端按契约对管理接口一律返回
+  // code=1「激活码机制已关闭」——旧文案把两者都写成「没能加载出来」，管理员
+  // 会当成故障反复点重试（而重试永远不会成功），真实原因与出口都被藏起来。
+  const codesErrMsg = codesQuery.isError
+    ? ((codesQuery.error as Error | null)?.message ?? "")
+    : ""
+  const codesDisabled = codesErrMsg.includes("激活码机制已关闭")
+
   const generate = async () => {
     // 在飞幂等守卫——与 login submit / activate 同款
     // 短路：按钮 disabled 依赖 React 渲染落地有延迟，连按两次会在 disabled 生效前发出两个
@@ -409,16 +421,16 @@ function CodesTab({
           />
         </div>
         <Button
-          variant="primary"
+          variant="secondary"
           size="sm"
           onClick={generate}
           disabled={generating}
           className="h-11 sm:h-10 px-5 text-xs flex items-center gap-1.5"
         >
           {generating ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Plus className="h-3.5 w-3.5 text-black" />
+            <Plus className="h-3.5 w-3.5" />
           )}
           <span>生成</span>
         </Button>
@@ -463,14 +475,26 @@ function CodesTab({
         <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
       ) : codesQuery.isError ? (
         <EmptyState
-          icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
+          icon={
+            codesDisabled ? (
+              <KeyRound className="h-6 w-6 text-neutral-600" />
+            ) : (
+              <AlertTriangle className="h-6 w-6 text-neutral-600" />
+            )
+          }
           action={
-            <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
-              重试
-            </button>
+            codesDisabled ? (
+              <span className="text-2xs text-neutral-500">在「系统配置 → 激活码机制」打开后本页即可正常使用</span>
+            ) : (
+              <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+                重试
+              </button>
+            )
           }
         >
-          激活码没能加载出来
+          {codesDisabled
+            ? "激活码机制已关闭，当前不生成也不校验激活码"
+            : codesErrMsg || "激活码没能加载出来"}
         </EmptyState>
       ) : codesQuery.data && codesQuery.data.length > 0 ? (
         <div className="max-h-64 overflow-y-auto rounded-[var(--radius-lg)] border border-neutral-900 divide-y divide-neutral-900">

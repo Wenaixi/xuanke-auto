@@ -319,8 +319,11 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* 去选课：透明玻璃次操作档（6% 白底 + 发丝边框），与顶栏其余动作同级——
+                白底反转留白只给「窗口开启后的报名」这类不可逆主操作，入口按钮改透明后
+                视觉重心回到倒计时矩阵。 */}
             <Button
-              variant="primary"
+              variant="secondary"
               size="sm"
               onClick={onGoSelect}
               className="flex items-center gap-1.5 text-xs"

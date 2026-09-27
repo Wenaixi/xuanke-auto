@@ -41,9 +41,13 @@ type Config struct {
 	AdminToken string
 	// AdminName 管理员账号名（默认 admin）
 	AdminName string
-	// ListenHost 监听地址（空 = 所有网卡，桌面/服务器默认；APK 内置 127.0.0.1，
-	// 只允许同设备访问——局域网与外部一律不可达）
+	// ListenHost 监听主机（默认 127.0.0.1，只允许本机访问）。XUANKE_LISTEN_HOST
+	// 可覆盖：局域网填本机内网 IP（如 192.168.1.10），穿透/公网填域名或 0.0.0.0
+	// （所有网卡，等价旧版的全接口监听）。
 	ListenHost string
+	// PlatformEmbedded 平台内置形态（APK）：管理账密由 profile 固定、端口不可改
+	// （Java 壳按 3091 加载页面）。桌面/服务器恒 false。
+	PlatformEmbedded bool
 	// ActivationCodesEnabled 激活码机制开关（XUANKE_ACTIVATION，默认 off；on 才启用激活码）
 	// 默认关闭：本地双击 exe 开箱即用（账号登录直接进系统），公网分发才显式开启激活码。
 	ActivationCodesEnabled bool
@@ -70,14 +74,17 @@ func Load() Config {
 		SFModel:                envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
 		AdminToken:             os.Getenv("XUANKE_ADMIN_TOKEN"),
 		AdminName:              os.Getenv("XUANKE_ADMIN_NAME"),
+		// 默认只绑回环：要开局域网就显式填本机内网 IP，要公网/穿透就填域名
+		// 或 0.0.0.0（所有网卡）。
+		ListenHost:             envOr("XUANKE_LISTEN_HOST", "127.0.0.1"),
 		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") == "on",
 	}
 	if prof != nil {
-		// APK 内置配置最后覆盖：.env / 环境变量里的历史值一律让位，
-		// 保证「APK 上永远是这组账密 + 只监听回环」。
+		// APK 内置账密最后覆盖：.env / 环境变量里的历史值一律让位
+		// （监听地址不覆盖——它与桌面共用同一套 XUANKE_LISTEN_HOST 语义）。
 		cfg.AdminName = prof.AdminName
 		cfg.AdminToken = prof.AdminToken
-		cfg.ListenHost = prof.ListenHost
+		cfg.PlatformEmbedded = true
 	}
 	return cfg
 }
@@ -158,23 +165,23 @@ func SetDataDirForPlatform(dir string) {
 	forcedDataDir.Store(dir)
 }
 
-// platformProfile 平台内置配置（APK 专属）：管理员账密与监听地址随包固定。
+// platformProfile 平台内置配置（APK 专属）：管理员账密随包固定。
 // 桌面/服务器不注入（nil），一切行为与既有版本完全一致。
 type platformProfile struct {
 	AdminName  string
 	AdminToken string
-	ListenHost string
 }
 
 // platform 平台内置配置（Android JNI 入口在 config.Load 之前注入；桌面恒 nil）。
 var platform atomic.Pointer[platformProfile]
 
-// SetPlatformProfileForPlatform 由平台入口强制管理员账密与监听地址：APK 侧载
-// 场景下无需任何 .env 配置即可进管理页，且服务只绑回环（同设备外不可达）。
-// 桌面/服务器不调用，保持「随机口令 + 全接口监听」语义（与 SetDataDirForPlatform
-// 同一套平台注入模式）。
-func SetPlatformProfileForPlatform(name, token, listenHost string) {
-	platform.Store(&platformProfile{AdminName: name, AdminToken: token, ListenHost: listenHost})
+// SetPlatformProfileForPlatform 由平台入口强制管理员账密：APK 侧载场景下用户
+// 无需任何 .env 配置即可进管理页（桌面/服务器不调用，保持「随机口令」语义；
+// 与 SetDataDirForPlatform 同一套平台注入模式）。
+// 监听地址不在这里固定——它与桌面同一套 XUANKE_LISTEN_HOST 语义（默认 127.0.0.1，
+// 需要局域网/公网时改 .env 即可）。
+func SetPlatformProfileForPlatform(name, token string) {
+	platform.Store(&platformProfile{AdminName: name, AdminToken: token})
 }
 
 // WritableDir 返回应用私有、可写的资源释出目录（供内嵌资源落地磁盘）。
@@ -231,6 +238,10 @@ XUANKE_ACTIVATION=off
 # 服务端口与数据库路径（可选）
 # XUANKE_PORT=3091
 # XUANKE_DB=data/xuanke.db
+
+# 监听地址（默认 127.0.0.1，只允许本机访问）
+# 局域网：填本机内网 IP（如 192.168.1.10）；穿透/公网：填域名，或 0.0.0.0（所有网卡）
+# XUANKE_LISTEN_HOST=127.0.0.1
 `
 	_ = os.WriteFile(path, []byte(tpl), 0o600)
 }

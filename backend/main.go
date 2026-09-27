@@ -17,13 +17,16 @@ func main() {
 	// 打开浏览器/关于/退出；Docker/服务器（Linux CGO=0）无托盘，服务照常启动。
 	// 托盘就绪后放行 main 继续（避免图标一闪而过）；关闭自动开浏览器，改为
 	// 托盘「打开浏览器」手动打开（托盘应用习惯）。
-	tray := trayData{url: "http://localhost:" + cfg.Port, dbPath: cfg.DBPath, port: cfg.Port}
+	// 托盘/浏览器入口用配置的监听主机（0.0.0.0 这类通配地址显示成 localhost）：
+	// 监听在 127.0.0.1 或内网 IP / 域名时，提示与打开的 URL 都要一致。
+	host := displayHost(cfg.ListenHost)
+	tray := trayData{url: "http://" + host + ":" + cfg.Port, dbPath: cfg.DBPath, port: cfg.Port}
 	runTray(tray)
-	log.Printf("[main] 托盘已就绪：右键「打开浏览器」访问选课大厅，或浏览器直接访问 http://localhost%s", ":"+cfg.Port)
+	log.Printf("[main] 托盘已就绪：右键「打开浏览器」访问选课大厅，或浏览器直接访问 http://%s:%s", host, cfg.Port)
 
 	// 自动开浏览器改由托盘「打开浏览器」菜单触发（桌面带托盘场景）；
 	// 无托盘场景（Docker/Linux CGO=0）仍自动打开一次（保持原行为）。
-	openBrowser("http://localhost" + srv.Addr)
+	openBrowser("http://" + host + ":" + cfg.Port)
 
 	// 托盘「退出」= 整进程退出：mQuit 点击 → quitApplication() 先优雅关服务
 	// 再退图标。srv.Shutdown 使 runServer 的 ListenAndServe 返回 ErrServerClosed，

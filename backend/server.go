@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"xuanke-auto/backend/internal/accounts"
@@ -23,8 +27,11 @@ import (
 // Started 服务启动结果：监听地址 + 优雅关服入口 + 退出原因通道。
 // 桌面 main 与安卓平台入口共用同一套引擎初始化，仅形态收尾不同。
 type Started struct {
-	// Addr 实际监听地址（":3091"）；供日志与服务启动后提示。
+	// Addr 实际监听地址（如默认 "127.0.0.1:3091"）；供日志与服务启动后提示。
 	Addr string
+	// Rebind 热切换监听地址（管理员后台改 listen_host / listen_port 时调用）：
+	// 新地址先绑定成功再关旧监听，失败即返回错误且旧监听继续服务。
+	Rebind func(host, port string) error
 	// Shutdown 优雅关服（等服务在飞请求结束），托盘「退出」与安卓销毁时调用。
 	Shutdown func()
 	// Cleanup 关闭 DB/会话等底层资源（Android 常驻共享库 main 永不返回，
@@ -87,6 +94,10 @@ func runServer(cfg config.Config) *Started {
 		VisionModel:        cfg.SFModel,
 		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr 本地识别（免密钥），vision 云识别需显式配置
 		CaptchaConcurrency: 1,
+		// 监听地址同样进运行时配置：管理员后台可热改（重绑 socket）并落库 settings。
+		// 启动顺序 = env 初值 → 落库值覆盖（ApplySettings）→ 按最终值真正监听。
+		ListenHost: cfg.ListenHost,
+		ListenPort: cfg.Port,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）。
 	// 键名与解析规则由 runtime 包的配置表统一定义——落库侧（api PUT）与本还原侧
@@ -144,28 +155,95 @@ func runServer(cfg config.Config) *Started {
 	}()
 
 	mux := http.NewServeMux()
-	apiHandler := api.Register(api.Options{
-		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
-		AdminToken: cfg.AdminToken, AdminName: cfg.AdminName,
-		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: encrypt, Runtime: rt,
-	})
-	mux.Handle("/", web.SpaHandler())
 
-	addr := ":" + cfg.Port
-	log.Printf("[main] 至道选课自动化服务启动: http://localhost%s（激活码机制: %v）", addr, cfg.ActivationCodesEnabled)
-	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
+	// 监听地址：runtime 配置优先（管理员后台热改与落库值），回退 env 启动值。
+	// 默认 127.0.0.1（只允许本机）；内网 IP 开局域网、域名走穿透/公网、0.0.0.0 所有网卡。
+	rtCfg := rt.Get()
+	listenHost, listenPort := rtCfg.ListenHost, rtCfg.ListenPort
+	if listenHost == "" {
+		listenHost = "127.0.0.1"
+	}
+	if listenPort == "" {
+		listenPort = cfg.Port
+	}
+	addr := net.JoinHostPort(listenHost, listenPort)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		// 监听失败即退出：起不来的服务静默存活比崩溃更难排查。
+		log.Fatalf("服务启动失败（监听 %s）: %v", addr, err)
+	}
 
 	// http.Server 显式超时——公网部署时 slowloris/慢速 POST
 	// 不再能占用 goroutine 与连接池饿死调度器 tick 与健康检查。
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           apiHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	started := &Started{Addr: addr}
+	ch := make(chan error, 1)
+
+	// currentLn 当前活跃监听：热重绑后旧监听的 Serve 会返回
+	// "use of closed network connection"——那是正常路径，不能按启动失败处理
+	// （否则管理员改一次监听地址就把进程打死）。只有"仍是当前监听的 Serve
+	// 意外返回"才算服务真的挂了。
+	var currentLn atomic.Value
+	currentLn.Store(ln)
+	var rebindMu sync.Mutex
+
+	serve := func(l net.Listener) {
+		serveErr := srv.Serve(l)
+		if errors.Is(serveErr, http.ErrServerClosed) {
+			select {
+			case ch <- http.ErrServerClosed:
+			default:
+			}
+			return
+		}
+		if cur, ok := currentLn.Load().(net.Listener); ok && cur == l {
+			log.Printf("[main] 监听服务意外退出: %v", serveErr)
+			select {
+			case ch <- serveErr:
+			default:
+			}
+		}
+	}
+
+	// rebind 热切换监听：新地址先起来再关旧地址——新地址失败时旧服务照常可用，
+	// 绝不出现"配置改了、服务没了"的空窗。
+	rebind := func(host, port string) error {
+		rebindMu.Lock()
+		defer rebindMu.Unlock()
+		newAddr := net.JoinHostPort(host, port)
+		newLn, err := net.Listen("tcp", newAddr)
+		if err != nil {
+			return fmt.Errorf("监听 %s 失败: %w", newAddr, err)
+		}
+		old, _ := currentLn.Load().(net.Listener)
+		currentLn.Store(newLn)
+		go serve(newLn)
+		if old != nil && old != newLn {
+			_ = old.Close()
+		}
+		srv.Addr = newAddr
+		log.Printf("[main] 监听地址已热切换: http://%s", net.JoinHostPort(displayHost(host), port))
+		return nil
+	}
+
+	apiHandler := api.Register(api.Options{
+		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
+		AdminToken: cfg.AdminToken, AdminName: cfg.AdminName,
+		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: encrypt, Runtime: rt,
+		PlatformEmbedded: cfg.PlatformEmbedded, Rebind: rebind,
+	})
+	mux.Handle("/", web.SpaHandler())
+	srv.Handler = apiHandler
+
+	log.Printf("[main] 至道选课自动化服务启动: http://%s（激活码机制: %v）", net.JoinHostPort(displayHost(listenHost), listenPort), cfg.ActivationCodesEnabled)
+	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
+
+	started := &Started{Addr: addr, Rebind: rebind}
 	started.Cleanup = func() {
 		// DB 与会话库的关闭收口：桌面死库 defer 与安卓 Java 销毁都会到达这里。
 		// 幂等（多次调仅首回收）——sessions.Close 与 d.Close 内部都保证幂等。
@@ -179,20 +257,19 @@ func runServer(cfg config.Config) *Started {
 			log.Printf("[main] 服务优雅关闭异常: %v", err)
 		}
 	}
-	ch := make(chan error, 1)
 	started.ErrCh = ch
-	go func() {
-		err := srv.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			ch <- http.ErrServerClosed
-			return
-		}
-		if err != nil {
-			log.Fatalf("服务启动失败: %v", err)
-		}
-		ch <- err
-	}()
+	go serve(ln)
 	return started
+}
+
+// displayHost 提示/日志用的主机名：0.0.0.0 / :: / 空（监听所有网卡）显示成
+// localhost，其余照实显示（127.0.0.1 / 内网 IP / 域名）。
+func displayHost(listenHost string) string {
+	switch listenHost {
+	case "", "0.0.0.0", "::", "[::]":
+		return "localhost"
+	}
+	return listenHost
 }
 
 // adminNameOrDefault 管理员账号名（配置为空时默认 admin）。

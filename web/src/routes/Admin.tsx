@@ -33,6 +33,7 @@ import {
   FileText,
   ArrowLeft,
   AlertTriangle,
+  Network,
 } from "lucide-react"
 
 interface Props {
@@ -516,6 +517,8 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const [fallback, setFallback] = useState(false)
   const [concurrency, setConcurrency] = useState(1)
   const [activationOn, setActivationOn] = useState(true)
+  const [listenHost, setListenHost] = useState("127.0.0.1")
+  const [listenPort, setListenPort] = useState("3091")
   const [saving, setSaving] = useState(false)
 
   const configQuery = useQuery({
@@ -538,6 +541,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       setFallback(loaded.captcha_fallback === true)
       setConcurrency(loaded.captcha_concurrency || 1)
       setActivationOn(loaded.activation_enabled)
+      // 监听地址回填：缺键（旧后端）时用默认值展示，绝不显示空串
+      setListenHost(loaded.listen_host || "127.0.0.1")
+      setListenPort(loaded.listen_port || "3091")
     }
   }, [loaded, configEpoch])
 
@@ -550,6 +556,11 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
     if (saving) return
     setSaving(true)
     try {
+      // 监听地址变更会让当前页面 URL 失效（换成内网 IP/域名后本机不一定还能连），
+      // 保存成功要明确提示，不能只说"已生效"让管理员以为页面卡了。
+      const addrChanged =
+        listenHost.trim() !== (loaded.listen_host || "") ||
+        listenPort.trim() !== (loaded.listen_port || "")
       const body: Record<string, unknown> = {
         activation_enabled: activationOn,
         vision_base_url: baseUrl.trim(),
@@ -557,6 +568,8 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         captcha_engine: engine,
         captcha_fallback: fallback,
         captcha_concurrency: Math.max(1, concurrency || 1),
+        listen_host: listenHost.trim(),
+        listen_port: listenPort.trim(),
       }
       // 留空 = 不改动 key（脱敏回显无法完整回填）
       if (apiKey.trim()) body.vision_api_key = apiKey.trim()
@@ -570,7 +583,13 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       if (!refreshed.error && refreshed.data) {
         setConfigEpoch((e) => e + 1) // 用后端生效真值经 effect 回填到表单（与生效配置对齐）
       }
-      toast({ title: "配置已保存", description: "已生效，无需重启服务", variant: "success" })
+      toast({
+        title: "配置已保存",
+        description: addrChanged
+          ? "已生效；监听地址已变更，请改用新地址访问（本页可能需刷新）"
+          : "已生效，无需重启服务",
+        variant: "success",
+      })
       // "PUT 完成 → 用户此刻点进密钥框打字"的亚秒窄窗；且保存后才清空仍保证
       // "留空 = 不改动 key"的回显语义不被上次保存的旧输入污染。
       setApiKey("")
@@ -736,6 +755,57 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
               className="h-10 text-sm font-mono glass-input border-neutral-800 text-white"
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
+        <CardHeader className="pb-2 border-b border-neutral-900">
+          <div className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-neutral-400" />
+            <CardTitle className="text-sm font-medium tracking-wide text-white">服务监听</CardTitle>
+          </div>
+          <CardDescription className="text-xs text-neutral-500">
+            保存后立即重绑监听，无需重启；新地址绑定失败时保留原地址继续服务
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-3 grid gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="admin-config-listen-host" className="text-xs text-neutral-400">监听地址</label>
+            <Input
+              id="admin-config-listen-host"
+              value={listenHost}
+              onChange={(e) => setListenHost(e.target.value)}
+              placeholder="127.0.0.1"
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
+            />
+            <p className="text-2xs text-neutral-600 mt-0.5">
+              127.0.0.1 只允许本机访问；填本机内网 IP（如 192.168.1.10）供局域网使用；
+              填域名（反代/穿透）或 0.0.0.0（所有网卡）
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="admin-config-listen-port" className="text-xs text-neutral-400">端口</label>
+            <Input
+              id="admin-config-listen-port"
+              value={listenPort}
+              onChange={(e) => setListenPort(e.target.value)}
+              disabled={loaded?.platform_embedded === true}
+              placeholder="3091"
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600 disabled:opacity-50"
+            />
+            {loaded?.platform_embedded === true && (
+              <p className="text-2xs text-amber-400/90">
+                手机 App 内置页面按当前端口连接，端口不可修改；要供局域网/公网访问请改监听地址
+              </p>
+            )}
+          </div>
+          <p className="text-2xs text-neutral-600">
+            {listenHost.trim() === "127.0.0.1"
+              ? "当前形态：仅本机可访问"
+              : listenHost.trim() === "0.0.0.0"
+                ? "当前形态：所有网卡可访问——请确保已有防火墙与访问口令保护"
+                : "当前形态：仅该主机可访问——请确认该 IP/域名可解析到本机，否则会连不上"}
+          </p>
         </CardContent>
       </Card>
 

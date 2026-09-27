@@ -1,4 +1,4 @@
-﻿// 与后端 API JSON 对应的类型定义。字段与后端 zhidao.Class 严格对齐：
+// 与后端 API JSON 对应的类型定义。字段与后端 zhidao.Class 严格对齐：
 // lessons_date/apply_date/plan_count/audited_count 前后端均零消费，已剔除
 //（后端 json "-" 剔除后响应体不再下发，类型同步瘦身——绝不声明永不消费的幻影字段）。
 
@@ -107,6 +107,12 @@ export interface AdminConfig {
   // 开启后本机 ddddocr 不可用回退 Vision、Vision 无密钥回退本机 ddddocr。
   captcha_fallback: boolean
   captcha_concurrency: number
+  // 监听地址（默认 127.0.0.1 仅本机；填内网 IP 开局域网、域名走穿透/公网、
+  // 0.0.0.0 所有网卡）。改动会热重绑监听，无需重启。
+  listen_host: string
+  listen_port: string
+  // 平台内置形态（APK）：端口输入置灰（App 内页面按 3091 连接，改端口会失联）。
+  platform_embedded: boolean
 }
 
 // 运行状态总览（GET /api/admin/stats）

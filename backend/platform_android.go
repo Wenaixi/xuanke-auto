@@ -62,6 +62,10 @@ func XuankeSetDataDir(dir *C.char) {
 // 返回后 Android 壳的 WebView 加载 http://127.0.0.1:PORT/ 即可使用完整前端。
 // 服务生命周期随进程常驻（前台服务保活）；Java onDestroy 调 XuankeStop 收尾。
 func XuankeStart() {
+	// APK 内置管理员账密（随包固定；桌面/服务器不注入，仍走随机口令）：
+	// 必须在 config.Load 之前注入——Load 会据此把账密写进 data/.env 并覆盖生效值。
+	// 监听地址不在这里固定：与桌面共用 XUANKE_LISTEN_HOST（默认 127.0.0.1）。
+	config.SetPlatformProfileForPlatform("admin", "admin123")
 	cfg := config.Load()
 	log.Printf("[android] 启动选课引擎（runtime %s/%s）", runtime.GOOS, runtime.GOARCH)
 	globalStarted.Store(runServer(cfg))

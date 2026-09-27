@@ -27,6 +27,11 @@ type Config struct {
 	CaptchaFallback bool
 	// CaptchaConcurrency 验证码识别并发上限（默认 1，串行识别防平台熔断）。
 	CaptchaConcurrency int
+	// ListenHost 监听主机（默认 127.0.0.1 只允许本机；填内网 IP 开局域网、
+	// 填域名走穿透/公网、0.0.0.0 = 所有网卡）。改动触发监听热重绑。
+	ListenHost string
+	// ListenPort 监听端口（默认 3091）。改动同样触发热重绑。
+	ListenPort string
 }
 
 // Store 进程内配置中心：读写锁保护，Get 返回拷贝保证调用方拿到一致快照。
@@ -144,6 +149,31 @@ var configFields = []configField{
 				return false
 			}
 			c.CaptchaConcurrency = n
+			return true
+		},
+	},
+	{
+		// 监听主机：空值不应用（保留 env 启动值），避免落库空串把服务绑到随机地址
+		Key:       "listen_host",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return c.ListenHost, nil },
+		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
+			if strings.TrimSpace(v) == "" {
+				return false
+			}
+			c.ListenHost = v
+			return true
+		},
+	},
+	{
+		// 监听端口：1-65535 之外的落库值一律不应用（保留既有值）
+		Key:       "listen_port",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return c.ListenPort, nil },
+		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 65535 {
+				return false
+			}
+			c.ListenPort = v
 			return true
 		},
 	},

@@ -107,7 +107,7 @@ func TestPlatformProfileWritesFixedAuthToEnvFile(t *testing.T) {
 	t.Setenv("XUANKE_ADMIN_NAME", "")
 	root := t.TempDir()
 	SetDataDirForPlatform(root)
-	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+	SetPlatformProfileForPlatform("admin", "admin123")
 
 	cfg := Load()
 	if cfg.AdminName != "admin" || cfg.AdminToken != "admin123" || cfg.ListenHost != "127.0.0.1" {
@@ -140,7 +140,7 @@ func TestPlatformProfileRewritesExistingEnvFileAuth(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "data", ".env"), []byte(old), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+	SetPlatformProfileForPlatform("admin", "admin123")
 
 	cfg := Load()
 	if cfg.AdminToken != "admin123" || cfg.AdminName != "admin" {
@@ -166,7 +166,7 @@ func TestPlatformProfileBeatsRealEnvironment(t *testing.T) {
 	t.Setenv("XUANKE_ADMIN_TOKEN", "env-token-should-lose")
 	t.Setenv("XUANKE_ADMIN_NAME", "")
 	SetDataDirForPlatform(t.TempDir())
-	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+	SetPlatformProfileForPlatform("admin", "admin123")
 
 	if cfg := Load(); cfg.AdminToken != "admin123" || cfg.AdminName != "admin" {
 		t.Fatalf("APK 内置账密必须无条件优于环境变量: %+v", cfg)
@@ -183,10 +183,30 @@ func TestNoPlatformProfileKeepsDesktopBehavior(t *testing.T) {
 	SetDataDirForPlatform(root)
 
 	cfg := Load()
-	if cfg.AdminToken != "desktop-token" || cfg.AdminName != "" || cfg.ListenHost != "" {
-		t.Fatalf("桌面形态不得被 APK 内置配置污染: %+v", cfg)
+	if cfg.AdminToken != "desktop-token" || cfg.AdminName != "" || cfg.ListenHost != "127.0.0.1" {
+		t.Fatalf("桌面形态不得被 APK 内置配置污染（监听默认只绑回环）: %+v", cfg)
 	}
 	if _, err := os.Stat(filepath.Join(root, "data", ".env")); !os.IsNotExist(err) {
 		t.Fatal("管理口令来自真实环境变量时不得写 .env（保持原行为）")
+	}
+}
+
+// TestListenHostConfigurable 监听地址对桌面与 APK 是同一套 env 语义：
+// 默认 127.0.0.1（只允许本机），填内网 IP 开局域网、填域名走穿透/公网、
+// 填 0.0.0.0 等价旧版的全接口监听。
+func TestListenHostConfigurable(t *testing.T) {
+	resetProfileState(t)
+	t.Setenv("XUANKE_ADMIN_TOKEN", "tok")
+	t.Setenv("XUANKE_LISTEN_HOST", "")
+	SetDataDirForPlatform(t.TempDir())
+
+	if cfg := Load(); cfg.ListenHost != "127.0.0.1" {
+		t.Fatalf("默认监听地址必须是 127.0.0.1（仅本机），实际 %q", cfg.ListenHost)
+	}
+	for _, host := range []string{"192.168.1.10", "xuanke.example.com", "0.0.0.0"} {
+		t.Setenv("XUANKE_LISTEN_HOST", host)
+		if cfg := Load(); cfg.ListenHost != host {
+			t.Fatalf("XUANKE_LISTEN_HOST=%s 必须生效，实际 %q", host, cfg.ListenHost)
+		}
 	}
 }

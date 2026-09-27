@@ -39,6 +39,12 @@ type Options struct {
 	ActivationEnabled bool
 	Encrypt           func(string) (string, error)
 	Runtime           *runtime.Store
+	// PlatformEmbedded 平台内置形态（APK）：管理账密随包固定、端口不可改
+	// （Java 壳按 3091 加载页面，改了 App 内页面就连不上）。
+	PlatformEmbedded bool
+	// Rebind 监听地址热切换（server.go 注入：先绑新地址成功再关旧的）。
+	// nil = 该形态不支持热重绑（测试直构 Deps），后台改监听地址时明确拒绝。
+	Rebind func(host, port string) error
 	// Stats handleAdminStats 专用的可注入替身（窄接口，四个读方法）；nil 时回退 Store。
 	// 生产装配不设——只为让「目标数读取失败必须报 500」这条契约在测试里可被真实覆盖。
 	Stats StatsStore
@@ -61,6 +67,10 @@ type Deps struct {
 	AdminToken string
 	// AdminName 管理员登录账号名（默认 admin，可用 XUANKE_ADMIN_NAME 改名）。
 	AdminName string
+	// PlatformEmbedded 平台内置形态（APK）：端口不可改（页面按 3091 连）。
+	PlatformEmbedded bool
+	// Rebind 监听地址热切换（server.go 注入；nil = 不支持，改监听地址被拒）。
+	Rebind func(host, port string) error
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
 }
@@ -658,6 +668,44 @@ type AdminConfigView struct {
 	CaptchaEngine      string `json:"captcha_engine"`
 	CaptchaFallback    bool   `json:"captcha_fallback"`
 	CaptchaConcurrency int    `json:"captcha_concurrency"`
+	ListenHost         string `json:"listen_host"`
+	ListenPort         string `json:"listen_port"`
+	// PlatformEmbedded 平台内置形态（APK）：前端据此把端口输入置灰——
+	// Java 壳页面按 3091 连接，改端口会让 App 内页面失联。
+	PlatformEmbedded bool `json:"platform_embedded"`
+}
+
+// configView 组装配置视图（GET 与 PUT 响应共用一处，避免两边字段漏改分叉）。
+func (d *Deps) configView(cfg runtime.Config) AdminConfigView {
+	return AdminConfigView{
+		ActivationEnabled:  cfg.ActivationEnabled,
+		VisionBaseURL:      cfg.VisionBaseURL,
+		VisionAPIKey:       maskKey(cfg.VisionAPIKey),
+		VisionModel:        cfg.VisionModel,
+		CaptchaEngine:      cfg.CaptchaEngine,
+		CaptchaFallback:    cfg.CaptchaFallback,
+		CaptchaConcurrency: cfg.CaptchaConcurrency,
+		ListenHost:         cfg.ListenHost,
+		ListenPort:         cfg.ListenPort,
+		PlatformEmbedded:   d.PlatformEmbedded,
+	}
+}
+
+// validateListen 校验监听主机/端口：主机只填主机名（IP / 域名 / 0.0.0.0），
+// 不带方案与端口——否则 "127.0.0.1:3091" 再拼一次端口会变成
+// "127.0.0.1:3091:3091"（net.Listen 才报错，管理员只看到含糊的绑定失败）。
+func validateListen(host, port string) error {
+	if host == "" {
+		return errors.New("监听地址不能为空：仅本机填 127.0.0.1，所有网卡填 0.0.0.0")
+	}
+	if strings.ContainsAny(host, "/:") {
+		return errors.New("监听地址只填主机（127.0.0.1 / 内网 IP / 域名 / 0.0.0.0），不带 http:// 与端口")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return errors.New("端口需为 1-65535 的数字")
+	}
+	return nil
 }
 
 // maxCaptchaConcurrency 验证码识别并发上限：并发 1 是安全基线，20 覆盖
@@ -669,16 +717,7 @@ type AdminConfigView struct {
 func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		cfg := d.Runtime.Get()
-		writeJSON(w, 0, AdminConfigView{
-			ActivationEnabled:  cfg.ActivationEnabled,
-			VisionBaseURL:      cfg.VisionBaseURL,
-			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
-			VisionModel:        cfg.VisionModel,
-			CaptchaEngine:      cfg.CaptchaEngine,
-			CaptchaFallback:    cfg.CaptchaFallback,
-			CaptchaConcurrency: cfg.CaptchaConcurrency,
-		}, "")
+		writeJSON(w, 0, d.configView(d.Runtime.Get()), "")
 	case http.MethodPut:
 		var req struct {
 			ActivationEnabled  *bool   `json:"activation_enabled"`
@@ -688,6 +727,8 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			CaptchaEngine      *string `json:"captcha_engine"`
 			CaptchaFallback    *bool   `json:"captcha_fallback"`
 			CaptchaConcurrency *int    `json:"captcha_concurrency"`
+			ListenHost         *string `json:"listen_host"`
+			ListenPort         *string `json:"listen_port"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -703,6 +744,40 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		if req.CaptchaConcurrency != nil && (*req.CaptchaConcurrency < 1 || *req.CaptchaConcurrency > maxCaptchaConcurrency) {
 			writeJSON(w, 1, nil, "验证码识别并发需在 1-20 之间")
 			return
+		}
+		// 监听地址：先真实重绑监听（新地址绑定失败即整体拒绝，绝不落库一个起不来的
+		// 地址），成功才写运行时配置。放在其它字段 Update 之前——重绑失败时不能留下
+		// "vision 改了、监听没改"的半生效状态。
+		if req.ListenHost != nil || req.ListenPort != nil {
+			cur := d.Runtime.Get()
+			host, port := cur.ListenHost, cur.ListenPort
+			if req.ListenHost != nil {
+				host = strings.TrimSpace(*req.ListenHost)
+			}
+			if req.ListenPort != nil {
+				port = strings.TrimSpace(*req.ListenPort)
+			}
+			if err := validateListen(host, port); err != nil {
+				writeJSON(w, 1, nil, err.Error())
+				return
+			}
+			if d.PlatformEmbedded && port != cur.ListenPort {
+				writeJSON(w, 1, nil, "APK 内置页面按当前端口连接，端口不可修改（监听地址可改）")
+				return
+			}
+			if d.Rebind == nil {
+				writeJSON(w, 1, nil, "当前形态不支持监听地址热重载")
+				return
+			}
+			if err := d.Rebind(host, port); err != nil {
+				writeJSONStatus(w, http.StatusBadRequest, 1, nil, "监听地址未生效："+err.Error())
+				return
+			}
+			d.Runtime.Update(func(c *runtime.Config) {
+				c.ListenHost = host
+				c.ListenPort = port
+			})
+			changed = append(changed, "监听 "+host+":"+port)
 		}
 		d.Runtime.Update(func(c *runtime.Config) {
 			if req.ActivationEnabled != nil {
@@ -765,15 +840,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.logAudit(d.AdminNameValue(), 0, "config", "更新配置: "+strings.Join(changed, ", "), true)
-		writeJSON(w, 0, AdminConfigView{
-			ActivationEnabled:  cfg.ActivationEnabled,
-			VisionBaseURL:      cfg.VisionBaseURL,
-			VisionAPIKey:       maskKey(cfg.VisionAPIKey),
-			VisionModel:        cfg.VisionModel,
-			CaptchaEngine:      cfg.CaptchaEngine,
-			CaptchaFallback:    cfg.CaptchaFallback,
-			CaptchaConcurrency: cfg.CaptchaConcurrency,
-		}, "配置已更新并生效")
+		writeJSON(w, 0, d.configView(cfg), "配置已更新并生效")
 	default:
 		writeJSON(w, 405, nil, "方法不允许")
 	}

@@ -1033,18 +1033,18 @@ function AccountsTab({
                           variant="outline"
                           size="sm"
                           onClick={() => onSelectAccount?.(a.account)}
-                          className="text-xs text-white border-neutral-700 hover:border-white active:border-white flex items-center gap-1.5"
+                          className="text-2xs whitespace-nowrap text-white border-neutral-700 hover:border-white active:border-white flex items-center gap-1.5"
                         >
-                          <BookMarked className="h-3.5 w-3.5" />
+                          <BookMarked className="h-3 w-3" />
                           <span>选课大厅</span>
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => onAskDelete(a.account)}
-                          className="text-xs text-neutral-400 hover:text-white active:text-white hover:border-white active:border-white"
+                          className="text-2xs whitespace-nowrap text-neutral-400 hover:text-white active:text-white hover:border-white active:border-white"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
                           删除
                         </Button>
                       </div>

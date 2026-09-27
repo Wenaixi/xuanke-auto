@@ -1,6 +1,6 @@
 # 至道选课自动化 · 第三方声明
 
-本仓库用到以下项目（许可证已逐一确认可开源）：
+本仓库使用以下第三方项目，许可证已逐一核对。
 
 ## Go 后端（backend/）
 
@@ -8,23 +8,40 @@
 | --- | --- | --- |
 | [modernc.org/sqlite](https://modernc.org/sqlite) | 纯 Go SQLite 驱动 | BSD-3-Clause |
 | [yangbin1322/go-ddddocr](https://github.com/yangbin1322/go-ddddocr) | 原生 ddddocr 识别引擎绑定 | Apache-2.0 |
+| [yalue/onnxruntime_go](https://github.com/yalue/onnxruntime_go) | ONNX Runtime 的 Go 绑定 | MIT |
 | [nfnt/resize](https://github.com/nfnt/resize) | 图像缩放 | ISC |
 | [getlantern/systray](https://github.com/getlantern/systray) | 系统托盘 | MIT |
 | [lxn/walk](https://github.com/lxn/walk) 与 [lxn/win](https://github.com/lxn/win) | Windows 原生 GUI 与 Win32 API | BSD-3-Clause |
-| [skratchdot/open-golang](https://github.com/skratchdot/open-golang) | 默认浏览器打开链接 | MIT |
+| [skratchdot/open-golang](https://github.com/skratchdot/open-golang) | 用默认浏览器打开链接 | MIT |
 | [google/uuid](https://github.com/google/uuid) | UUID 生成 | BSD-3-Clause |
 | [stretchr/testify](https://github.com/stretchr/testify) | 测试断言 | MIT |
 | 其他 Go 依赖（含 modernc 系 cc/v4、libc 等） | 见 `backend/go.sum` | 各依赖 LICENSE |
 
 ## 前端（web/）
 
-React 19、Vite、TypeScript、Tailwind CSS 4、Radix Primitives、TanStack Query、lucide-react、oxlint 等。各包许可证见 `web/package-lock.json` 对应 LICENSE；构建依赖上游数据，建议定期 `npm audit`。
+React 19、Vite、TypeScript、Tailwind CSS 4、Radix Primitives、TanStack Query、lucide-react、oxlint 等。各包许可证见 `web/package-lock.json` 及对应包内 LICENSE，构建依赖上游数据，建议定期 `npm audit`。
 
-## 符号与内置资产
+### 内嵌字体
+
+界面使用三套自托管可变字体，均为 **SIL Open Font License 1.1**，随包保留各自的 LICENSE 即满足该许可的要求，界面本身无需再作声明：
+
+| 包 | 字体 | 版权 |
+| --- | --- | --- |
+| `@fontsource-variable/geist` | Geist Variable | The Geist Project Authors（https://github.com/vercel/geist-font） |
+| `@fontsource-variable/geist-mono` | Geist Mono Variable | The Geist Project Authors（https://github.com/vercel/geist-font） |
+| `@fontsource-variable/noto-sans-sc` | Noto Sans SC Variable | Google Inc. |
+
+中文分包不覆盖 CJK 扩展 B 区（U+20000 以上），这部分字形由字体栈末尾的系统中文兜底。
+
+## 模型与运行时
 
 - `backend/internal/zhidao/assets/common_old.onnx`、`charsets_old.json`：ddddocr 识别模型与字符集，来自 [ddddocr](https://github.com/sml2h3/ddddocr)，遵循其许可。
-- `web/public/bg.jpg`：界面背景图（作者自备图片）。
+- Microsoft ONNX Runtime 运行时（`onnxruntime` dll/so/dylib）：版本锁定官方 v1.25.0，与 `go.sum` 中的 `onnxruntime_go` 对齐。**不入 git**，由 `backend/scripts/fetch-onnxruntime.sh` 在构建时下载，许可与版权见[上游仓库](https://github.com/microsoft/onnxruntime)。
+
+## 其他资产
+
+- `web/public/bg.jpg`：界面背景图，作者自备。
 
 ## 完整第三方声明
 
-所有第三方代码、模型、资产的完整版权与许可声明，请在各上游仓库查询。发布产物（单 exe）内嵌上述全部内容，分发时请一并保留本文件。
+上述第三方代码、模型与资产的完整版权与许可声明，请在各上游仓库查询。发布产物（单 exe、APK）内嵌了上述全部内容，分发时请一并保留本文件。

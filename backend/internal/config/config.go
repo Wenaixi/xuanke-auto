@@ -41,6 +41,9 @@ type Config struct {
 	AdminToken string
 	// AdminName 管理员账号名（默认 admin）
 	AdminName string
+	// ListenHost 监听地址（空 = 所有网卡，桌面/服务器默认；APK 内置 127.0.0.1，
+	// 只允许同设备访问——局域网与外部一律不可达）
+	ListenHost string
 	// ActivationCodesEnabled 激活码机制开关（XUANKE_ACTIVATION，默认 off；on 才启用激活码）
 	// 默认关闭：本地双击 exe 开箱即用（账号登录直接进系统），公网分发才显式开启激活码。
 	ActivationCodesEnabled bool
@@ -50,14 +53,15 @@ type Config struct {
 // 数据目录固定为可执行文件同目录下的 data/（data/.env 含管理员账密/激活码开关等）。
 // 首次运行没有 data/.env 时自动写入随机管理员账密与默认配置，之后每次读取。
 func Load() Config {
+	prof := platform.Load()
 	envPath := filepath.Join(dataDir(), ".env")
-	ensureEnvFile(envPath)
+	ensureEnvFile(envPath, prof)
 	loadDotEnv(envPath)
 	// 开放时间唯一事实源 = 平台 beginTimes 自动识别（scheduler 层），配置层不再注入，
 	// 也不读取 XUANKE_OPEN_TIME 环境变量——旧文档的硬编码 2026 默认值已整体移除，
 	// 避免"识别槽为空时把过期日期当开窗点"的误导。
 	dbPath := envOr("XUANKE_DB", filepath.Join(dataDir(), "xuanke.db"))
-	return Config{
+	cfg := Config{
 		Port:                   envOr("XUANKE_PORT", "3091"),
 		DBPath:                 dbPath,
 		BaseURL:                "https://www.zhidao.fj.cn",
@@ -68,6 +72,14 @@ func Load() Config {
 		AdminName:              os.Getenv("XUANKE_ADMIN_NAME"),
 		ActivationCodesEnabled: os.Getenv("XUANKE_ACTIVATION") == "on",
 	}
+	if prof != nil {
+		// APK 内置配置最后覆盖：.env / 环境变量里的历史值一律让位，
+		// 保证「APK 上永远是这组账密 + 只监听回环」。
+		cfg.AdminName = prof.AdminName
+		cfg.AdminToken = prof.AdminToken
+		cfg.ListenHost = prof.ListenHost
+	}
+	return cfg
 }
 
 // loadDotEnv 读取 data/.env 的键值对回填环境变量（真实环境变量优先，文件兜底）。
@@ -146,6 +158,25 @@ func SetDataDirForPlatform(dir string) {
 	forcedDataDir.Store(dir)
 }
 
+// platformProfile 平台内置配置（APK 专属）：管理员账密与监听地址随包固定。
+// 桌面/服务器不注入（nil），一切行为与既有版本完全一致。
+type platformProfile struct {
+	AdminName  string
+	AdminToken string
+	ListenHost string
+}
+
+// platform 平台内置配置（Android JNI 入口在 config.Load 之前注入；桌面恒 nil）。
+var platform atomic.Pointer[platformProfile]
+
+// SetPlatformProfileForPlatform 由平台入口强制管理员账密与监听地址：APK 侧载
+// 场景下无需任何 .env 配置即可进管理页，且服务只绑回环（同设备外不可达）。
+// 桌面/服务器不调用，保持「随机口令 + 全接口监听」语义（与 SetDataDirForPlatform
+// 同一套平台注入模式）。
+func SetPlatformProfileForPlatform(name, token, listenHost string) {
+	platform.Store(&platformProfile{AdminName: name, AdminToken: token, ListenHost: listenHost})
+}
+
 // WritableDir 返回应用私有、可写的资源释出目录（供内嵌资源落地磁盘）。
 //
 // **Android 上绝不能用 os.TempDir()**：其返回 /data/local/tmp（系统目录，
@@ -161,20 +192,30 @@ func WritableDir() string {
 	return os.TempDir()
 }
 
-// ensureEnvFile 确保 .env 存在：不存在则自动生成随机管理员口令与默认配置。
-// 已存在（含真实环境变量）一律不改动，保证冰封可复现配置。
-func ensureEnvFile(path string) {
-	if os.Getenv("XUANKE_ADMIN_TOKEN") != "" {
+// ensureEnvFile 确保 .env 存在：prof 为 nil（桌面/服务器）时不存在则自动生成
+// 随机管理员口令与默认配置；prof 非 nil（APK）时写入随包固定的账密，并在已有
+// .env 上就地改写账密两键——保证「文件里写的」与「实际生效的」永远一致
+// （否则用户按 .env 里的随机口令登录必失败，排障被彻底误导）。
+func ensureEnvFile(path string, prof *platformProfile) {
+	if prof == nil && os.Getenv("XUANKE_ADMIN_TOKEN") != "" {
 		return // 真实环境变量已提供管理口令，无需写文件
 	}
 	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
+		if prof != nil {
+			_ = os.WriteFile(path, []byte(rewriteAuthLines(string(b), prof)), 0o600)
+		}
 		return // 已有配置
 	}
 	admin := randomAdminToken()
+	nameLine := "# XUANKE_ADMIN_NAME=admin"
+	if prof != nil {
+		admin = prof.AdminToken
+		nameLine = "XUANKE_ADMIN_NAME=" + prof.AdminName
+	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	tpl := `# 至道选课自动化 - 环境配置文件（首次运行自动生成）
 # 管理员登录账号（可选，默认 admin；改成任意名字即为管理员登录账号）
-# XUANKE_ADMIN_NAME=admin
+` + nameLine + `
 # 管理员口令（首次运行自动生成；删除本行后重启可重新生成随机口令）
 XUANKE_ADMIN_TOKEN=` + admin + `
 
@@ -192,4 +233,24 @@ XUANKE_ACTIVATION=off
 # XUANKE_DB=data/xuanke.db
 `
 	_ = os.WriteFile(path, []byte(tpl), 0o600)
+}
+
+// rewriteAuthLines 就地改写 .env 的管理员账密两键：先删掉两键的全部旧行
+// （含注释行），再把内置值前置，其余配置原样保留。
+func rewriteAuthLines(old string, prof *platformProfile) string {
+	var keep []string
+	for _, line := range strings.Split(old, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "XUANKE_ADMIN_TOKEN=") ||
+			strings.HasPrefix(t, "XUANKE_ADMIN_NAME=") ||
+			strings.HasPrefix(t, "# XUANKE_ADMIN_TOKEN=") ||
+			strings.HasPrefix(t, "# XUANKE_ADMIN_NAME=") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	head := "# 管理员账号与口令（APK 随包固定；桌面版不受影响）\n" +
+		"XUANKE_ADMIN_NAME=" + prof.AdminName + "\n" +
+		"XUANKE_ADMIN_TOKEN=" + prof.AdminToken + "\n"
+	return head + strings.TrimLeft(strings.Join(keep, "\n"), "\n")
 }

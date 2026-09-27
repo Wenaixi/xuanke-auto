@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -83,4 +85,108 @@ func TestCaptchaEngineDefaultDdddocr(t *testing.T) {
 	}
 	// 兜底开关是运行时可配置项（管理员后台热配置并落库），配置层不读 env——
 	// 留注释防止后来人误加 XUANKE_CAPTCHA_FALLBACK env 读取（开关唯一事实源=落库配置）。
+}
+
+// resetProfileState 复位平台注入与数据目录的包级状态（测试隔离）。
+// 同包测试直接改写私有包级变量：不为此新增导出复位 API（包内机制不进 interface 面）。
+func resetProfileState(t *testing.T) {
+	t.Helper()
+	platform.Store(nil)
+	forcedDataDir = atomic.Value{}
+	t.Cleanup(func() {
+		platform.Store(nil)
+		forcedDataDir = atomic.Value{}
+	})
+}
+
+// TestPlatformProfileWritesFixedAuthToEnvFile APK 形态：注入内置 profile 后，
+// 管理员账密固定、只监听回环，且账密写进 data/.env（文件内容与生效值必须一致）。
+func TestPlatformProfileWritesFixedAuthToEnvFile(t *testing.T) {
+	resetProfileState(t)
+	t.Setenv("XUANKE_ADMIN_TOKEN", "")
+	t.Setenv("XUANKE_ADMIN_NAME", "")
+	root := t.TempDir()
+	SetDataDirForPlatform(root)
+	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+
+	cfg := Load()
+	if cfg.AdminName != "admin" || cfg.AdminToken != "admin123" || cfg.ListenHost != "127.0.0.1" {
+		t.Fatalf("APK 内置配置未生效: %+v", cfg)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "data", ".env"))
+	if err != nil {
+		t.Fatalf("APK 首次启动必须写出 data/.env: %v", err)
+	}
+	if !strings.Contains(string(b), "XUANKE_ADMIN_TOKEN=admin123") ||
+		!strings.Contains(string(b), "XUANKE_ADMIN_NAME=admin") {
+		t.Fatalf(".env 必须写入固定账密，实际:\n%s", b)
+	}
+}
+
+// TestPlatformProfileRewritesExistingEnvFileAuth APK 升级安装后 data/.env 仍是
+// 旧的随机口令：必须被就地改写为固定账密，其余配置保留。
+func TestPlatformProfileRewritesExistingEnvFileAuth(t *testing.T) {
+	resetProfileState(t)
+	t.Setenv("XUANKE_ADMIN_TOKEN", "")
+	t.Setenv("XUANKE_ADMIN_NAME", "")
+	root := t.TempDir()
+	SetDataDirForPlatform(root)
+	if err := os.MkdirAll(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "XUANKE_ADMIN_TOKEN=deadbeefdeadbeefdeadbeef\n" +
+		"XUANKE_ADMIN_NAME=someone\n" +
+		"SF_API_KEY=sk-keep-me\n"
+	if err := os.WriteFile(filepath.Join(root, "data", ".env"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+
+	cfg := Load()
+	if cfg.AdminToken != "admin123" || cfg.AdminName != "admin" {
+		t.Fatalf("内置账密必须覆盖 .env 历史值: %+v", cfg)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "data", ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "deadbeef") || strings.Contains(s, "someone") {
+		t.Fatalf(".env 不得残留历史账密: %s", s)
+	}
+	if !strings.Contains(s, "XUANKE_ADMIN_TOKEN=admin123") || !strings.Contains(s, "SF_API_KEY=sk-keep-me") {
+		t.Fatalf(".env 应为「固定账密 + 保留其它配置」，实际: %s", s)
+	}
+}
+
+// TestPlatformProfileBeatsRealEnvironment APK 上即便真实环境变量已设口令，
+// 内置值仍必须胜出（「固定为 admin/admin123」是无条件语义）。
+func TestPlatformProfileBeatsRealEnvironment(t *testing.T) {
+	resetProfileState(t)
+	t.Setenv("XUANKE_ADMIN_TOKEN", "env-token-should-lose")
+	t.Setenv("XUANKE_ADMIN_NAME", "")
+	SetDataDirForPlatform(t.TempDir())
+	SetPlatformProfileForPlatform("admin", "admin123", "127.0.0.1")
+
+	if cfg := Load(); cfg.AdminToken != "admin123" || cfg.AdminName != "admin" {
+		t.Fatalf("APK 内置账密必须无条件优于环境变量: %+v", cfg)
+	}
+}
+
+// TestNoPlatformProfileKeepsDesktopBehavior 桌面/服务器未注入 profile 时：
+// 环境变量口令照用、ListenHost 为空（全接口监听）、且不因本次改动写 .env。
+func TestNoPlatformProfileKeepsDesktopBehavior(t *testing.T) {
+	resetProfileState(t)
+	t.Setenv("XUANKE_ADMIN_TOKEN", "desktop-token")
+	t.Setenv("XUANKE_ADMIN_NAME", "")
+	root := t.TempDir()
+	SetDataDirForPlatform(root)
+
+	cfg := Load()
+	if cfg.AdminToken != "desktop-token" || cfg.AdminName != "" || cfg.ListenHost != "" {
+		t.Fatalf("桌面形态不得被 APK 内置配置污染: %+v", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(root, "data", ".env")); !os.IsNotExist(err) {
+		t.Fatal("管理口令来自真实环境变量时不得写 .env（保持原行为）")
+	}
 }

@@ -55,6 +55,15 @@
   --text-4xl--letter-spacing: -0.02em;
 }
 
+/* 等宽场景特性：font-mono 用于日志、时间戳、课程编号、激活码。
+   关闭 liga/calt——它们会把 =>、!= 之类符号序列合并成单个字形，
+   在密集诊断日志里造成误读；启用 zero（斜杠零）区分数字 0 与字母 O。
+   该声明与内置 font-mono 同名，靠顶层 @utility 覆盖并附加特性。 */
+@utility font-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "liga" 0, "calt" 0, "tnum" 1, "zero" 1;
+}
+
 /* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，
    恒定压过 @layer utilities 内的 Tailwind 工具类。放进 components 层后与 utilities
    同级裁决——**且 utilities 在层序中更靠后，故 Card 自带 bg-[var(--surface)] 依旧胜出**，
@@ -121,6 +130,12 @@ html, body {
   color: var(--fg);
 }
 
+/* Android WebView 必须：关闭自动字体膨胀，否则自托管字体会被打乱断行 */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 /* 挂载点外壳：透明底 + 相对定位，作为随文档滚动的背景层定位参照 */
 #root {
   background-color: transparent;
@@ -133,6 +148,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
   overflow-x: hidden;
+  /* 中文标点挤压：Chromium 123+ 支持，但字体须含 halt/chws 特性，属实测项 */
+  text-spacing-trim: normal;
+}
+
+/* 中英自动间距：Chromium 至今未实现，写了不生效但无害，其它内核将来受益 */
+@supports (text-autospace: normal) {
+  body {
+    text-autospace: normal;
+  }
 }
 
 /* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰。

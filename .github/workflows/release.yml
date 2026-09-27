@@ -485,19 +485,10 @@ jobs:
             CODE=1
           fi
           echo "::notice::APK 版本注入: versionName=$NAME versionCode=$CODE"
-          # 侧载 debug 签名：CI runner 上 ~/.android/debug.keystore 不存在
-          # （AGP 不会像本地那样自动生成），validateSigningRelease 直接失败。
-          # 这里显式用 keytool 生成标准 debug keystore（口令/别名均为
-          # android，与 Android SDK 默认一致），保证任何 runner 都能出包。
-          KS="$HOME/.android/debug.keystore"
-          if [ ! -f "$KS" ]; then
-            mkdir -p "$(dirname "$KS")"
-            keytool -genkeypair -v -keystore "$KS" -storepass android \
-              -alias androiddebugkey -keypass android \
-              -dname "CN=Android Debug,O=Android,C=US" \
-              -keyalg RSA -keysize 2048 -validity 10000
-            echo "::notice::已生成 debug keystore: $KS"
-          fi
+          # 侧载签名密钥入库（build/android/xuanke.jks，由 app/build.gradle 的
+          # signingConfigs.release 引用）：CI 不再现场生成随机 keystore——那会让
+          # 每个 release 的证书都不同，老用户升级必然
+          # INSTALL_FAILED_UPDATE_INCOMPATIBLE（v0.2.15→v0.2.16 实证）。
           # 版本号用 sed 直接改写 app/build.gradle 的两行，绕开 Gradle DSL 求值
           # （-P 注入属性在 defaultConfig 阶段取到 null，AGP 抛 Value is null，
           #  七轮 CI 实测未中；providers.gradleProperty 同样取 null）。
@@ -519,6 +510,17 @@ jobs:
             echo "::error::APK 版本注入失败：期望 versionName='$NAME'，实际 $GOT_NAME"; exit 1
           fi
           echo "::notice::APK 版本校验通过: $GOT_NAME"
+          # 签名指纹断言：密钥被替换 / 被 -P 覆盖 / 生成漂移，都在这里硬失败——
+          # 否则「用户装不上」要等真机反馈才发现。指纹 = 证书 DER 的 SHA-256
+          # （keytool -list -v 的 SHA256 字段同口径）。
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          EXPECT_FP="b02128ad80a9f94dc1915d2a987f00a5276a10ef3c405c21962b52da14409b0b"
+          GOT_FP="$("$APKSIGNER" verify --print-certs "$APK" |
+            sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          if [ "$GOT_FP" != "$EXPECT_FP" ]; then
+            echo "::error::APK 签名指纹不符：期望 $EXPECT_FP，实际 $GOT_FP"; exit 1
+          fi
+          echo "::notice::APK 签名指纹校验通过: $GOT_FP"
           mkdir -p ../../dist-release
           cp "$APK" ../../dist-release/xuanke-android-arm64.apk
 

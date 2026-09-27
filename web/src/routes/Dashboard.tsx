@@ -10,7 +10,6 @@ import { useTickingCountdown } from "../lib/useTickingCountdown"
 import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
 import {
   Activity,
-  ArrowUpRight,
   BookOpen,
   CheckCircle2,
   ChevronDown,
@@ -298,6 +297,10 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     }
   }, [expandedDates, dateGroups])
 
+  // 本机会话是否已失效：与顶部错误条同源判据（业务码 401），不另造一套状态。
+  // 网络错误/5xx 不算会话失效（会被 react-query 重试），否则会误报"请重新登录"。
+  const sessionInvalid = !stateLoading && !!stateErr && isSessionError(stateErr)
+
   return (
     <div className="min-h-screen text-white p-4 sm:p-6 lg:p-8 select-none pb-8">
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
@@ -307,33 +310,29 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             <div className="flex items-center gap-2.5">
               <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
-                选课自动化控制中心
+                选课助手
               </h1>
-              <Badge variant="outline" className="text-3xs uppercase font-mono tracking-wider">
-                CORE
-              </Badge>
             </div>
             <p className="text-xs text-neutral-400">
-              实时监听教务选课开放时间节点与席位状态
+              开放时间一到，自动帮你抢
             </p>
           </div>
 
           <div className="flex items-center gap-2.5">
             <Button
-              variant="dark"
+              variant="primary"
               size="sm"
               onClick={onGoSelect}
               className="flex items-center gap-1.5 text-xs"
             >
-              <BookOpen className="h-3.5 w-3.5 text-white" />
-              <span>选课大厅</span>
-              <ArrowUpRight className="h-3.5 w-3.5 text-white" />
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>去选课</span>
             </Button>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={onLogout}
-              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
+              className="flex items-center gap-1.5 text-xs"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span>退出</span>
@@ -449,60 +448,66 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             </CardContent>
           </Card>
 
-          {/* 右侧跨度：运行状态指标卡片 */}
+          {/* 右侧跨度：账号状态卡。只回答一个问题——「我现在能不能正常抢课」。
+              原「运行指标」暴露心跳轮询周期、频控保护策略与教务令牌技术状态，
+              违反设计规范「学生端不暴露心跳轮询周期、频控保护策略、教务令牌技术状态」；
+              现只留两枚令牌有效性，并把技术状态译成人话（失效时直接说明会自动重试）。 */}
           <Card className="rounded-[var(--radius-lg)] glass border border-neutral-800 flex flex-col justify-between shadow-none">
             <CardHeader className="pb-2 border-b border-neutral-900">
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-neutral-400" />
                 <CardTitle className="text-sm font-medium tracking-wide text-white">
-                  运行指标
+                  账号状态
                 </CardTitle>
               </div>
               <CardDescription className="text-xs text-neutral-500">
-                后台调度心跳与通信机制
+                两项都正常时，到点会自动帮你抢
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3 text-xs pt-3">
-              <div className="divide-y divide-neutral-900">
-                <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-neutral-400">心跳轮询周期</span>
-                  <span className="text-white font-mono tabular-nums">30 秒</span>
+            <CardContent className="pt-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-800 space-y-1.5">
+                  <div className="text-2xs text-neutral-500">教务登录</div>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        state?.token_valid === false ? "bg-white/40 animate-pulse" : "bg-white"
+                      }`}
+                    />
+                    <span
+                      className={`text-xs font-medium ${
+                        state?.token_valid === false ? "text-white/60" : "text-white"
+                      }`}
+                    >
+                      {state?.token_valid === false ? "已失效" : "有效"}
+                    </span>
+                  </div>
+                  <div className="text-2xs text-neutral-500 min-h-[1em]">
+                    {state?.token_valid === false ? "正在自动重新登录" : ""}
+                  </div>
                 </div>
-                <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-neutral-400">预选目标课程</span>
-                  {/* 去掉"/ 3 门"——后端上限 100 门且每发布可配多条备选，
-                      3 门是早期"每账号至多 3 门"旧约束残留，硬编码展示与真实能力分叉 */}
-                  <span className="text-white font-mono tabular-nums">{courses.length} 门</span>
-                </div>
-                <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-neutral-400">教务令牌</span>
-                  <span className="flex items-center gap-1.5">
-                    {state?.token_valid === false ? (
-                      <>
-                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
-                        <span className="text-white/60 font-mono">已失效 · 自动恢复中</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
-                        <span className="text-white font-mono">有效</span>
-                      </>
-                    )}
-                  </span>
-                </div>
-                <div className="py-2.5 flex items-center justify-between">
-                  <span className="text-neutral-400">频控保护策略</span>
-                  <span className="text-white">分级退避 · 自动恢复</span>
-                </div>
-              </div>
 
-              <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-800 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
-                  <span className="text-white font-medium">后台就绪</span>
+                <div className="p-3 rounded-[var(--radius-sm)] glass border border-neutral-800 space-y-1.5">
+                  <div className="text-2xs text-neutral-500">本机会话</div>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        sessionInvalid ? "bg-white/40 animate-pulse" : "bg-white"
+                      }`}
+                    />
+                    <span
+                      className={`text-xs font-medium ${
+                        sessionInvalid ? "text-white/60" : "text-white"
+                      }`}
+                    >
+                      {sessionInvalid ? "已失效" : "有效"}
+                    </span>
+                  </div>
+                  <div className="text-2xs text-neutral-500 min-h-[1em]">
+                    {sessionInvalid ? "请退出后重新登录" : ""}
+                  </div>
                 </div>
-                <span className="text-2xs text-neutral-500 font-mono">STANDBY</span>
               </div>
             </CardContent>
           </Card>
@@ -517,9 +522,8 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 预选目标课程
               </h2>
             </div>
-            <span className="text-xs text-neutral-500 font-mono">
-              {/* 展示名 TARGETS = 动态目标集合（旧"3 门"约束详见上方注释） */}
-              TARGETS
+            <span className="text-xs text-neutral-500">
+              {courses.length} 门
             </span>
           </div>
 
@@ -704,7 +708,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                     </button>
                   }
                 >
-                  日志加载失败（网络异常或服务端不可达）
+                  日志没能加载出来，检查下网络再试一次
                 </EmptyState>
               ) : !logs ? (
                 <div className="py-8 text-center text-neutral-600 text-xs font-mono">
@@ -728,7 +732,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   </div>
                 ))
               ) : (
-                <EmptyState className="py-8">NO RECENT LOGS</EmptyState>
+                <EmptyState className="py-8">暂时没有新日志</EmptyState>
               )}
             </div>
           </Card>

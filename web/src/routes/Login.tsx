@@ -1,4 +1,4 @@
-﻿import { useState } from "react"
+import { useState } from "react"
 import { api } from "../api/client"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
@@ -106,9 +106,9 @@ export default function Login({ onLogin }: Props) {
       <div className="w-full max-w-sm">
         <Card className="rounded-[var(--radius-lg)] glass-strong border border-neutral-700 shadow-2xl overflow-hidden">
           <CardHeader className="space-y-1.5 p-6 pb-4">
-            <div className="flex items-center justify-between text-xs tracking-wider uppercase text-neutral-500 font-mono">
-              <span>ZHIDAO EDU</span>
-              <span>SYSTEM</span>
+            <div className="flex items-center justify-between text-xs text-neutral-500">
+              <span>知道教育平台</span>
+              <span>自动选课</span>
             </div>
             <CardTitle className="text-xl font-medium tracking-tight text-white pt-2">
               账户登录
@@ -170,7 +170,7 @@ export default function Login({ onLogin }: Props) {
                     // 可见性切换按钮语义化——aria-label 说明作用、aria-pressed 报状态
                     aria-label={showPassword ? "隐藏密码" : "显示密码"}
                     aria-pressed={showPassword}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 grid h-10 w-10 place-items-center sm:h-7 sm:w-7 text-neutral-500 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -191,16 +191,16 @@ export default function Login({ onLogin }: Props) {
                 variant="primary"
                 size="lg"
                 disabled={loading}
-                className="w-full mt-2 h-10 flex items-center justify-center gap-2 text-sm font-semibold rounded-[var(--radius-sm)]"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm font-semibold rounded-[var(--radius-sm)]"
               >
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin text-black" />
-                    <span>正在连接教务认证...</span>
+                    <span>正在登录，请稍候…</span>
                   </>
                 ) : (
                   <>
-                    <span>登录系统</span>
+                    <span>登录</span>
                     <ArrowRight className="h-4 w-4 text-black" />
                   </>
                 )}
@@ -209,8 +209,8 @@ export default function Login({ onLogin }: Props) {
 
             {/* 底部信息：极简纯粹 */}
             <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between text-2xs text-neutral-500">
-              <span>账号隔离</span>
-              <span>实时调度</span>
+              <span>账密加密保存在本机</span>
+              <span>仅用于自动选课</span>
             </div>
           </CardContent>
         </Card>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type {
@@ -161,25 +161,28 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="codes" className="flex items-center gap-1.5">
-              <KeyRound className="h-3.5 w-3.5" />
+          {/* 窄屏等分五列、全露（图标在上文字在下）：五个标签在 375px 下总宽 460px，
+              横滑方案实测用户不习惯，改为一次看全、一指点中、零滚动；桌面恢复紧凑横排。
+              图标在窄屏放大到 h-4，与 40px 级的触控目标匹配。 */}
+          <TabsList className="grid w-full grid-cols-5 sm:inline-flex sm:w-auto">
+            <TabsTrigger value="codes" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+              <KeyRound className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>激活码</span>
             </TabsTrigger>
-            <TabsTrigger value="config" className="flex items-center gap-1.5">
-              <Settings className="h-3.5 w-3.5" />
+            <TabsTrigger value="config" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+              <Settings className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>系统配置</span>
             </TabsTrigger>
-            <TabsTrigger value="stats" className="flex items-center gap-1.5">
-              <Activity className="h-3.5 w-3.5" />
+            <TabsTrigger value="stats" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+              <Activity className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>运行状态</span>
             </TabsTrigger>
-            <TabsTrigger value="accounts" className="flex items-center gap-1.5">
-              <Users className="h-3.5 w-3.5" />
+            <TabsTrigger value="accounts" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+              <Users className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>账号管理</span>
             </TabsTrigger>
-            <TabsTrigger value="logs" className="flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5" />
+            <TabsTrigger value="logs" className="flex-col gap-1 px-1 py-2 text-2xs sm:flex-row sm:gap-1.5 sm:px-4 sm:py-1.5 sm:text-sm">
+              <FileText className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               <span>日志总览</span>
             </TabsTrigger>
           </TabsList>
@@ -246,7 +249,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                   size="sm"
                   onClick={() => setPendingDelete(null)}
                   disabled={deleting}
-                  className="text-xs h-8"
+                  className="text-xs h-10 sm:h-8"
                   autoFocus
                 >
                   取消
@@ -283,7 +286,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
                       setDeleting(false)
                     }
                   }}
-                  className="text-xs h-8 bg-red-600 hover:bg-red-500 text-white border-none"
+                  className="text-xs h-10 sm:h-8 bg-red-600 hover:bg-red-500 text-white border-none"
                 >
                   {deleting ? "删除中..." : "确认删除"}
                 </Button>
@@ -409,7 +412,7 @@ function CodesTab({
           size="sm"
           onClick={generate}
           disabled={generating}
-          className="h-10 px-5 text-xs flex items-center gap-1.5"
+          className="h-11 sm:h-10 px-5 text-xs flex items-center gap-1.5"
         >
           {generating ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
@@ -435,7 +438,7 @@ function CodesTab({
                 <span className="text-white tracking-widest">{c}</span>
                 <button
                   onClick={() => onCopy(c)}
-                  className="flex items-center gap-1 text-neutral-500 hover:text-white transition-colors"
+                  className="flex items-center gap-1 min-h-10 sm:min-h-0 text-neutral-500 hover:text-white transition-colors"
                 >
                   {copied === c ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   <span>{copied === c ? "已复制" : "复制"}</span>
@@ -449,7 +452,7 @@ function CodesTab({
       {/* 全部激活码 */}
       <div className="text-xs font-mono text-neutral-500 flex items-center justify-between">
         <span>全部激活码</span>
-        <button onClick={() => codesQuery.refetch()} className="flex items-center gap-1 hover:text-white transition-colors">
+        <button onClick={() => codesQuery.refetch()} className="flex items-center justify-center gap-1 min-h-10 sm:min-h-0 hover:text-white transition-colors">
           <RefreshCw className="h-3 w-3" />
           刷新
         </button>
@@ -466,7 +469,7 @@ function CodesTab({
             </button>
           }
         >
-          激活码加载失败（网络异常或服务端不可达）
+          激活码没能加载出来
         </EmptyState>
       ) : codesQuery.data && codesQuery.data.length > 0 ? (
         <div className="max-h-64 overflow-y-auto rounded-[var(--radius-lg)] border border-neutral-900 divide-y divide-neutral-900">
@@ -482,10 +485,10 @@ function CodesTab({
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-3xs text-neutral-600 font-mono hidden sm:inline">{c.created_at}</span>
-                  <button onClick={() => onCopy(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="复制" aria-label="复制">
+                  <button onClick={() => onCopy(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white transition-colors" title="复制" aria-label="复制">
                     {copied === c.code ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
-                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除" aria-label="删除">
+                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除" aria-label="删除">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -743,7 +746,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       )}
       {configQuery.isError && (
         <p className="text-2xs text-neutral-300">
-          配置加载失败（网络异常或服务端不可达）——
+          配置没能加载出来——
           <button onClick={() => configQuery.refetch()} className="underline hover:text-white">
             重试
           </button>
@@ -853,7 +856,7 @@ function StatsTab({ account, sessionToken, activeTab }: { account: Account; sess
               </button>
             }
           >
-            运行状态加载失败（网络异常或服务端不可达）
+            运行状态没能加载出来
           </EmptyState>
         ) : (
           <div className="p-8 text-center text-xs text-neutral-600">加载中...</div>
@@ -967,7 +970,7 @@ function AccountsTab({
             </button>
           }
         >
-          账号数据加载失败（网络异常或服务端不可达）
+          账号列表没能加载出来
         </EmptyState>
       ) : (
         <EmptyState icon={<Users className="h-6 w-6 text-neutral-600" />}>暂无账号</EmptyState>
@@ -1018,7 +1021,7 @@ function LogsTab({ account, sessionToken, activeTab }: { account: Account; sessi
               </button>
             }
           >
-            日志加载失败（网络异常或服务端不可达）
+            日志没能加载出来
           </EmptyState>
         ) : (
           <EmptyState icon={<FileText className="h-6 w-6 text-neutral-600" />}>暂无日志</EmptyState>

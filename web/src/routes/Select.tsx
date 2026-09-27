@@ -1,4 +1,4 @@
-﻿import { memo, useMemo, useState, useEffect, useRef } from "react"
+import { memo, useMemo, useState, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, selectElective, exitElective } from "../api/client"
 import type { Account, ClassItem, ElectivesData, SchedulerState } from "../types"
@@ -424,20 +424,17 @@ export default function Select({ account, sessionToken, onDone }: Props) {
             <div className="flex items-center gap-2.5">
               <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
-                选修课程大厅
+                选择课程
               </h1>
-              <Badge variant="outline" className="text-3xs font-mono uppercase">
-                COURSES
-              </Badge>
             </div>
             <p className="text-xs text-neutral-400">
-              各批次预选课程配置与实时名额
+              挑好课，开抢时自动报名
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <Badge variant="outline" className="text-xs py-1 px-3 font-mono">
-              {account ? account : "默认"} · SELECTED {selectedCount}
+            <Badge variant="outline" className="text-xs py-1.5 px-3 tabular-nums">
+              {account ? account : "默认账号"} · 已选 {selectedCount}
               {publishes.length > 0 ? `/${publishes.length}` : ""}
             </Badge>
             <Button
@@ -451,10 +448,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                 // 在飞 PUT 完成会经 finally 自动补发（见 hook 内 handleBack），全部落定才卸载。
                 void save.handleBack(onDone)
               }}
-              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
+              className="flex items-center gap-1.5 text-xs"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              <span>返回控制台</span>
+              <span>返回</span>
             </Button>
           </div>
         </header>
@@ -524,7 +521,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               variant={sortTightest ? "primary" : "outline"}
               size="sm"
               onClick={() => setSortTightest(!sortTightest)}
-              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-10 px-4 flex-1 sm:flex-none"
+              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none"
             >
               <ArrowDownWideNarrow className="h-3.5 w-3.5" />
               <span>{sortTightest ? "剩余名额正序" : "按剩余排序"}</span>
@@ -534,7 +531,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               variant={onlyAvailable ? "primary" : "outline"}
               size="sm"
               onClick={() => setOnlyAvailable(!onlyAvailable)}
-              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-10 px-4 flex-1 sm:flex-none"
+              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none"
             >
               <Filter className="h-3.5 w-3.5" />
               <span>{onlyAvailable ? "仅看有余量" : "显示全部"}</span>
@@ -765,7 +762,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   disabled={actionLoading.has(c.id) || !c.can_select}
                                   onClick={() => setExitModalClass(c)}
                                   title={c.title || (c.can_select ? "点击退选此课程" : "当前无法退选")}
-                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 transition-colors"
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-10 sm:h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 active:bg-red-500/20 transition-colors"
                                 >
                                   <LogOut className="h-3.5 w-3.5" />
                                   <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
@@ -778,7 +775,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   disabled={actionLoading.has(c.id) || !c.can_select}
                                   onClick={() => handleSelectClass(c)}
                                   title={c.title || (c.can_select ? "点击立即报名" : "不在选修报名时间范围内，无法选课！")}
-                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8 disabled:opacity-40"
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-10 sm:h-8 disabled:opacity-40"
                                 >
                                   <Check className="h-3.5 w-3.5" />
                                   <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
@@ -792,7 +789,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   variant={isSelected ? "outline" : "ghost"}
                                   size="sm"
                                   onClick={() => pick(t.publish_id, c)}
-                                  className="w-full flex items-center justify-center gap-1 text-2xs h-7 text-neutral-400 hover:text-white"
+                                  className="w-full flex items-center justify-center gap-1 text-2xs h-10 sm:h-7 text-neutral-400 hover:text-white"
                                 >
                                   <BookMarked className="h-3 w-3" />
                                   <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>
@@ -803,7 +800,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   variant={isSelected ? "outline" : "primary"}
                                   size="sm"
                                   onClick={() => pick(t.publish_id, c)}
-                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-8"
+                                  className="w-full flex items-center justify-center gap-1.5 text-xs h-10 sm:h-8"
                                 >
                                   {isSelected ? (
                                     <>
@@ -878,7 +875,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   size="sm"
                   onClick={() => setExitModalClass(null)}
                   disabled={actionLoading.has(exitModalClass.id)}
-                  className="text-xs h-8"
+                  className="text-xs h-10 sm:h-8"
                   autoFocus
                 >
                   取消
@@ -888,7 +885,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                   size="sm"
                   onClick={() => handleConfirmExit(exitModalClass)}
                   disabled={actionLoading.has(exitModalClass.id)}
-                  className="text-xs h-8 bg-red-600 hover:bg-red-500 text-white border-none"
+                  className="text-xs h-10 sm:h-8 bg-red-600 hover:bg-red-500 text-white border-none"
                 >
                   {actionLoading.has(exitModalClass.id) ? "退选中..." : "确认退选"}
                 </Button>

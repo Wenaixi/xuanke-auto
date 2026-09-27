@@ -11,9 +11,10 @@ export const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      // 窄屏（管理页 5 个标签 ≈450px）超出容器时横向滚动，不再被 body 的
-      // overflow-x:hidden 裁掉导致末尾标签点不到；末尾标签半露本身就是可滑动线索。
-      // 隐藏滚动条：6px 条会挤占 h-10 栏高并制造视觉噪音。
+      // 纯兜底：标签总宽超出容器时横向可滚，避免被 body 的 overflow-x:hidden 直接裁掉
+      // （否则末尾标签永不可达）。**管理页已不依赖此兜底**——横滑方案上线后实测用户
+      // 用不惯，改为窄屏等分五列全露（见 Admin 的 TabsList）；此处只保证将来标签变多时
+      // 不会出现点不到的标签。隐藏滚动条：6px 条会挤占栏高并制造视觉噪音。
       "inline-flex h-10 max-w-full items-center justify-start rounded-[var(--radius-md)] bg-[var(--surface)] p-1 text-[var(--fg-muted)] border border-[var(--border)] select-none overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
       className
     )}

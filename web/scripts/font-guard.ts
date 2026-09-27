@@ -11,6 +11,10 @@ const css = readFileSync(join(root, "src/styles/global.css"), "utf8")
 const main = readFileSync(join(root, "src/main.tsx"), "utf8")
 const vite = readFileSync(join(root, "vite.config.ts"), "utf8")
 
+// 剥离注释后的源码：所有正则断言一律基于它。
+// 否则注释里出现的说明字样（例如「刻意不声明 text-spacing-trim」）会触发误报。
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, "")
+
 let failed = false
 const check = (name: string, ok: boolean) => {
   if (!ok) failed = true
@@ -30,15 +34,15 @@ const walk = (dir: string): string[] => {
 const tsxFiles = walk(join(root, "src"))
 
 // 1. 字体栈令牌必须定义（--font-* 命名空间才生成 font-sans / font-mono 工具类）
-check("global.css 定义 --font-sans", /--font-sans\s*:/.test(css))
-check("global.css 定义 --font-mono", /--font-mono\s*:/.test(css))
+check("global.css 定义 --font-sans", /--font-sans\s*:/.test(cssCode))
+check("global.css 定义 --font-mono", /--font-mono\s*:/.test(cssCode))
 
 // 2. body 字体必须读令牌，不得回退硬编码栈
 check(
   "body font-family 读 var(--font-sans)",
-  /body\s*\{[^}]*font-family\s*:\s*var\(--font-sans\)/.test(css),
+  /body\s*\{[^}]*font-family\s*:\s*var\(--font-sans\)/.test(cssCode),
 )
-check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(css))
+check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(cssCode))
 
 // 3. 三个字体包必须被引入
 for (const pkg of [
@@ -61,17 +65,20 @@ for (const token of [
   "--text-2xl:",
   "--text-4xl:",
 ]) {
-  check(`global.css 定义 ${token}`, css.includes(token))
+  check(`global.css 定义 ${token}`, cssCode.includes(token))
 }
 
-// 5. 等宽场景 OpenType 特性必须声明
+// 5. 无效排版声明必须缺席。这些声明曾经写过，但 fontTools 实测证明字体不支持：
+//    Geist Mono 的 GSUB 只有 ccmp/dnom/frac/locl/numr（无 liga/calt/tnum/zero），
+//    Noto Sans SC 只有 ccmp/liga/locl/vert/vrt2（无 halt/chws）；
+//    且 text-spacing-trim 与 text-autospace 的 normal 均为 CSS 初始值。加回来等于虚假承诺。
 check(
-  "global.css 声明 font-feature-settings（关连字 + 斜杠零）",
-  /font-feature-settings\s*:[^;]*"zero"/.test(css),
+  "global.css 不含已被实测否定的无效声明（font-feature-settings / text-spacing-trim / text-autospace）",
+  !/font-feature-settings|text-spacing-trim|text-autospace/.test(cssCode),
 )
 
 // 6. 跨平台字体膨胀修正必须存在（Android WebView 必需）
-check("声明 text-size-adjust: 100%", /text-size-adjust\s*:\s*100%/.test(css))
+check("声明 text-size-adjust: 100%", /text-size-adjust\s*:\s*100%/.test(cssCode))
 
 // 7. woff2 必须排除内联（否则 unicode-range 按需加载失效）
 check(

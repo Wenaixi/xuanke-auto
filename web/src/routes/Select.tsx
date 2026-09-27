@@ -422,6 +422,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-900 pb-5">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
+              <img className="h-6 w-6 shrink-0" src="/logo.png" alt="" draggable={false} />
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
                 选修课程大厅
               </h1>

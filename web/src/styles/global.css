@@ -185,17 +185,19 @@ body {
   height: auto;
   display: block;
   transform: translateY(var(--bg-shift, 0px));
+  /* 背景图**保持彩色**：曾试过 filter: grayscale(1) 去色（想让「白」更中性），
+     主人当场否掉（「怎么全灰了」）——别再给这张图加任何滤镜。 */
 }
 
 /* 深黑渐变遮罩：盖在图片之上（DOM 顺序在 img 后），不随图片位移，
    保证任意亮度下白字清晰。
-   背景要求「更亮」：中段只压 33%（首末 66%，首末更深是因为顶栏标题那类文字直接压在画面上）。
-   遮罩只负责背景亮度；文字的对比改由**文字层**自己扛（见 .app-content 的 text-shadow）——
-   面板只是 6% 白玻璃，不足以让白字在任何背景上都显得白。 */
+   背景要求「更亮更白」：中段只压 22%（首末 50%）。遮罩只负责背景亮度，
+   文字的对比由**文字层**自己扛（见 .app-content 的 text-shadow）——面板只是 6% 白玻璃。
+   另：图片已 grayscale（见 .canvas-bg-img），故这里的黑即中性灰，不再有彩色偏色。 */
 .canvas-bg-mask {
   position: absolute;
   inset: 0;
-  background: linear-gradient(rgba(0, 0, 0, 0.66) 0%, rgba(0, 0, 0, 0.33) 45%, rgba(0, 0, 0, 0.66) 100%);
+  background: linear-gradient(rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.22) 45%, rgba(0, 0, 0, 0.5) 100%);
 }
 
 /* 桌面端（鼠标设备）：宽度缩为 160%（逻辑与移动端完全一致，仅放大比例不同） */

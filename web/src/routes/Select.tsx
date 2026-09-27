@@ -669,7 +669,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                           <CardContent className="p-3.5 flex flex-col gap-2.5">
                             {/* 顶部标签行 */}
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-neutral-500 font-mono">
+                              <span className="text-xs text-neutral-300 font-mono">
                                 ID: {c.id}
                               </span>
                               {isSelected ? (
@@ -701,22 +701,23 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                 {c.course_name}
                               </h3>
                               {c.class_name && c.class_name !== c.course_name && (
-                                <p className="text-2xs text-neutral-500 truncate mt-0.5 font-mono">
+                                <p className="text-2xs text-neutral-400 truncate mt-0.5 font-mono">
                                   {c.class_name}
                                 </p>
                               )}
                             </div>
 
-                            {/* 地点与教师信息 */}
-                            <div className="space-y-1 text-xs text-neutral-400 pt-2 border-t border-neutral-800">
+                            {/* 地点与教师信息：关键信息用白字（主人要求「关键的地方要是白字，
+                                不要都是灰字」）；只有最次级的副行（班级名）保留灰档 */}
+                            <div className="space-y-1 text-xs text-white pt-2 border-t border-neutral-800">
                               <div className="flex items-center gap-2 truncate">
-                                <User className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
+                                <User className="h-3.5 w-3.5 text-neutral-300 shrink-0" />
                                 <span className="truncate">
                                   教师：{c.teacher_name_list || "待定"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 truncate">
-                                <MapPin className="h-3.5 w-3.5 text-neutral-500 shrink-0" />
+                                <MapPin className="h-3.5 w-3.5 text-neutral-300 shrink-0" />
                                 <span className="truncate">
                                   地点：{c.class_room_name || "待教室分配"}
                                 </span>
@@ -726,7 +727,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                             {/* 容量统计 */}
                             <div className="space-y-1.5 pt-1.5">
                               <div className="flex items-center justify-between text-2xs">
-                                <span className="text-neutral-500 flex items-center gap-1 font-mono">
+                                <span className="text-neutral-300 flex items-center gap-1 font-mono">
                                   <Users className="h-3 w-3" />
                                   <span>已报容量</span>
                                 </span>

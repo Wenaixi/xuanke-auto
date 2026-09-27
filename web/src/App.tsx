@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Login from "./routes/Login"
 import Dashboard from "./routes/Dashboard"
@@ -12,6 +12,7 @@ import Dashboard from "./routes/Dashboard"
 const Select = lazy(() => import("./routes/Select"))
 const Admin = lazy(() => import("./routes/Admin"))
 import { ToastProvider } from "./components/ui/Toast"
+import { Footer } from "./components/Footer"
 import { logout as apiLogout, UNAUTHORIZED_EVENT } from "./api/client"
 import type { Account, Sessions } from "./types"
 import { isCurrentAdminSession } from "./lib/adminAuth"
@@ -359,6 +360,9 @@ export default function App() {
             <Login onLogin={login} />
           )}
           </Suspense>
+          {/* 页脚放在 main 内、Suspense 之后：全站（含登录页/管理页）一次渲染，
+              懒加载路由的 fallback 期间也不会重复出现。 */}
+          <Footer />
         </main>
       </ToastProvider>
     </QueryClientProvider>

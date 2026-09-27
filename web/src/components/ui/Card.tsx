@@ -6,7 +6,9 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
     <div
       ref={ref}
       className={cn(
-        "rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] text-[var(--fg)] shadow-sm transition-all duration-200 hover:border-[var(--border-hover)]",
+        // active:border-white 与 hover 同属性：触屏没有 hover，卡片（黑边）在启动端
+        // 点下去必须也变白，否则手指没有任何反馈（主人：「鼠标放上去可以变白，启动端点击不行」）。
+        "rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] text-[var(--fg)] shadow-sm transition-all duration-200 hover:border-[var(--border-hover)] active:border-white",
         className
       )}
       {...props}

@@ -705,7 +705,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   action={
                     <button
                       onClick={() => refetchLogs()}
-                      className="text-neutral-400 hover:text-white transition-colors"
+                      className="text-neutral-400 hover:text-white active:text-white transition-colors"
                     >
                       重试
                     </button>

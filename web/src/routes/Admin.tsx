@@ -144,7 +144,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
               variant="outline"
               size="sm"
               onClick={onBackToStudent}
-              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
+              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white active:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>学生端</span>
@@ -153,7 +153,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
               variant="outline"
               size="sm"
               onClick={onLogout}
-              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white"
+              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white active:text-white"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span>退出</span>
@@ -441,7 +441,7 @@ function CodesTab({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-neutral-500 font-mono">
             <span>本次生成 {generated.length} 个</span>
-            <button onClick={() => setGenerated([])} className="hover:text-white transition-colors">
+            <button onClick={() => setGenerated([])} className="hover:text-white active:text-white transition-colors">
               收起
             </button>
           </div>
@@ -451,7 +451,7 @@ function CodesTab({
                 <span className="text-white tracking-widest">{c}</span>
                 <button
                   onClick={() => onCopy(c)}
-                  className="flex items-center gap-1 min-h-10 sm:min-h-0 text-neutral-500 hover:text-white transition-colors"
+                  className="flex items-center gap-1 min-h-10 sm:min-h-0 text-neutral-500 hover:text-white active:text-white transition-colors"
                 >
                   {copied === c ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   <span>{copied === c ? "已复制" : "复制"}</span>
@@ -465,7 +465,7 @@ function CodesTab({
       {/* 全部激活码 */}
       <div className="text-xs font-mono text-neutral-500 flex items-center justify-between">
         <span>全部激活码</span>
-        <button onClick={() => codesQuery.refetch()} className="flex items-center justify-center gap-1 min-h-10 sm:min-h-0 hover:text-white transition-colors">
+        <button onClick={() => codesQuery.refetch()} className="flex items-center justify-center gap-1 min-h-10 sm:min-h-0 hover:text-white active:text-white transition-colors">
           <RefreshCw className="h-3 w-3" />
           刷新
         </button>
@@ -486,7 +486,7 @@ function CodesTab({
             codesDisabled ? (
               <span className="text-2xs text-neutral-500">在「系统配置 → 激活码机制」打开后本页即可正常使用</span>
             ) : (
-              <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              <button onClick={() => codesQuery.refetch()} className="text-neutral-400 hover:text-white active:text-white transition-colors">
                 重试
               </button>
             )
@@ -510,10 +510,10 @@ function CodesTab({
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-3xs text-neutral-600 font-mono hidden sm:inline">{c.created_at}</span>
-                  <button onClick={() => onCopy(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white transition-colors" title="复制" aria-label="复制">
+                  <button onClick={() => onCopy(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white active:text-white transition-colors" title="复制" aria-label="复制">
                     {copied === c.code ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
-                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除" aria-label="删除">
+                  <button onClick={() => remove(c.code)} disabled={removing.has(c.code)} className="grid h-10 w-10 place-items-center sm:h-6 sm:w-6 text-neutral-500 hover:text-white active:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none" title="删除" aria-label="删除">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -719,7 +719,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
                 className={`flex-1 h-10 rounded-[var(--radius-sm)] border text-xs transition-colors ${
                   engine === "vision"
                     ? "border-white bg-white text-black font-medium"
-                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white"
+                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white active:text-white"
                 }`}
               >
                 OpenAI 兼容视觉 API（云）
@@ -729,7 +729,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
                 className={`flex-1 h-10 rounded-[var(--radius-sm)] border text-xs transition-colors ${
                   engine === "ddddocr"
                     ? "border-white bg-white text-black font-medium"
-                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white"
+                    : "border-neutral-800 glass-input text-neutral-400 hover:text-white active:text-white"
                 }`}
               >
                 本地 ddddocr（离线）
@@ -841,7 +841,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       {configQuery.isError && (
         <p className="text-2xs text-neutral-300">
           配置没能加载出来——
-          <button onClick={() => configQuery.refetch()} className="underline hover:text-white">
+          <button onClick={() => configQuery.refetch()} className="underline hover:text-white active:text-white">
             重试
           </button>
         </p>
@@ -945,7 +945,7 @@ function StatsTab({ account, sessionToken, activeTab }: { account: Account; sess
           <EmptyState
             icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
             action={
-              <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              <button onClick={() => statsQuery.refetch()} className="text-neutral-400 hover:text-white active:text-white transition-colors">
                 重试
               </button>
             }
@@ -1033,7 +1033,7 @@ function AccountsTab({
                           variant="outline"
                           size="sm"
                           onClick={() => onSelectAccount?.(a.account)}
-                          className="text-xs text-white border-neutral-700 hover:border-white flex items-center gap-1.5"
+                          className="text-xs text-white border-neutral-700 hover:border-white active:border-white flex items-center gap-1.5"
                         >
                           <BookMarked className="h-3.5 w-3.5" />
                           <span>选课大厅</span>
@@ -1042,7 +1042,7 @@ function AccountsTab({
                           variant="outline"
                           size="sm"
                           onClick={() => onAskDelete(a.account)}
-                          className="text-xs text-neutral-400 hover:text-white hover:border-white"
+                          className="text-xs text-neutral-400 hover:text-white active:text-white hover:border-white active:border-white"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           删除
@@ -1059,7 +1059,7 @@ function AccountsTab({
         <EmptyState
           icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
           action={
-            <button onClick={() => accountsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+            <button onClick={() => accountsQuery.refetch()} className="text-neutral-400 hover:text-white active:text-white transition-colors">
               重试
             </button>
           }
@@ -1110,7 +1110,7 @@ function LogsTab({ account, sessionToken, activeTab }: { account: Account; sessi
           <EmptyState
             icon={<AlertTriangle className="h-6 w-6 text-neutral-600" />}
             action={
-              <button onClick={() => logsQuery.refetch()} className="text-neutral-400 hover:text-white transition-colors">
+              <button onClick={() => logsQuery.refetch()} className="text-neutral-400 hover:text-white active:text-white transition-colors">
                 重试
               </button>
             }

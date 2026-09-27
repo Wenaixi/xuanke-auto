@@ -25,7 +25,7 @@ export function Footer() {
             href={REPO_URL}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-1.5 hover:text-white transition-colors"
+            className="inline-flex items-center gap-1.5 hover:text-white active:text-white transition-colors"
             title="在 GitHub 上查看源码"
           >
             <GitHubMark className="h-3.5 w-3.5" />

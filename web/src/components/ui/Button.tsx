@@ -11,19 +11,24 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 // 每个变体都必须有 active 态，且**按下比悬停更强烈**：触屏没有 hover，
 // 全局 CSS 又主动关掉了 -webkit-tap-highlight-color，若只留 hover，手指按下去
 // 等于没有任何反馈（用户原话「点下去不确定点上没」）。active 是移动端唯一的即时反馈。
+// 另一条同源规则：**凡是 hover 会变的属性，active 必须变同一个属性**。此前只在 hover 里
+// 写 text/border 变白，桌面鼠标移上去会白、启动端（Android WebView）点下去毫无变化
+// ——用户原话「鼠标放上去可以变白，但是启动端点击不行」。故 hover:xxx 一律配 active:xxx。
 const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  default: "bg-[var(--surface-soft)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-muted)] hover:border-[var(--border-hover)] active:bg-black/50",
+  default: "bg-[var(--surface-soft)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-muted)] hover:border-[var(--border-hover)] active:bg-black/50 active:border-[var(--border-hover)]",
   primary: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 active:bg-neutral-300 shadow-sm",
   success: "bg-neutral-100 text-black border border-white font-semibold hover:bg-white active:bg-neutral-300 shadow-sm",
-  warning: "bg-neutral-800 text-white border border-neutral-700 font-medium hover:bg-neutral-700 active:bg-neutral-600",
-  destructive: "bg-rose-950/40 text-rose-300 border border-rose-900/60 font-medium hover:bg-rose-900/50 active:bg-rose-900/70",
-  outline: "bg-transparent text-[var(--fg-muted)] border border-[var(--border)] hover:text-[var(--fg)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-soft)] active:bg-white/15",
-  secondary: "bg-[var(--surface)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-soft)] hover:border-[var(--border-hover)] active:bg-white/15",
-  ghost: "bg-transparent text-[var(--fg-muted)] border-transparent hover:bg-[var(--surface-soft)] hover:text-[var(--fg)] active:bg-white/15",
+  warning: "bg-neutral-800 text-white border border-neutral-700 font-medium hover:bg-neutral-700 active:bg-neutral-600 active:border-neutral-500",
+  destructive: "bg-rose-950/40 text-rose-300 border border-rose-900/60 font-medium hover:bg-rose-900/50 active:bg-rose-900/70 active:border-rose-700",
+  // outline：文字取纯白（原 --fg-muted 灰）——选课页的「返回 / 按剩余排序 / 显示全部」
+  // 都走这个变体，主人要求这些字是纯白而不是灰字。
+  outline: "bg-transparent text-[var(--fg)] border border-[var(--border)] hover:text-white hover:border-[var(--border-hover)] hover:bg-[var(--surface-soft)] active:text-white active:border-white active:bg-white/15",
+  secondary: "bg-[var(--surface)] text-[var(--fg)] border border-[var(--border)] hover:bg-[var(--surface-soft)] hover:border-[var(--border-hover)] active:bg-white/15 active:border-white",
+  ghost: "bg-transparent text-[var(--fg-muted)] border-transparent hover:bg-[var(--surface-soft)] hover:text-white active:bg-white/15 active:text-white",
   invert: "bg-white text-black border border-white font-semibold hover:bg-neutral-200 active:bg-neutral-300 shadow-sm",
   // dark：曾是 bg-black 实色底（唯一不随 --surface 走的按钮变体，全站透明化后它就是唯一的黑块）。
   // 改透明玻璃 + 更亮的描边：靠边框与全大写白字保持存在感，而不是靠一块实色面板。
-  dark: "glass text-white border border-white/35 font-medium hover:border-white/70 hover:bg-white/10",
+  dark: "glass text-white border border-white/35 font-medium hover:border-white/70 hover:bg-white/10 active:border-white active:bg-white/15",
 }
 
 // 触控目标按「移动端优先、桌面回收」写：手指精度远低于鼠标，32px 的小按钮在手机上

@@ -790,7 +790,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   variant={isSelected ? "outline" : "ghost"}
                                   size="sm"
                                   onClick={() => pick(t.publish_id, c)}
-                                  className="w-full flex items-center justify-center gap-1 text-2xs h-10 sm:h-7 text-neutral-400 hover:text-white"
+                                  className="w-full flex items-center justify-center gap-1 text-2xs h-10 sm:h-7 text-neutral-400 hover:text-white active:text-white"
                                 >
                                   <BookMarked className="h-3 w-3" />
                                   <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>

@@ -208,7 +208,7 @@ export default function Login({ onLogin }: Props) {
             </form>
 
             {/* 底部信息：极简纯粹 */}
-            <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-500">
+            <div className="mt-6 pt-4 border-t border-neutral-800 flex items-center justify-between text-2xs text-neutral-500">
               <span>账号隔离</span>
               <span>实时调度</span>
             </div>

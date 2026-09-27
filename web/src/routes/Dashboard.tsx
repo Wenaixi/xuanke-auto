@@ -95,19 +95,19 @@ function CountdownMatrix({ days, hours, minutes, seconds }: { days: string; hour
     <div className="grid grid-cols-4 gap-2 sm:gap-4 text-center">
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
         <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{days}</span>
-        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">天</span>
+        <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">天</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
         <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{hours}</span>
-        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">时</span>
+        <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">时</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-800 p-3 sm:p-5 flex flex-col items-center">
         <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{minutes}</span>
-        <span className="text-[11px] text-neutral-500 font-mono uppercase mt-1">分</span>
+        <span className="text-2xs text-neutral-500 font-mono uppercase mt-1">分</span>
       </div>
       <div className="rounded-[var(--radius-sm)] glass border border-neutral-700 glass-strong p-3 sm:p-5 flex flex-col items-center">
         <span className="text-2xl sm:text-4xl font-light tabular-nums tracking-tight text-white">{seconds}</span>
-        <span className="text-[11px] text-neutral-400 font-mono uppercase mt-1">秒</span>
+        <span className="text-2xs text-neutral-400 font-mono uppercase mt-1">秒</span>
       </div>
     </div>
   )
@@ -308,7 +308,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
                 选课自动化控制中心
               </h1>
-              <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider">
+              <Badge variant="outline" className="text-3xs uppercase font-mono tracking-wider">
                 CORE
               </Badge>
             </div>
@@ -501,7 +501,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
                   <span className="text-white font-medium">后台就绪</span>
                 </div>
-                <span className="text-[11px] text-neutral-500 font-mono">STANDBY</span>
+                <span className="text-2xs text-neutral-500 font-mono">STANDBY</span>
               </div>
             </CardContent>
           </Card>
@@ -570,7 +570,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                 >
                   {g.pubs.map((pub) => (
                     <div key={pub.publish_id} className="mb-4 last:mb-0">
-                      <div className="text-[11px] text-neutral-400 font-medium font-mono uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <div className="text-2xs text-neutral-400 font-medium font-mono uppercase tracking-wider mb-2 flex items-center gap-2">
                         <Layers className="h-3 w-3 text-neutral-600" />
                         <span>{pub.name}</span>
                         <span className="text-neutral-600">· {pub.items.length} 门</span>
@@ -592,12 +592,12 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                               }`}
                             >
                               <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-b border-neutral-900">
-                                <Badge variant="outline" className="text-[10px] font-mono">
+                                <Badge variant="outline" className="text-3xs font-mono">
                                   #{c.publish_id} · {priorityName(c.priority)}
                                 </Badge>
                                 <Badge
                                   variant={isSuccess ? "primary" : isFull ? "destructive" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
-                                  className="text-[11px]"
+                                  className="text-2xs"
                                 >
                                   {isSuccess
                                     ? "已确认选课"
@@ -613,7 +613,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
 
                               <CardContent className="p-4 pt-3 space-y-3">
                                 <div>
-                                  <div className="text-[11px] text-neutral-500 font-mono">
+                                  <div className="text-2xs text-neutral-500 font-mono">
                                     ID: {c.class_id}
                                   </div>
                                   <h3 className="font-medium text-sm text-white tracking-tight line-clamp-1 mt-0.5">
@@ -715,7 +715,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                     key={l.id}
                     className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-4 border-b border-neutral-900/60 pb-2 text-xs font-mono"
                   >
-                    <span className="text-neutral-500 text-[11px] shrink-0">
+                    <span className="text-neutral-500 text-2xs shrink-0">
                       {l.created_at}
                     </span>
                     <span className="text-white shrink-0 font-medium">
@@ -742,7 +742,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
             <span className="text-xs font-medium text-white">
               {state?.window_closed ? "窗口已关闭" : state?.window_opened ? "窗口开放中" : "系统待命中"}
             </span>
-            <span className="text-[10px] text-neutral-500 font-mono">
+            <span className="text-3xs text-neutral-500 font-mono">
               {account ? `ACCOUNT ${account}` : "DEFAULT"} · TARGETS {courses.length}
             </span>
           </div>

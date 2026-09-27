@@ -425,7 +425,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
                 选修课程大厅
               </h1>
-              <Badge variant="outline" className="text-[10px] font-mono uppercase">
+              <Badge variant="outline" className="text-3xs font-mono uppercase">
                 COURSES
               </Badge>
             </div>
@@ -588,7 +588,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                     }`}
                   />
                   {(selected[t.publish_id] ?? []).length > 0 && (
-                    <Badge variant="primary" className="text-[10px] px-1.5 py-0 ml-1">
+                    <Badge variant="primary" className="text-3xs px-1.5 py-0 ml-1">
                       已锁定 {(selected[t.publish_id] ?? []).length}
                     </Badge>
                   )}
@@ -675,23 +675,23 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                 ID: {c.id}
                               </span>
                               {isSelected ? (
-                                <Badge variant="primary" className="text-[11px] font-medium">
+                                <Badge variant="primary" className="text-2xs font-medium">
                                   {priorityName(selIdx)}
                                 </Badge>
                               ) : isFull ? (
-                                <Badge variant="outline" className="text-[11px] text-neutral-500 border-neutral-800">
+                                <Badge variant="outline" className="text-2xs text-neutral-500 border-neutral-800">
                                   已满额
                                 </Badge>
                               ) : unannounced ? (
-                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-800">
+                                <Badge variant="outline" className="text-2xs text-neutral-400 border-neutral-800">
                                   名额未公布
                                 </Badge>
                               ) : remaining <= 5 ? (
-                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-700">
+                                <Badge variant="outline" className="text-2xs text-neutral-400 border-neutral-700">
                                   余 {remaining} 席
                                 </Badge>
                               ) : (
-                                <Badge variant="outline" className="text-[11px] text-neutral-400 border-neutral-800">
+                                <Badge variant="outline" className="text-2xs text-neutral-400 border-neutral-800">
                                   名额充足
                                 </Badge>
                               )}
@@ -703,7 +703,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                 {c.course_name}
                               </h3>
                               {c.class_name && c.class_name !== c.course_name && (
-                                <p className="text-[11px] text-neutral-500 truncate mt-0.5 font-mono">
+                                <p className="text-2xs text-neutral-500 truncate mt-0.5 font-mono">
                                   {c.class_name}
                                 </p>
                               )}
@@ -727,7 +727,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
                             {/* 容量统计 */}
                             <div className="space-y-1.5 pt-1.5">
-                              <div className="flex items-center justify-between text-[11px]">
+                              <div className="flex items-center justify-between text-2xs">
                                 <span className="text-neutral-500 flex items-center gap-1 font-mono">
                                   <Users className="h-3 w-3" />
                                   <span>已报容量</span>
@@ -791,7 +791,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   variant={isSelected ? "outline" : "ghost"}
                                   size="sm"
                                   onClick={() => pick(t.publish_id, c)}
-                                  className="w-full flex items-center justify-center gap-1 text-[11px] h-7 text-neutral-400 hover:text-white"
+                                  className="w-full flex items-center justify-center gap-1 text-2xs h-7 text-neutral-400 hover:text-white"
                                 >
                                   <BookMarked className="h-3 w-3" />
                                   <span>{isSelected ? `已设为后台冲刺${priorityName(selIdx)}` : "设为后台冲刺目标"}</span>

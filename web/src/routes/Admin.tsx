@@ -129,7 +129,7 @@ export default function Admin({ account, sessionToken, onLogout, onBackToStudent
               <h1 className="text-lg sm:text-xl font-medium tracking-tight text-white">
                 系统管理
               </h1>
-              <Badge variant="primary" className="text-[10px] uppercase font-mono tracking-wider">
+              <Badge variant="primary" className="text-3xs uppercase font-mono tracking-wider">
                 ADMIN
               </Badge>
             </div>
@@ -475,12 +475,12 @@ function CodesTab({
               <div key={c.code} className="flex items-center justify-between gap-2 px-3 py-2.5 text-xs">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="font-mono tracking-widest text-white truncate">{c.code}</span>
-                  <Badge variant={exhausted ? "outline" : "primary"} className="text-[10px] shrink-0">
+                  <Badge variant={exhausted ? "outline" : "primary"} className="text-3xs shrink-0">
                     {c.used_uses}/{c.total_uses}
                   </Badge>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[10px] text-neutral-600 font-mono hidden sm:inline">{c.created_at}</span>
+                  <span className="text-3xs text-neutral-600 font-mono hidden sm:inline">{c.created_at}</span>
                   <button onClick={() => onCopy(c.code)} className="p-1 text-neutral-500 hover:text-white transition-colors" title="复制" aria-label="复制">
                     {copied === c.code ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
@@ -688,7 +688,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
                 本地 ddddocr（离线）
               </button>
             </div>
-            <p className="text-[11px] text-neutral-600 mt-0.5">
+            <p className="text-2xs text-neutral-600 mt-0.5">
               {engine === "ddddocr"
                 ? "使用本机内置/本机 Python ddddocr（免 API 密钥）；本机缺失时将按下方开关决定是否回退"
                 : "需在后台填写 OpenAI 兼容接口地址、密钥与模型；密钥未填时按下方开关决定是否回退"}
@@ -697,7 +697,7 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
           <div className="flex items-center justify-between rounded-[var(--radius-sm)] border border-neutral-900 glass px-3 py-2.5">
             <div className="flex flex-col gap-0.5">
               <span className="text-xs text-neutral-300">引擎兜底</span>
-              <span className="text-[11px] text-neutral-600">
+              <span className="text-2xs text-neutral-600">
                 {fallback
                   ? "已开启：本机 ddddocr 不可用回退云端 Vision；Vision 无密钥回退本机 ddddocr"
                   : "已关闭：两种引擎严格互不回退，配置的引擎不可用即识别不可用（默认）"}
@@ -736,12 +736,12 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       </Card>
 
       {!loaded && !configQuery.isError && (
-        <p className="text-[11px] text-amber-400/90">
+        <p className="text-2xs text-amber-400/90">
           配置加载中——表单尚未回填，保存按钮已锁定，避免用初始空值覆盖生效配置
         </p>
       )}
       {configQuery.isError && (
-        <p className="text-[11px] text-neutral-300">
+        <p className="text-2xs text-neutral-300">
           配置加载失败（网络异常或服务端不可达）——
           <button onClick={() => configQuery.refetch()} className="underline hover:text-white">
             重试
@@ -898,10 +898,10 @@ function AccountsTab({
           <table className="w-full text-sm border-collapse" aria-label="账号列表">
             <thead>
               <tr className="border-b border-neutral-900">
-                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">账号</th>
-                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">目标课程</th>
-                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">已选成功</th>
-                <th scope="col" className="h-10 px-4 text-right align-middle font-medium text-[11px] uppercase tracking-wider text-neutral-500 select-none">操作</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-2xs uppercase tracking-wider text-neutral-500 select-none">账号</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-2xs uppercase tracking-wider text-neutral-500 select-none">目标课程</th>
+                <th scope="col" className="h-10 px-4 text-left align-middle font-medium text-2xs uppercase tracking-wider text-neutral-500 select-none">已选成功</th>
+                <th scope="col" className="h-10 px-4 text-right align-middle font-medium text-2xs uppercase tracking-wider text-neutral-500 select-none">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -916,7 +916,7 @@ function AccountsTab({
                       {targets.length > 0 ? (
                         <span className="flex flex-wrap gap-1.5">
                           {targets.map((t) => (
-                            <Badge key={t.class_id} variant="outline" className="text-[10px] font-mono">
+                            <Badge key={t.class_id} variant="outline" className="text-3xs font-mono">
                               {t.course_name || t.class_id}
                               {(t.priority ?? 0) > 0 ? ` #${t.priority}` : ""}
                             </Badge>
@@ -1000,7 +1000,7 @@ function LogsTab({ account, sessionToken, activeTab }: { account: Account; sessi
         ) : logs && logs.length > 0 ? (
           logs.map((l) => (
             <div key={l.id} className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-4 border-b border-neutral-900/60 pb-2 font-mono">
-              <span className="text-neutral-600 text-[11px] shrink-0">{l.created_at}</span>
+              <span className="text-neutral-600 text-2xs shrink-0">{l.created_at}</span>
               <span className="text-white shrink-0 font-medium">{l.account}</span>
               <span className={`shrink-0 font-medium ${l.is_ok ? "text-white" : "text-neutral-400"}`}>
                 [{l.action}]

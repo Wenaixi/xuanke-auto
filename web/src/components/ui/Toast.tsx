@@ -102,7 +102,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             </ToastPrimitive.Close>
           </ToastPrimitive.Root>
         ))}
-        <ToastPrimitive.Viewport className="fixed bottom-4 right-4 z-50 flex w-full max-w-[380px] max-h-[80vh] overflow-y-auto flex-col gap-2 p-4 pointer-events-none outline-none" />
+        {/* 窄屏左右同时留边：原 w-full + right-4 会向左溢出 16px（width 100% 还要再右偏）。
+            sm 起恢复右对齐定宽。 */}
+        <ToastPrimitive.Viewport className="fixed bottom-4 left-4 right-4 z-50 flex max-w-[380px] max-h-[80vh] overflow-y-auto flex-col gap-2 p-4 pointer-events-none outline-none sm:left-auto sm:right-4 sm:w-full" />
       </ToastPrimitive.Provider>
     </ToastContext.Provider>
   )

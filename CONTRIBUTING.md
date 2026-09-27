@@ -40,6 +40,13 @@
 - 涉及平台契约（zhidao.fj.cn 选课接口）的改动，请在 PR 里说明与真实站点行为的对应关系。契约基线由维护者本地归档，不进仓库，外部无法对照。
 - 保持 PR 小而聚焦，一个 PR 做一件事。
 
+## 发版
+
+1. **先更新 `CHANGELOG.md`**：在顶部加新版本小节，写清用户可见的变化（修复 / 新增 / 变更），只写用户能感知的行为，不写内部实现术语。
+2. 合并到 `master` 后打标签（`v0.2.x`）并推送，标签会触发 `release.yml` 出全平台产物并建 Release。
+3. **Release 说明用 `CHANGELOG.md` 里该版本的正文替换自动生成的内容**（`gh release edit vX.Y.Z --notes-file <文件>`，或直接在网页上粘贴）。`generate_release_notes` 只会给出一行 commit 对比链接，对用户没有信息量——尤其涉及「需要卸载重装」这类必须提前告知的变化时。
+4. 安卓包签名密钥固定在 `build/android/xuanke.jks`，CI 会断言 APK 证书指纹与预期一致。**换密钥会让所有老用户无法覆盖安装**，改动前先确认。
+
 ## 行为准则
 
 参与本项目即表示你同意 [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)。

@@ -53,6 +53,16 @@
   --text-4xl: 2.25rem;
   --text-4xl--line-height: 1.05;
   --text-4xl--letter-spacing: -0.02em;
+
+  /* 灰阶提亮：默认 neutral-400/500/600 在深黑水墨画布上对比不足（实测 600 档
+     在纯黑上仅约 2.4:1，远低于 4.5:1），管理员端成片辅助标签几乎糊进背景。
+     此处覆写调色板令牌而非逐处改类名：全站灰字一次生效，输入框占位符
+     placeholder:text-neutral-600 同步受益。四档整体上移约一档并保持
+     600 < 500 < 400 < 300 单调递增，明暗层次不塌。 */
+  --color-neutral-300: #e5e5e5;
+  --color-neutral-400: #cccccc;
+  --color-neutral-500: #a3a3a3;
+  --color-neutral-600: #7a7a7a;
 }
 
 /* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，
@@ -78,8 +88,10 @@
   --border-invert: #ffffff;
 
   --fg: #ffffff;
-  --fg-muted: #a1a1aa;
-  --fg-dim: #71717a;
+  /* 与提亮后的调色板灰阶对齐（原 #a1a1aa / #71717a 在深黑画布上对比不足）；
+     --fg-muted 承载描边按钮文字、卡片描述、未选中标签，--fg-dim 承载输入框占位符。 */
+  --fg-muted: #cccccc;
+  --fg-dim: #a3a3a3;
 
   /* 单色语义灰阶映射（纯黑白极简，剔除所有高饱和彩色杂质） */
   --emerald: #ffffff;

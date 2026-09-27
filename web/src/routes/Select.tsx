@@ -517,21 +517,28 @@ export default function Select({ account, sessionToken, onDone }: Props) {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* 筛选开关的选中态**不许用 primary**（白底黑字实心块）——那是主操作专用，做开关会
+                变成两块不透明白砖，点它也看不出反馈。选中态统一用「半透明高亮 + 白描边 + 白字」，
+                与主界面同类控件一致（未选中 = outline，指针移上/按下时描边与文字转白）。 */}
             <Button
-              variant={sortTightest ? "primary" : "outline"}
+              variant={sortTightest ? "secondary" : "outline"}
               size="sm"
               onClick={() => setSortTightest(!sortTightest)}
-              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none"
+              className={`flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none ${
+                sortTightest ? "bg-white/15 border-white text-white hover:bg-white/20 hover:border-white" : ""
+              }`}
             >
               <ArrowDownWideNarrow className="h-3.5 w-3.5" />
               <span>{sortTightest ? "剩余名额正序" : "按剩余排序"}</span>
             </Button>
 
             <Button
-              variant={onlyAvailable ? "primary" : "outline"}
+              variant={onlyAvailable ? "secondary" : "outline"}
               size="sm"
               onClick={() => setOnlyAvailable(!onlyAvailable)}
-              className="flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none"
+              className={`flex items-center gap-1.5 text-xs whitespace-nowrap h-11 sm:h-10 px-4 flex-1 sm:flex-none ${
+                onlyAvailable ? "bg-white/15 border-white text-white hover:bg-white/20 hover:border-white" : ""
+              }`}
             >
               <Filter className="h-3.5 w-3.5" />
               <span>{onlyAvailable ? "仅看有余量" : "显示全部"}</span>

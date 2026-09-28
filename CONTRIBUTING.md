@@ -162,7 +162,7 @@ go test ./...
 | 提交 `data/`、`*.db`、`.env`、`*.pem`、`*.key`、`.master_key` | 真实账号、会话与主密钥只允许留在本地 `data/`（`SECURITY.md` 红线） |
 | 提交 onnxruntime 动态库、`libxuanke.so`、`dist-release/` 产物 | 16MB×N 的体积产物，由 `fetch-onnxruntime.sh` 与 CI 现下现编 |
 | 替换 `build/android/xuanke.jks` 或改签名配置 | 会让已装 APK 无法覆盖安装，CI 指纹断言会红 |
-| 把本地专有基线当公共文档引用 | `archive/legacy/` 的 HAR 与站点 JS、`AGENTS.md` 记忆库整树被 `.gitignore` 忽略，在他人克隆里不存在，引用等于给出死链 |
+| 把本地专有基线当公共文档引用 | `archive/legacy/` 的 HAR 与站点 JS、`CLAUDE.md` 记忆库整树被 `.gitignore` 忽略，在他人克隆里不存在，引用等于给出死链 |
 | 在源码、注释、文档、issue 里贴真实账号/学号/token/抓包原文 | 同上，属于敏感信息红线 |
 
 ## 行为准则

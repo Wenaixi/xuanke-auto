@@ -246,59 +246,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminName, inAdmin, adminToken])
 
-  // 壁纸滚动统一机制（手机 + 电脑同一套，仅放大比例不同）：
-  //   背景随下滑“往上走”：滚动页面时图片以 1:1 速度上移（露出图片下方），
-  //   当图片底边(图顶+图高)到达屏幕底边(视口高)即冻结，继续下滑图片不动、
-  //   底边恰贴屏幕底绝不越出底部；上滑则 1:1 回落。
-  // 数学表达（唯一公式）：shift = −clamp(scrollY, 0, 图片高 − 视口高)（负值=上移）
-  //   移动端 180% / 桌面 160% 仅 CSS 宽度不同，JS 直接量 img 真实高度，无需区分设备。
-  // 性能：图片高度纯 mount/resize/图片加载时量测一次缓存，滚动回调零布局读取；
-  //   位移直接写 transform 具体像素（GPU 合成轨道），滚动全程流畅无抖动。
-  useEffect(() => {
-    const img = document.querySelector<HTMLElement>(".canvas-bg-img")
-    if (!img) return
-    let maxShift = 0
-    let frame = 0
-    /* 量测图片真实渲染高度 − 视口高（仅装载/窗口变化/图片加载时执行，绝不进滚动路径） */
-    const measure = () => {
-      maxShift = Math.max(0, img.getBoundingClientRect().height - window.innerHeight)
-      apply()
-    }
-    const apply = () => {
-      /* 取整：浏览器滚动本质整数像素，消除亚像素插值导致的抖动 */
-      const y = Math.round(window.scrollY)
-      /* shift = −clamp(y, 0, maxShift)：负值上移，未触底前 1:1 跟随，触底冻结 */
-      const shift = -Math.min(Math.max(0, y), maxShift)
-      img.style.transform = `translateY(${shift}px)`
-      frame = 0
-    }
-    const onScroll = () => {
-      if (!frame) frame = requestAnimationFrame(apply)
-    }
-    measure()
-    /* 图片未加载完前 height 可能为 0，加载完成后重新量测一次 */
-    img.addEventListener("load", measure)
-    window.addEventListener("scroll", onScroll, { passive: true })
-    window.addEventListener("resize", measure)
-    return () => {
-      img.removeEventListener("load", measure)
-      window.removeEventListener("scroll", onScroll)
-      window.removeEventListener("resize", measure)
-      if (frame) cancelAnimationFrame(frame)
-    }
-  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        {/* 水墨画布背景层：固定全屏于内容之下（z-index 0），路由页面在 .app-content 层（z-index 1）上 */
-        }
-        <div className="canvas-bg" aria-hidden>
-          {/* 水墨图本体（真实 <img>，方便量测实际渲染高度） */ }
-          <img className="canvas-bg-img" src="/bg.jpg" alt="" draggable={false} />
-          {/* 深黑渐变遮罩：盖住图片但不随其位移，保证白字任意亮度可读 */ }
-          <div className="canvas-bg-mask" />
-        </div>
         <main className="app-content">
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-neutral-500 text-xs">加载中…</div>}>
           {sessionToken ? (

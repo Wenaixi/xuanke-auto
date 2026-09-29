@@ -23,11 +23,11 @@ React 19、Vite、TypeScript、Tailwind CSS 4、Radix Primitives、TanStack Quer
 
 ### 内嵌字体
 
-界面字体全部自托管、随包分发，均为 **SIL Open Font License 1.1**：
+界面字体随包分发，均为 **SIL Open Font License 1.1**：
 
 | 包 / 文件 | 字体 | 用途 | 版权 |
 | --- | --- | --- | --- |
-| `lxgw-wenkai-webfont` | LXGW WenKai（霞鹜文楷） | 全站界面正文（400 / 700 两个字重） | 落霞孤鹜 LXGW（https://github.com/lxgw/LxgwWenKai） |
+| `@fontsource-variable/geist` | Geist Variable | 全站界面正文（可变无衬线） | The Geist Project Authors（https://github.com/vercel/geist-font） |
 | `web/public/fonts/jf-openhuninn-title.woff2` | jf open 粉圓 的**派生子集** | 仅左上角标题 | Copyright (c) 2010 MOTOYA CO.,LTD.；2011-2016 The Varela Round Project Authors；2020-2024 justfont Co., LTD.（https://github.com/justfont/open-huninn-font） |
 | `@fontsource-variable/geist-mono` | Geist Mono Variable | 等宽数字（倒计时、课程 ID、统计表格） | The Geist Project Authors（https://github.com/vercel/geist-font） |
 
@@ -35,17 +35,13 @@ React 19、Vite、TypeScript、Tailwind CSS 4、Radix Primitives、TanStack Quer
   **Reserved Font Names**（`open huninn` 等），故派生子集**不使用保留名**：内部字体名已改为
   `JF Open Huninn Title`，CSS family 名为 `Title Round`。许可证全文随包放在
   `web/public/fonts/jf-openhuninn-OFL.txt`（会随 `public/` 一起进入 dist、打进 exe/APK）。
-- 粉圓子集不含部分简体字（实测缺「选课择统」），这些字由字体栈第二顺位文楷承接，不会出现豆腐块。
-- 文楷中文分包不覆盖 CJK 扩展 B 区（U+20000 以上），这部分字形由字体栈末尾的系统中文兜底。
+- 粉圓子集不含部分简体字（实测缺「选课择统」），这些字由字体栈第二顺位 Geist Variable 承接，不会出现豆腐块。
+- **Geist 不含汉字**：中文由系统中文字体按 `PingFang SC`（macOS/iOS）→ `Microsoft YaHei UI`（Windows）→ `Noto Sans CJK SC`（Linux）顺位兜底，各平台观感会略有差异。
 
 ## 模型与运行时
 
-- `backend/internal/zhidao/assets/common_old.onnx`、`charsets_old.json`：ddddocr 识别模型与字符集，来自 [ddddocr](https://github.com/sml2h3/ddddocr)，遵循其许可。
+- `backend/internal/upstream/assets/common_old.onnx`、`charsets_old.json`：ddddocr 识别模型与字符集，来自 [ddddocr](https://github.com/sml2h3/ddddocr)，遵循其许可。
 - Microsoft ONNX Runtime 运行时（`onnxruntime` dll/so/dylib）：版本锁定官方 v1.25.0，与 `go.sum` 中的 `onnxruntime_go` 对齐。**不入 git**，由 `backend/scripts/fetch-onnxruntime.sh` 在构建时下载，许可与版权见[上游仓库](https://github.com/microsoft/onnxruntime)。
-
-## 其他资产
-
-- `web/public/bg.jpg`：界面背景图，作者自备。
 
 ## 完整第三方声明
 

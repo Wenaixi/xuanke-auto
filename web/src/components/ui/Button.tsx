@@ -34,11 +34,14 @@ const variantStyles: Record<NonNullable<ButtonProps["variant"]>, string> = {
 // 触控目标按「移动端优先、桌面回收」写：手指精度远低于鼠标，32px 的小按钮在手机上
 // 必然点空或点到隔壁（公认舒适线 44px、可接受下限 40px）；而桌面鼠标精确、密度优先，
 // 故 sm 断点起回到原紧凑档。这是移动端与桌面唯一分叉的尺寸规则，全站按钮一次收敛。
+// 按钮一律胶囊（xAI 规范的 rounded.pill = 9999px，规范原文「Every button is a pill」）。
+// 与面板直角并存的形态两轨制：面板/卡片/输入框用 --radius-*（已归零），
+// 按钮用 rounded-full。二者的分界是「是否可点」，不是尺寸。
 const sizeStyles: Record<NonNullable<ButtonProps["size"]>, string> = {
-  default: "h-11 sm:h-10 px-4 py-2 text-sm rounded-[var(--radius-md)]",
-  sm: "h-10 sm:h-8 px-3.5 sm:px-3 text-xs rounded-[var(--radius-sm)]",
-  lg: "h-12 px-6 text-base rounded-[var(--radius-md)]",
-  icon: "h-11 w-11 sm:h-10 sm:w-10 p-0 flex items-center justify-center rounded-[var(--radius-md)]",
+  default: "h-11 sm:h-10 px-4 py-2 text-sm rounded-full",
+  sm: "h-10 sm:h-8 px-3.5 sm:px-3 text-xs rounded-full",
+  lg: "h-12 px-6 text-base rounded-full",
+  icon: "h-11 w-11 sm:h-10 sm:w-10 p-0 flex items-center justify-center rounded-full",
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -52,7 +55,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           // 键盘焦点可见性：global.css「基础交互重置」对 button 统一 outline:none 抹掉
           // 原生 focus，此处补 focus-visible ring 作补偿——Tab 键盘导航的焦点环可见，
           // 鼠标点击不显示（focus-visible 语义），全站 Button 一次收敛（无障碍基线）。
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cyan)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]",
+          // ring-offset 必须为 0：偏移量会在胶囊外侧留一圈方角描边，破坏胶囊轮廓。
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cyan)] focus-visible:ring-offset-0",
           variantStyles[variant],
           sizeStyles[size],
           className

@@ -26,9 +26,8 @@ npx tsc --noEmit     # 注意：web/tsconfig.json 是 references 空壳，此命
 - `src/routes/`：路由页面（Login / Select 选课大厅 / Dashboard / Admin 管理后台，路由级懒加载）
 - `src/components/`：共享组件（含性能敏感的 `CountdownLeaf` 倒计时叶子）
 - `src/lib/`：业务逻辑（`adminAuth` 管理态、`targetGuard` 目标保存守卫、`useTickingCountdown` 倒计时）
-- `src/styles/global.css`：设计令牌唯一入口（字体、字号阶梯、面板透明档、灰阶）
+- `src/styles/global.css`：设计令牌唯一入口（字体、字号阶梯、面板实色分层、灰阶）
 - `scripts/`：防回归守卫脚本（`npm run guard` 执行，CI 也跑）
-- `public/bg.jpg`：水墨背景图
 - `public/favicon.ico`：浏览器标签图标（16/32/48 多尺寸）
 - `public/logo.png`：页面左上角标题旁的 logo（128px）
 
@@ -37,11 +36,11 @@ npx tsc --noEmit     # 注意：web/tsconfig.json 是 references 空壳，此命
 - `@tanstack/react-query`：API 轮询与缓存（课程/状态/日志/管理后台）
 - `@radix-ui/*`：Dialog / Tabs / Toast 等无头原语
 - `lucide-react`：线性图标
-- `@fontsource-variable/*`：自托管可变字体（Geist / Geist Mono / Noto Sans SC）
+- `@fontsource-variable/*`：自托管可变字体（Geist / Geist Mono；中文由系统中文字体兜底）
 - `tailwindcss`：原子化样式
 
 ## 规范
 
 - 涉及与后端交互的数据契约（如 /state、/electives、/admin/* 响应字段），改动时两端同步，以根 `README.md` 与后端 `backend/internal/api/handler.go` 为准。
-- UI 设计语言：纯黑白 + 冷灰文字 + 1px 发丝边框，圆角控制在 4/6/8px，数字用等宽（`tabular-nums`）。主操作白底黑字，次操作透明底加冷灰边框，状态不单靠颜色区分。不要引入第二套配色或卡片体系，不用 emoji 和大圆角阴影。
+- UI 设计语言：xAI 单色体系（规范见项目根 `DESIGN.md`）——近黑画布 `#0a0a0a` + 实色分层面板（`#191919` / `#1a1c20`）+ 发丝线 `#212327`，**不用半透明玻璃、不用投影抬层级**。形态两轨制：**按钮为胶囊（`rounded-full`），面板 / 卡片 / 输入框 / 徽章 / 弹窗 / 进度条一律直角**（`--radius-*` 四个令牌已归零）；状态点、开关滑块等功能性圆形保留。数字用等宽（`tabular-nums`）。主操作白底黑字，次操作透明底加冷灰边框，状态不单靠颜色区分。不要引入第二套配色体系，不用 emoji。
 - 字体与字号不要手写：统一用 `src/styles/global.css` 里的 `--font-*` 与 `--text-*` 令牌，`font-guard.ts` 会断言组件层没有手写 `font-family`、也没有绕过令牌的任意值字号。

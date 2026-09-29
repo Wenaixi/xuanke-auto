@@ -2,22 +2,27 @@
 @plugin "tailwindcss-animate";
 
 /* 字体栈令牌：--font-* 命名空间会生成 font-sans / font-mono / font-title 工具类。
-   **界面正文字体 = 霞鹜文楷 LXGW WenKai**（SIL OFL 1.1，免费商用，可嵌入 exe/APK；
-   npm 包 lxgw-wenkai-webfont 每字重 97 片分包、按需加载）。楷体温润、中文辨识度高。
-   只引 400/700 两个真字重（300 用量仅 4 处且都在等宽数字上，省下 5MB）——
-   `font-medium`(500) 会落到 400、`font-semibold`(600) 落到 700，都是真字形，不出合成假粗体。
-   **标题字体 = jf open 粉圓**（justfont 开源，OFL）：只用在一个 10.7KB 的子集里
+   **界面正文字体 = Geist Variable**（SIL OFL 1.1，Vercel 出品，可嵌入 exe/APK）。
+   选它的理由：xAI 规范正文栈首选的 universalSans 是私有字体、不可获取，
+   其官方文档列出的开源替代里 Geist 是与 Geist Mono 同源的那一款。
+   早期版本用的是霞鹜文楷（楷体），与 xAI 冷峻单色体系不搭，且 194 个中文分片
+   要占约 8.9MiB；换成 Geist 后体积降到百 KB 级。
+   **标题字体 = jf open 粉圓**（justfont 开源，OFL）：只用在一个约 12KB 的子集里
    （public/fonts/jf-openhuninn-title.woff2，仅含标题实际出现过的字），
-   分包里没有的简体字（实测粉圓缺「选课择统」）自动回退到文楷，不出豆腐。
-   mono 栈保留 Geist Mono：文楷数字是比例宽度且无 tnum，倒计时/ID 用它会对不齐。 */
+   子集外的字（粉圓是繁体优先字体，简体「选课择统」无字形）自动回退到 Geist Variable。 */
 @theme {
-  --font-sans: "LXGW WenKai", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC",
-    sans-serif;
-  --font-mono: "Geist Mono Variable", "LXGW WenKai", ui-monospace,
-    SFMono-Regular, Menlo, Consolas, "PingFang SC", "Microsoft YaHei UI",
-    "Microsoft YaHei", monospace;
-  --font-title: "Title Round", "LXGW WenKai", sans-serif;
+  /* Geist 为拉丁/数字主字体，**不含汉字**——中文必须由系统中文字体兜底，
+     三平台顺位固定：苹方（macOS/iOS）→ 微软雅黑（Windows）→ 思源（Linux）。
+     代价：微软雅黑只有 Light/Regular/Bold 三档，font-medium(500) /
+     font-semibold(600) 在 Windows 上会静默落为 400/700，字重层次减弱。 */
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
+  /* mono 栈保留 Geist Mono：比例宽度字体数字无 tnum，倒计时/ID 会对不齐。 */
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+  /* 标题沿用粉圓子集（体积仅 12KB），与无衬线正文拉开层次 */
+  --font-title: "Title Round", "Geist Variable", ui-sans-serif, system-ui, sans-serif;
 
   /* 微标签层：只设字号与字距，刻意不定义 --line-height，
      生成的 text-3xs / text-2xs 只设置 font-size，行高继续继承父级，
@@ -60,15 +65,19 @@
   --text-4xl--line-height: 1.05;
   --text-4xl--letter-spacing: -0.02em;
 
-  /* 灰阶：只动字，不动背景与卡片（主人的硬要求）。
-     取值经历两轮：先按要求压深（#e5e5e5/#cccccc → #d4d4d4/#b8b8b8），
-     后按「灰字淡一些些，这太黑了」回调一档，现值即下面四档——比原始略深、
-     比压深那版明显更淡。改这里只动字形颜色，不动背景与面板（见项目契约 104）。
-     两套灰必须同步改：neutral-* 是调色板、--fg-* 是语义令牌，只改一套等于只修一半。 */
-  --color-neutral-300: #e3e3e3;
-  --color-neutral-400: #c9c9c9;
-  --color-neutral-500: #b0b0b0;
-  --color-neutral-600: #8a8a8a;
+  /* 灰阶：与 xAI 文字体系对齐（body #dadbdf / body-mid #7d8187）。
+     组件层大量直接用 text-neutral-400 / border-neutral-800 等类，不经过
+     --fg-* 令牌，两套灰必须同步改，只改一套等于只修一半。 */
+  --color-neutral-300: #dadbdf;
+  --color-neutral-400: #dadbdf;
+  --color-neutral-500: #7d8187;
+  --color-neutral-600: #7d8187;
+  /* 700 及以下原取 Tailwind 默认灰，会与新发丝线 #212327 错乱；
+     在此单点覆盖即可让全站现有类名自动落入新体系，无需逐处改。 */
+  --color-neutral-700: #212327;
+  --color-neutral-800: #212327;
+  --color-neutral-900: #161a1d;
+  --color-neutral-950: #0f1114;
 }
 
 /* 手写实用类全部进 @layer components：不包层会按 CSS 层叠规范成为「无层样式」，
@@ -78,27 +87,29 @@
    改这一处，Card / Input / Tabs / Toast / Button(secondary) 一起透出水墨背景。 */
 @layer components {
 :root {
-  /* 瑞士国际主义与高级黑白极简艺术调色板 (Monochrome Fine Art) */
-  --bg: #000000;
-  /* 面板底：6% 白 = 与 .glass 同值，半透明到能透出画布背景。
-     面板下方始终压着 .canvas-bg-mask 的 38%~72% 深黑渐变，白字对比度由遮罩而非面板保证——
-     若某处白字在亮背景区域读不清，先加厚遮罩，不要把面板改回实色。 */
-  --surface: rgba(255, 255, 255, 0.06);
-  --surface-soft: rgba(255, 255, 255, 0.10);
-  /* 凹陷/悬停档刻意取暗而非更白：唯二消费方是进度条槽与默认按钮 hover——进度条槽若也跟着
-     变白，白色填充（进度本体）就糊进槽底失去对比。 */
-  --surface-muted: rgba(0, 0, 0, 0.35);
-  --border: rgba(255, 255, 255, 0.12);
-  --border-hover: rgba(255, 255, 255, 0.24);
-  --border-strong: rgba(255, 255, 255, 0.5);
+  /* xAI 设计语言（见项目根 DESIGN.md）：近黑画布 + 逐级抬升的实色面板，
+     全部用**不透明实色**而非半透明玻璃——画布恒为 #0a0a0a，半透明 6% 白贴上去
+     只剩 10/255 的灰差，层级会整个塌掉。 */
+  --bg: #0a0a0a;
+  /* 面板底：比画布亮一档的炭灰，卡片与主面板的实体承载面。 */
+  --surface: #191919;
+  /* 更实一档：输入框、悬停面、弹窗面板等需要与 --surface 拉开层次的区域。 */
+  --surface-soft: #1a1c20;
+  /* 凹陷/嵌套档：进度条槽与按钮按下档。刻意取比 --surface-soft 更亮的
+     中性灰而非更暗——槽底太暗会让白色填充糊进背景失去对比。 */
+  --surface-muted: #363a3f;
+  /* 发丝线：1px 实色分隔，xAI 体系里层级全靠它表达，不用投影。 */
+  --border: #212327;
+  --border-hover: #363a3f;
+  --border-strong: #536471;
   --border-invert: #ffffff;
 
   --fg: #ffffff;
   /* 与调色板灰阶同源同步（--fg-muted 对齐 neutral-400、--fg-dim 对齐 neutral-500）：
      --fg-muted 承载描边按钮文字、卡片描述、未选中标签，--fg-dim 承载输入框占位符。
      两者是全站灰字的两条主干，改调色板不改这里等于只修一半。 */
-  --fg-muted: #c9c9c9;
-  --fg-dim: #b0b0b0;
+  --fg-muted: #dadbdf;
+  --fg-dim: #7d8187;
 
   /* 单色语义灰阶映射（纯黑白极简，剔除所有高饱和彩色杂质） */
   --emerald: #ffffff;
@@ -109,7 +120,8 @@
   --amber-bg: rgba(255, 255, 255, 0.06);
   --amber-border: rgba(255, 255, 255, 0.2);
 
-  --rose: #f43f5e;
+  /* 错误红是单色体系里唯一的彩色，保留以区分失败态（xAI Error Red） */
+  --rose: #f4212e;
   --rose-bg: rgba(244, 63, 94, 0.08);
   --rose-border: rgba(244, 63, 94, 0.25);
 
@@ -117,11 +129,14 @@
   --cyan-bg: rgba(255, 255, 255, 0.08);
   --cyan-border: rgba(255, 255, 255, 0.3);
 
-  /* 严谨纯粹几何圆角体系 (精简利落) */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+
+  /* 形态两轨制：按钮取胶囊（--radius-full），面板与输入框一律直角。
+     下面四档保留名字但值全为 0，是为了让全站 200+ 处消费点无需逐个改类名；
+     真要新增控件圆角，请显式写 rounded-full 并说明理由，不要改这四档。 */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
   --radius-full: 9999px;
 }
 
@@ -146,17 +161,18 @@ html {
   text-size-adjust: 100%;
 }
 
-/* 挂载点外壳：透明底 + 相对定位，作为随文档滚动的背景层定位参照 */
+/* 挂载点外壳：实色画布。背景图机制已移除，画布不再需要透出任何内容，
+   直接铺 --bg 避免多层透明叠加后与 body 产生色差。 */
 #root {
-  background-color: transparent;
+  background-color: var(--bg);
   position: relative;
 }
 
 /* 标题字体：jf open 粉圓（justfont 开源，OFL 1.1）的**子集**——只加载 public/fonts 里那份
-   11KB 子集。family 名刻意叫 "Title Round" 而不是原名：该字体的 OFL 声明了
+   约 12KB 子集。family 名刻意叫 "Title Round" 而不是原名：该字体的 OFL 声明了
    Reserved Font Names（'open huninn' 等），派生版本按协议不得沿用保留名（内部名也已改为
    JF Open Huninn Title）。子集外的字（粉圓本身没有的简体，实测缺「选课择统」）自动回退到
-   第二顺位文楷，不出豆腐；许可证文本随包放在 public/fonts/jf-openhuninn-OFL.txt。 */
+   第二顺位 Geist Variable，不出豆腐；许可证文本随包放在 public/fonts/jf-openhuninn-OFL.txt。 */
 @font-face {
   font-family: "Title Round";
   src: url("/fonts/jf-openhuninn-title.woff2") format("woff2");
@@ -176,79 +192,14 @@ body {
      且两者的 normal 均为 CSS 初始值，写出来等同无操作。更换中文字体时需重新评估。 */
 }
 
-/* 水墨画布背景层：boqi.jpg 铺满全屏 + 深黑渐变遮罩，保证任意亮度下白字清晰。
-   挂在 App 根节点下，天然位于所有路由内容之下，半透明组件即可透出水墨图。
-   注意：背景层使用 z-index:0，路由内容需显式 z-index:1 叠在背景之上，
-   避免使用 z-index:-1 在含 React Portal / fixed 堆叠上下文的页面上被内容层盖住。 */
-.canvas-bg {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
 
-/* 水墨图本体：真实 <img> 元素，方便 JS 直接量测真实渲染高度。
-   全端共用同一条滚动冻结逻辑：位移 --bg-shift 由 App.tsx 按
-   shift = −clamp(scrollY, 0, 图片高−视口高)（负值上移）写入 transform——
-   未触底前 1:1 跟随滚动，图片底部到屏幕底边即冻住、绝不越出底部。
-   默认（移动端）：180% 宽 */
-.canvas-bg-img {
-  position: absolute;
-  top: 0;
-  left: 0;
-  /* 显式定层（不用默认 z-index:auto）：App.tsx 会给这张图写内联 transform（滚动冻结），
-     它因此成为独立合成层；真机实测 Android WebView 会把该合成层画在**无 z-index 的兄弟
-     遮罩之上**，导致 .canvas-bg-mask 整层消失、背景原图直出（实测 APK 截图/源图像素比
-     恒为 1.000，同一页面 Chrome 为 0.5→0.22→0.5 遮罩曲线）。层级绝不能依赖 DOM 顺序
-     与合成层重叠判定——图 0、遮罩 1，见下条。 */
-  z-index: 0;
-  width: 180%;
-  max-width: none;
-  height: auto;
-  display: block;
-  transform: translateY(var(--bg-shift, 0px));
-  /* 背景图**保持彩色**：曾试过 filter: grayscale(1) 去色（想让「白」更中性），
-     主人当场否掉（「怎么全灰了」）——别再给这张图加任何滤镜。 */
-}
-
-/* 深黑渐变遮罩：盖在图片之上（DOM 顺序在 img 后），不随图片位移，
-   保证任意亮度下白字清晰。
-   背景要求「更亮更白」：中段只压 22%（首末 50%）。遮罩只负责背景亮度，
-   文字的对比由**文字层**自己扛（见 .app-content 的 text-shadow）——面板只是 6% 白玻璃。
-   另：图片已 grayscale（见 .canvas-bg-img），故这里的黑即中性灰，不再有彩色偏色。 */
-.canvas-bg-mask {
-  position: absolute;
-  inset: 0;
-  /* z-index:1 压在图片合成层（z-index:0）之上——见 .canvas-bg-img 的实测记录：
-     不显式定层时 Android WebView 会把带内联 transform 的图片画到遮罩之上。 */
-  z-index: 1;
-  background: linear-gradient(rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.22) 45%, rgba(0, 0, 0, 0.5) 100%);
-}
-
-/* 桌面端（鼠标设备）：宽度缩为 160%（逻辑与移动端完全一致，仅放大比例不同） */
-@media (hover: hover) and (pointer: fine) {
-  .canvas-bg-img {
-    width: 160%;
-  }
-}
-
-/* 页面内容壳层：显式置于水墨背景下但仍在所有弹层之上。
-   文字层增白：面板只是 6% 白玻璃，白字压在同一张背景图的亮处与暗处会呈现两种「白」
-   （实测选课页与主界面能差近 40 级灰度，还串上背景的彩色），用户要求「白字更白且两页统一」。
-   解法落在文字自身：给全站文字加一层极淡的暗投影，白字边缘重新立起来、灰字也更有实体感，
-   两页观感因此一致——背景与面板一行未动。 */
+/* 页面内容壳层：实色画布之上、弹层之下。
+   早期为「白字压水墨图」给全站文字加过四向暗描边（text-shadow），
+   那是在替背景图补对比度；画布改为恒定 #0a0a0a 后白字本就有足够对比，
+   继续保留只会在小字号文字上糊成一团，故整体移除。 */
 .app-content {
   position: relative;
   z-index: 1;
-  /* 四向 1px 暗描边 + 一层柔和投影：给字形一圈深色轮廓，白字在亮背景上才「立」得住、
-     也才和主界面一样白（只描边、不铺底色，面板与背景仍是一行未动）。 */
-  text-shadow:
-    -1px 0 rgba(0, 0, 0, 0.55),
-    1px 0 rgba(0, 0, 0, 0.55),
-    0 -1px rgba(0, 0, 0, 0.55),
-    0 1px rgba(0, 0, 0, 0.55),
-    0 1px 3px rgba(0, 0, 0, 0.55);
 }
 
 /* 等宽数字排版：倒计时与容量统计严格纵向对齐 */
@@ -269,30 +220,29 @@ body {
   background-color: var(--surface-soft);
 }
 
-/* 面板（磨砂玻璃）：半透明白底，保留设计质感。
- * backdrop-filter 已移除：Android WebView 对它捕获透明背景时渲染成黑块
- * （react-native-webview#3469 / JDK-8268397 同证），页面背景透明时大面积
- * 玻璃面板整体发黑。移除后半透明底 rgba(255,255,255,0.06) 直接叠加在
- * 画布背景上 = 6% 白 + 94% 背景，面板可读且不黑；桌面保留半透明观感、
- * 仅失去模糊，两平台一致。 */
+/* 面板（实色）：xAI 体系下层级的唯一载体是实色填充 + 发丝线描边。
+ * 早期这里是 6% 半透明白玻璃（backdrop-filter 早已移除，Android WebView
+ * 捕获透明背景会渲成黑块）；画布改为恒定 #0a0a0a 后，半透明面板与画布
+ * 只差极小灰阶、层级塌陷，故全面切实色。 */
 .glass {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: var(--surface);
 }
 
-/* 更实的面板：底部固定栏 / 弹窗面板等文字直接压在画面上的区域。
-   仍是透明玻璃，只比 .glass 厚一档（10% 白），保证密集白字不糊在亮背景上。 */
+/* 更实的面板：底部固定栏 / 弹窗面板等需要与下层内容明确分离的区域。
+   实色体系下不再靠「加厚白」提升，而是抬到 --surface-soft 这一档。 */
 .glass-strong {
-  background-color: rgba(255, 255, 255, 0.10);
+  background-color: var(--surface-soft);
 }
 
-/* 弹窗遮罩：足够暗保证弹窗内容可读 */
+/* 弹窗遮罩：全站唯一保留的半透明——它叠在纯黑画布上而非面板上，
+   必须明显暗于面板才能把弹窗与背后的内容分开。 */
 .glass-overlay {
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: rgba(0, 0, 0, 0.8);
 }
 
-/* 输入框 / 下拉表面：暗色半透明玻璃 */
+/* 输入框 / 下拉表面：与面板同档的实色，靠发丝线描边而非凹陷感区分 */
 .glass-input {
-  background-color: rgba(0, 0, 0, 0.35);
+  background-color: var(--surface-soft);
 }
 
 /* 基础交互重置 */
@@ -327,7 +277,7 @@ a {
   }
 }
 
-/* 现代圆润暗色滚动条 */
+/* 暗色滚动条：与实色面板体系一致，滑块取直角细条 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -338,8 +288,8 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 9999px;
+  background: var(--border);
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {

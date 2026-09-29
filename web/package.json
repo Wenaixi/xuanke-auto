@@ -12,6 +12,7 @@
     "guard": "node --import jiti/register scripts/perf-countdown-guard.ts && node --import jiti/register scripts/target-guard-check.ts && node --import jiti/register scripts/admin-auth-check.ts && node --import jiti/register scripts/unauthorized-check.ts && node --import jiti/register scripts/lazy-route-guard.ts && node --import jiti/register scripts/font-guard.ts"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-tabs": "^1.1.21",
@@ -19,7 +20,6 @@
     "@tanstack/react-query": "^5.102.8",
     "clsx": "^2.1.1",
     "lucide-react": "^1.45.0",
-    "lxgw-wenkai-webfont": "^1.7.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwind-merge": "^3.6.0"

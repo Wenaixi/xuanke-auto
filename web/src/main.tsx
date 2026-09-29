@@ -1,10 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+// 界面字体：Geist（SIL OFL 1.1，Vercel 出品）可变无衬线，与 xAI 规范的
+// universalSans（私有、不可获取）气质最接近，也和 Geist Mono 同源。
+// Geist 不含汉字，中文由系统中文字体兜底（见 global.css 的 --font-sans 栈）。
+// 不再自托管霞鹜文楷：楷体与冷峻单色体系不搭，且其 194 个中文分片占约 8.9MiB。
+import '@fontsource-variable/geist'
 import '@fontsource-variable/geist-mono'
-// 界面字体：霞鹜文楷（SIL OFL 1.1，免费商用）。只引 400/700 两个字重——300 用不到，
-// 省下约 5MB；只给这里两个入口是为了让未使用的字重分片不进构建产物。
-import 'lxgw-wenkai-webfont/lxgwwenkai-regular.css'
-import 'lxgw-wenkai-webfont/lxgwwenkai-bold.css'
 import './styles/global.css'
 import App from './App.tsx'
 

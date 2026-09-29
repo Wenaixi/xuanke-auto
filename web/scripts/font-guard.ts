@@ -44,10 +44,11 @@ check(
 )
 check("body 不残留硬编码 Inter 字体栈", !/font-family\s*:\s*['"]Inter['"]/.test(cssCode))
 
-// 3. 字体包必须被引入（界面 = 霞鹜文楷；Geist Mono 只负责等宽数字）
+// 3. 字体包必须被引入（界面 = Geist 可变无衬线；Geist Mono 只负责等宽数字。
+//    两者同源同版本；中文不由自托管字体承载，见 global.css 的 --font-sans 兜底栈）
 for (const pkg of [
+  "@fontsource-variable/geist",
   "@fontsource-variable/geist-mono",
-  "lxgw-wenkai-webfont/lxgwwenkai-regular.css",
 ]) {
   check(`main.tsx 引入 ${pkg}`, main.includes(pkg))
 }
@@ -71,7 +72,7 @@ for (const token of [
 //    Geist Mono 的 GSUB 只有 ccmp/dnom/frac/locl/numr（无 liga/calt/tnum/zero），
 //    当时的 Noto Sans SC 只有 ccmp/liga/locl/vert/vrt2（无 halt/chws）；
 //    且 text-spacing-trim 与 text-autospace 的 normal 均为 CSS 初始值。加回来等于虚假承诺。
-//    中文现已换为 MiSans VF——要加任何 OpenType 特性声明前，同样先解析字体文件实测。
+//    中文现已交由系统字体（Geist 不含汉字）——要加任何 OpenType 特性声明前，同样先解析字体文件实测。
 check(
   "global.css 不含已被实测否定的无效声明（font-feature-settings / text-spacing-trim / text-autospace）",
   !/font-feature-settings|text-spacing-trim|text-autospace/.test(cssCode),

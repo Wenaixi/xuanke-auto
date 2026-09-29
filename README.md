@@ -233,15 +233,17 @@ git push origin v0.2.28
 
 ## 十、界面字体
 
-界面字体全部自托管、随包分发，均为 **SIL OFL 1.1**，来源与版权见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：
+界面字体随包分发，均为 **SIL OFL 1.1**，来源与版权见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：
 
 | 用途 | 字体 | 说明 |
 | --- | --- | --- |
-| 正文与全部界面文字 | 霞鹜文楷 LXGW WenKai | 只打包 400 / 700 两个字重，按 `unicode-range` 分片按需加载 |
+| 正文与全部界面文字 | Geist Variable | 可变无衬线，与 Geist Mono 同源；按 `unicode-range` 分片按需加载 |
 | 左上角标题 | jf open 粉圓 的派生子集 | 12,556 字节，只含三个繁体标题（選課助手 / 系統管理 / 選擇課程）的用字与 ASCII；粉圓是繁体优先字体，改标题文案必须重打子集 |
-| 等宽数字（倒计时、课程 ID、统计表格） | Geist Mono | 文楷数字是比例宽度且没有 `tnum`，用它会让数字跳动、列对不齐 |
+| 等宽数字（倒计时、课程 ID、统计表格） | Geist Mono | Geist 数字带 `tnum`，用它会让倒计时严格对齐、表格列不跳动 |
 
-三套字体合计给产物增加约 8.9 MiB。粉圓子集的许可证全文随 `web/public/fonts/jf-openhuninn-OFL.txt` 一起进 dist（进而进 exe / APK）——OFL 要求随包保留许可证，不要删。
+三套字体合计给产物增加约 **0.16 MiB**（Geist + Geist Mono 共 146,868 字节，粉圓子集 12,556 字节）。粉圓子集的许可证全文随 `web/public/fonts/jf-openhuninn-OFL.txt` 一起进 dist（进而进 exe / APK）——OFL 要求随包保留许可证，不要删。
+
+**Geist 不含汉字**，中文由系统中文字体按 `PingFang SC`（macOS / iOS）→ `Microsoft YaHei UI`（Windows）→ `Noto Sans CJK SC`（Linux）顺位兜底。因此有两个已知代价：各平台中文观感略有差异；Windows 的微软雅黑只有 Light / Regular / Bold 三档，`font-medium`(500) 与 `font-semibold`(600) 会静默落为 400 / 700，字重层次比自托管可变字体弱。
 
 字体只允许在 `web/src/styles/global.css` 的 `@theme` 里定义：`--font-sans` / `--font-mono` / `--font-title` 三个令牌，组件层一律用 `font-sans` / `font-mono` / `font-title` 工具类；`npm run guard` 里的 `web/scripts/font-guard.ts` 会拦下组件层手写的 `font-family`。
 
@@ -257,7 +259,7 @@ backend/                    Go 后端（module xuanke-auto/backend）
   browser_windows.go        用默认浏览器打开页面
   internal/api/             HTTP 路由与处理器（/api/*、/api/admin/*）
   internal/scheduler/       开窗识别、探测与提交调度
-  internal/zhidao/          平台客户端：登录、课程、报名退选、识别引擎
+  internal/upstream/          平台客户端：登录、课程、报名退选、识别引擎
   internal/accounts/        多账号注册表与凭据生命周期
   internal/{config,runtime,secure,session,store,db}/
   web/                      embed 目标（//go:embed all:dist）
@@ -269,7 +271,7 @@ web/                        React 前端（Vite 构建，产物落 backend/web/d
   src/lib/                  纯函数与守卫逻辑（含 vitest 测试）
   src/styles/global.css     设计令牌（颜色、排版、字体）
   scripts/*-guard.ts        npm run guard 的六套源码形状守卫
-  public/                   背景图、图标、粉圓子集与其 OFL 许可证
+  public/                   图标、粉圓子集与其 OFL 许可证
 build/android/              Android 薄壳（Gradle + Java + 资源）
 .github/workflows/          ci.yml / release.yml
 docs/agents/                Agent 工作流配置（domain / issue-tracker / triage-labels）

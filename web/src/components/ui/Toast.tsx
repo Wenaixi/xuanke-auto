@@ -97,7 +97,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 </ToastPrimitive.Description>
               )}
             </div>
-            <ToastPrimitive.Close className="shrink-0 rounded-[var(--radius-sm)] p-1 text-[var(--fg-muted)] opacity-70 transition-opacity hover:opacity-100 hover:text-[var(--fg)] focus:outline-none">
+            <ToastPrimitive.Close className="shrink-0 rounded-full p-1 text-[var(--fg-muted)] opacity-70 transition-opacity hover:opacity-100 hover:text-[var(--fg)] focus:outline-none">
               <X className="h-4 w-4" />
             </ToastPrimitive.Close>
           </ToastPrimitive.Root>

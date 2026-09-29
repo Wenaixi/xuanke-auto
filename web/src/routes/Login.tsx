@@ -170,7 +170,7 @@ export default function Login({ onLogin }: Props) {
                     // 可见性切换按钮语义化——aria-label 说明作用、aria-pressed 报状态
                     aria-label={showPassword ? "隐藏密码" : "显示密码"}
                     aria-pressed={showPassword}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 grid h-10 w-10 place-items-center sm:h-7 sm:w-7 text-neutral-500 hover:text-white active:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 grid h-10 w-10 place-items-center sm:h-7 sm:w-7 text-neutral-500 hover:text-white active:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 rounded-full"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -191,7 +191,7 @@ export default function Login({ onLogin }: Props) {
                 variant="primary"
                 size="lg"
                 disabled={loading}
-                className="w-full mt-2 flex items-center justify-center gap-2 text-sm font-semibold rounded-[var(--radius-sm)]"
+                className="w-full mt-2 flex items-center justify-center gap-2 text-sm font-semibold rounded-full"
               >
                 {loading ? (
                   <>
@@ -281,7 +281,7 @@ export default function Login({ onLogin }: Props) {
                   size="lg"
                   disabled={activating}
                   onClick={activate}
-                  className="w-full h-10 flex items-center justify-center gap-2 text-sm font-semibold rounded-[var(--radius-sm)]"
+                  className="w-full h-10 flex items-center justify-center gap-2 text-sm font-semibold rounded-full"
                 >
                   {activating ? (
                     <>

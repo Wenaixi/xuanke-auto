@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"xuanke-auto/backend/internal/scheduler"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // Store 凭据持久化最小接口（store.Store 实现）。
+// SaveCredential 一次写齐「密文账密 + token + token 所属平台」——切换平台时正是靠
+// 「空 token + 新平台 ID」的同一次写入清掉跨平台会话并打上新标记。
 type Store interface {
-	SaveCredential(acct, passwordEnc, idToken string) error
+	SaveCredential(acct, passwordEnc, idToken, platformID string) error
 	LoadCredentials() ([]Credential, error)
 }
 
@@ -21,18 +23,22 @@ type Credential struct {
 	Account     string
 	PasswordEnc string
 	IDToken     string
+	// PlatformID token 所属的平台档案 ID。与当前档案不一致时 token 必须丢弃：
+	// 跨平台会话必废，且绝不把 A 平台的会话 token 发往 B 平台（凭据外泄）。
+	PlatformID string
 }
 
-// Manager 多账号客户端注册表：每个账号一个独立 zhidao.Client（独立 token/cookie 会话）。
+// Manager 多账号客户端注册表：每个账号一个独立 upstream.Client（独立 token/cookie 会话）。
 // 账号 A 的请求绝不携带账号 B 的会话——物理隔离的核心。
 type Manager struct {
-	baseURL string
-	vision  zhidao.VisionConfig
+	desc    upstream.SiteDescriptor // 当前平台档案（路径/键名/解码钩子）
+	baseURL string                  // 实际生效的站点根地址（管理员覆盖优先）
+	vision  upstream.VisionConfig
 	st      Store
 
 	mu      sync.Mutex
-	clients map[string]*zhidao.Client // 账号名 -> 独立客户端
-	order   []string                  // 登录顺序
+	clients map[string]*upstream.Client // 账号名 -> 独立客户端
+	order   []string                    // 登录顺序
 
 	// 全局重登频率闸门（安全审计）：所有账号共享同一出口 IP 打平台 doLogin，
 	// 若平台风控含 IP 维度，多个账号同时失效时全速重登会把整个 IP 刷到锁号（全盘陪葬）。
@@ -86,26 +92,46 @@ func (m *Manager) ResetGateForTest() {
 	m.gateUsed = 0
 }
 
-// New 创建多账号客户端注册表。
-func New(baseURL string, vision zhidao.VisionConfig, st Store) *Manager {
+// New 创建多账号客户端注册表。baseURL 空串表示用档案默认地址。
+func New(desc upstream.SiteDescriptor, baseURL string, vision upstream.VisionConfig, st Store) *Manager {
+	if baseURL == "" {
+		baseURL = upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
 	m := &Manager{
+		desc:    desc,
 		baseURL: baseURL,
 		vision:  vision,
 		st:      st,
-		clients: make(map[string]*zhidao.Client),
+		clients: make(map[string]*upstream.Client),
 	}
 	m.gateCond = sync.NewCond(&m.gateMu)
 	return m
 }
 
+// profileID 当前档案 ID（读锁快照：SetProfile 会换档案，落库前必须取当前值）。
+func (m *Manager) profileID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.desc.ID
+}
+
+// sessionCookies 当前档案声明的会话 Cookie 占位（读锁快照）。
+// 站点会话 Cookie 属档案事实（知到需access_limit_cookie=1，无此需求的平台声明空 map），
+// accounts 层只消费不硬编码——换平台时随档案自动改变。
+func (m *Manager) sessionCookies() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.desc.SessionCookies
+}
+
 // ensure 返回账号对应的独立客户端（不存在则创建空壳）。
-func (m *Manager) ensure(acct string) *zhidao.Client {
+func (m *Manager) ensure(acct string) *upstream.Client {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if c, ok := m.clients[acct]; ok {
 		return c
 	}
-	c := zhidao.New(m.baseURL, m.vision)
+	c := upstream.New(m.desc, m.baseURL, m.vision)
 	m.clients[acct] = c
 	m.order = append(m.order, acct)
 	return c
@@ -194,8 +220,8 @@ func (m *Manager) Registered() []string {
 // 赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
 // SetVision 再 applyCaptchaRecognizerFor(SetRecognizer)，若 SetVision 直接覆盖模板，
 // 两条调用之间新 ensure 的客户端会短暂拿到 nil 引擎；保留当前引擎与
-// zhidao.Client.SetVision 的"绝不挥动引擎切换"语义对齐（引擎归属 SetRecognizer）。
-func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
+// upstream.Client.SetVision 的"绝不挥动引擎切换"语义对齐（引擎归属 SetRecognizer）。
+func (m *Manager) SetVision(cfg upstream.VisionConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cfg = cfg.WithRecognizer(m.vision.Recognizer()) // 保留模板当前引擎
@@ -209,11 +235,11 @@ func (m *Manager) SetVision(cfg zhidao.VisionConfig) {
 // recognizer 为 nil 时表示"无引擎"（登录识别立即报错，直到管理员恢复配置）。
 // 同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
 // 当前已有客户端，m.vision 模板的 recognizer 恒为 nil：此后 ensure 新建客户端经
-// zhidao.New(m.baseURL, m.vision) 时 recognizer 拿不到引擎，默认兜底仅认 APIKey
+// upstream.New(m.baseURL, m.vision) 时 recognizer 拿不到引擎，默认兜底仅认 APIKey
 // （SF_API_KEY 留空的 ddddocr 部署下），新账号登录识别直接报"未配置验证码识别引擎"，
 // 系统从第一个新账号起无法登录任何新账号（既有客户端因已注入引擎被掩盖）。同理
 // SetVision 赋值前保留当前引擎，绝不把模板的 recognizer 清成 nil。
-func (m *Manager) SetRecognizer(r zhidao.CaptchaRecognizer) {
+func (m *Manager) SetRecognizer(r upstream.CaptchaRecognizer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.vision = m.vision.WithRecognizer(r)
@@ -277,7 +303,7 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 	}
 	if m.st != nil && encrypt != nil {
 		if enc, err := encrypt(password); err == nil {
-			if err := m.st.SaveCredential(acct, enc, token); err != nil {
+			if err := m.st.SaveCredential(acct, enc, token, m.profileID()); err != nil {
 				log.Printf("[accounts] 持久化凭据失败: %v", err)
 			}
 		} else {
@@ -291,11 +317,22 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 }
 
 // Restore 重启时用持久化凭据恢复各账号客户端（密码解密后在内存中，仅用于自动重登）。
-// SetCredentials 已写入 zd_edu_cookie（token）；SetCookies 为合并语义，
+// **跨平台会话丢弃**：库内 token 若属于别的平台档案（换过平台、或恢复了他机备份的库），
+// 一律不注入——否则会把 A 平台的会话 token 发往 B 平台（凭据外泄），且必然 401 白跑一轮。
+// 账密照常注入，调度器随即自动重登建新会话。
+// SetCredentials 已写入档案声明的会话 Cookie；SetCookies 为合并语义，
 // 只补齐 access_limit_cookie，绝不覆盖登录流程收集的服务端会话 Cookie。
 func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, error)) {
+	cur := m.profileID()
+	cookies := m.sessionCookies()
 	for _, cd := range creds {
 		c := m.ensure(cd.Account)
+		token := cd.IDToken
+		if token != "" && cd.PlatformID != cur {
+			log.Printf("[accounts] 账号 %s 的会话属于平台 %s，与当前平台 %s 不一致，已丢弃（将自动重登）",
+				cd.Account, cd.PlatformID, cur)
+			token = ""
+		}
 		pwd := ""
 		if decrypt != nil {
 			if p, err := decrypt(cd.PasswordEnc); err == nil {
@@ -307,14 +344,58 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 				log.Printf("[accounts] 账号 %s 凭据解密失败，自动重登将无保存账密: %v", cd.Account, err)
 			}
 		}
-		c.SetCredentials(cd.Account, pwd, cd.IDToken)
-		// access_limit_cookie 由 login/submitLogin 动态更新；这里只做占位补充，
-		// 不写死覆盖真实会话值（合并语义由 SetCookies 保证）。
-		c.SetCookies(map[string]string{
-			"access_limit_cookie": "1",
-		})
-		log.Printf("[accounts] 恢复账号 %s 的会话（token %s）", cd.Account, tokenShort(cd.IDToken))
+		c.SetCredentials(cd.Account, pwd, token)
+		// 会话 Cookie 占位由档案声明（知到需 access_limit_cookie=1；无需求的平台空 map）。
+		// 只做占位补充，不覆盖真实会话值（合并语义由 SetCookies 保证）。
+		c.SetCookies(cookies)
+		log.Printf("[accounts] 恢复账号 %s 的会话（token %s）", cd.Account, tokenShort(token))
 	}
+}
+
+// SetProfile 管理员切换选课平台档案后重建全部客户端。
+//
+// 语义（顺序即契约）：
+//  1. **memory-first**：先换档案与生效地址、整表清空注册表——旧客户端立即不可达，
+//     在飞链的锁内身份复核随之失败并静默放弃落库（复用「删号同名重建」那条防线），
+//     在飞结果绝不污染新平台状态；
+//  2. 逐账号用库内密文账密重建客户端，**token 一律置空**——跨平台会话必废，
+//     且物理上不存在「A 平台 token 发往 B 平台」的可能；
+//  3. 每账号落库一次 SaveCredential（空 token + 新平台 ID）：同一次写入既清掉库内旧
+//     token（防重启后把旧平台 token 当自己的用），又打上新平台标记。
+//
+// 目标课程/成功记录/已退选记录**刻意不动**：换平台是同一套选课语义的接口换代，
+// 这些记录仍然有效；只有会话与站点地址属于平台。
+func (m *Manager) SetProfile(desc upstream.SiteDescriptor, baseURL string, creds []Credential, decrypt func(string) (string, error)) {
+	if baseURL == "" {
+		baseURL = upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
+	m.mu.Lock()
+	m.desc, m.baseURL = desc, baseURL
+	m.clients = make(map[string]*upstream.Client)
+	m.order = nil
+	m.mu.Unlock()
+
+	for _, cd := range creds {
+		c := m.ensure(cd.Account)
+		pwd := ""
+		if decrypt != nil {
+			if p, err := decrypt(cd.PasswordEnc); err == nil {
+				pwd = p
+			} else {
+				log.Printf("[accounts] 账号 %s 凭据解密失败，切换平台后需手动登录: %v", cd.Account, err)
+			}
+		}
+		c.SetCredentials(cd.Account, pwd, "")
+		c.SetCookies(desc.SessionCookies)
+		if m.st != nil {
+			if err := m.st.SaveCredential(cd.Account, cd.PasswordEnc, "", desc.ID); err != nil {
+				// 落库失败绝不静默：库内残留旧平台 token，重启时会被 Restore 丢弃（防线仍在），
+				// 但管理员必须能从日志看到"这次切换没完全落库"。
+				log.Printf("[accounts] 切换平台后更新账号 %s 凭据失败: %v", cd.Account, err)
+			}
+		}
+	}
+	log.Printf("[accounts] 已切换选课平台档案 %s（%s）：%d 个账号客户端已重建，将自动重登", desc.ID, baseURL, len(creds))
 }
 
 func tokenShort(s string) string {

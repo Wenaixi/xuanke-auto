@@ -293,9 +293,14 @@ func fetchLoginPage(sess *http.Client, ua, baseURL, loginPath string) error {
 }
 
 // fetchCaptchaImage 取验证码图片（会话绑定校验码）。
-func fetchCaptchaImage(sess *http.Client, ua, baseURL, captchaPath, loginPath string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("%s%s?v=%d", baseURL, captchaPath, time.Now().UnixMilli()), nil)
+// 防缓存参数名由档案声明（cacheBustParam，空串 = 不拼）：硬拼 ?v= 是知到专有形态，
+// 换个站点若不需要该参数，多余的查询串可能被网关拒绝。
+func fetchCaptchaImage(sess *http.Client, ua, baseURL, captchaPath, loginPath, cacheBustParam string) ([]byte, error) {
+	u := baseURL + captchaPath
+	if cacheBustParam != "" {
+		u = fmt.Sprintf("%s?%s=%d", u, cacheBustParam, time.Now().UnixMilli())
+	}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}

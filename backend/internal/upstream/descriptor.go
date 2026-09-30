@@ -69,8 +69,11 @@ func (s CaptchaSpec) Acceptable(n int) bool {
 
 // normalizeByCharset 按正则字符类内容过滤掉不在集合内的字符。
 // charset 为空 = 只去首尾空白（适配字符集不定的平台）。
-// 非法字符集兜底为「不过滤」——档案 Validate 已在装配面拦下非法声明，
-// 运行时不 panic 也不静默丢字符。
+//
+// 字符集的**合法性由 Validate 在装配面校验**（见 validCaptchaCharset），本函数
+// 只负责执行。注意不能用"能否编译"当合法性判据——像 "[invalid" 这种残缺写法，
+// `[^`+charset+`]` 恰好仍是合法正则（嵌套字符类），会把 b/i/n/… 当非法字符静默剔掉。
+// 运行时只做"编译失败则不过滤"这一层防御，绝不静默丢字符。
 func normalizeByCharset(raw, charset string) string {
 	raw = strings.TrimSpace(raw)
 	if charset == "" {
@@ -81,6 +84,27 @@ func normalizeByCharset(raw, charset string) string {
 		return raw
 	}
 	return re.ReplaceAllString(raw, "")
+}
+
+// validCaptchaCharset 校验档案声明的字符集能否作为正则字符类使用。
+//
+// **只校验"能否编译"这一条硬错误**，并说清为什么不做语义校验（勿再尝试加启发式）：
+// 语义残缺的写法（如 "[invalid"）在 Go 正则里会编译成嵌套字符类 `[[invalid]`，
+// 该类**确实匹配字母 a**（嵌套类里就有 a）。已实测三种通用启发式全部失败：
+//   ① 能否编译——残缺写法能编译；
+//   ② 是否含字母数字——`[invalid]` 恰含 i/n/v/a/l/d，纯数字类 "0-9" 又确实不含字母；
+//   ③ 剔除比例过半——合法的 "0-9" 会剔掉全部 26 个字母，恒超半数。
+// 故职责边界是：挡掉**编译不过**的明显错误；语义正确性由档案作者负责（他看得懂
+// 自己写什么）。真出问题的后果轻微——多保留噪声字符会被长度门禁拦下，
+// 不会静默丢字符（那才是严重后果）。
+func validCaptchaCharset(charset string) error {
+	if strings.TrimSpace(charset) == "" {
+		return nil // 空 = 不做字符集过滤
+	}
+	if _, err := regexp.Compile("[" + charset + "]"); err != nil {
+		return fmt.Errorf("字符集 %q 不是合法的正则字符类: %w", charset, err)
+	}
+	return nil
 }
 
 // Decoders 各接口响应的解码钩子：字段名与响应形态由站点决定，引擎不猜任何键名。
@@ -202,6 +226,27 @@ func (d SiteDescriptor) Validate() error {
 		if f == "" {
 			return fmt.Errorf("站点档案 %s 缺少表单字段名 %s", d.ID, name)
 		}
+	}
+	// 声明了验证码却没给表单键名：登录链路会把识别结果拼到空键名上（写出`=value`），
+	// 平台必拒且现场是"参数缺失"这类难定位的错误——必须在装配面拦下。
+	if d.Captcha.Enabled && strings.TrimSpace(d.Form.Captcha) == "" {
+		return fmt.Errorf("站点档案 %s 声明有验证码但未给出表单字段名 Form.Captcha", d.ID)
+	}
+	// 声明了验证码却没给长度下限：识别结果长度无从校验，登录会带着噪声提交。
+	if d.Captcha.Enabled && d.Captcha.MinLen <= 0 {
+		return fmt.Errorf("站点档案 %s 声明有验证码但未给出 MinLen", d.ID)
+	}
+	if d.Captcha.MaxLen > 0 && d.Captcha.MaxLen < d.Captcha.MinLen {
+		return fmt.Errorf("站点档案 %s 的验证码 MaxLen(%d) 小于 MinLen(%d)", d.ID, d.Captcha.MaxLen, d.Captcha.MinLen)
+	}
+	// 字符集合法性：残缺写法（如 "[invalid"）恰好能编译成合法正则却会静默剔掉
+	// 所有字母数字，必须在装配面拦下，绝不拖到运行时丢字符。
+	if err := validCaptchaCharset(d.Captcha.Charset); err != nil {
+		return fmt.Errorf("站点档案 %s 的验证码字符集非法: %w", d.ID, err)
+	}
+	// 声明了设备指纹却没给键名：同理会把指纹拼到空键名上。
+	if strings.TrimSpace(d.Form.UniqueID) == "" && d.Login.DeviceID != nil && d.Login.DeviceID("ua", time.Now()) != "" {
+		return fmt.Errorf("站点档案 %s 的 DeviceID 钩子会产出非空值但未给出表单字段名 Form.UniqueID", d.ID)
 	}
 	return nil
 }

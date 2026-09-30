@@ -80,20 +80,25 @@ func runServer(cfg config.Config) *Started {
 
 	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发 /
 	// 监听地址 / 选课平台档案与站点地址）。
+	// env 侧 → 运行时配置中心的字段搬运收在 config.RuntimeSettings 一处
+	// （两结构体字段名系统性错位，Go 编译器不校验跨结构体手抄，漏搬即静默丢
+	// env 初值；覆盖面由 config 包的反射测试钉死）。此处只补 config 不提供的
+	// 两项：识别引擎默认 ddddocr 本地识别（免密钥），并发上限恒 1 串行防熔断。
+	rs := config.RuntimeSettings(cfg)
 	rt := runtime.New(runtime.Config{
-		ActivationEnabled:  cfg.ActivationCodesEnabled,
-		VisionBaseURL:      cfg.SFBaseURL,
-		VisionAPIKey:       cfg.SFAPIKey,
-		VisionModel:        cfg.SFModel,
+		ActivationEnabled:  rs.ActivationEnabled,
+		VisionBaseURL:      rs.VisionBaseURL,
+		VisionAPIKey:       rs.VisionAPIKey,
+		VisionModel:        rs.VisionModel,
 		CaptchaEngine:      config.CaptchaEngineDefault(), // 默认 ddddocr 本地识别（免密钥），vision 云识别需显式配置
 		CaptchaConcurrency: 1,
 		// 监听地址同样进运行时配置：管理员后台可热改（重绑 socket）并落库 settings。
 		// 启动顺序 = env 初值 → 落库值覆盖（ApplySettings）→ 按最终值真正监听。
-		ListenHost: cfg.ListenHost,
-		ListenPort: cfg.Port,
+		ListenHost: rs.ListenHost,
+		ListenPort: rs.ListenPort,
 		// 选课平台档案：env 初值 → 落库值覆盖（非法 ID 由 runtime 配置表拒绝并保留既有值）。
-		PlatformID:      cfg.PlatformID,
-		PlatformBaseURL: cfg.PlatformBaseURL,
+		PlatformID:      rs.PlatformID,
+		PlatformBaseURL: rs.PlatformBaseURL,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）。
 	// 键名与解析规则由 runtime 包的配置表统一定义——落库侧（api PUT）与本还原侧
@@ -255,7 +260,7 @@ func runServer(cfg config.Config) *Started {
 	apiHandler := api.Register(api.Options{
 		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		AdminToken: cfg.AdminToken, AdminName: cfg.AdminName,
-		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: encrypt, Runtime: rt,
+		Encrypt: encrypt, Runtime: rt,
 		PlatformEmbedded: cfg.PlatformEmbedded, Rebind: rebind, RebindPlatform: rebindPlatform,
 	})
 	mux.Handle("/", web.SpaHandler())

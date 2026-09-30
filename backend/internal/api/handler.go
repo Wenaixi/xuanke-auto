@@ -48,16 +48,15 @@ const (
 // handler_test.go）都必须逐位对齐；命名对象字段即语义自文档化）。
 // 字段与 Deps 一一对应，Register 内部填充 Deps。
 type Options struct {
-	Mux               *http.ServeMux
-	Store             *store.Store
-	Sched             *scheduler.Scheduler
-	Accounts          *accounts.Manager
-	Sessions          *session.Store
-	AdminToken        string
-	AdminName         string
-	ActivationEnabled bool
-	Encrypt           func(string) (string, error)
-	Runtime           *runtime.Store
+	Mux        *http.ServeMux
+	Store      *store.Store
+	Sched      *scheduler.Scheduler
+	Accounts   *accounts.Manager
+	Sessions   *session.Store
+	AdminToken string
+	AdminName  string
+	Encrypt    func(string) (string, error)
+	Runtime    *runtime.Store
 	// PlatformEmbedded 平台内置形态（APK）：管理账密随包固定、端口不可改
 	// （Java 壳按 3091 加载页面，改了 App 内页面就连不上）。
 	PlatformEmbedded bool
@@ -97,8 +96,6 @@ type Deps struct {
 	Rebind func(host, port string) error
 	// RebindPlatform 选课平台档案热切换（server.go 注入；nil = 不支持，切平台被拒）。
 	RebindPlatform func(platformID, baseURL string) error
-	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
-	ActivationEnabled bool
 }
 
 // StatsStore handleAdminStats 消费的最窄持久化接口——只含该 handler 实际用到的
@@ -239,7 +236,10 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 1, nil, "登录失败: "+err.Error())
 		return
 	}
-	if d.activationEnabled() {
+	// 激活码开关的唯一事实源 = 运行时配置中心（管理员热改立即生效）。曾有一份
+	// Deps.ActivationEnabled 静态副本作"无配置中心时回落"，但 Register 恒注入
+	// Runtime，生产与测试无一走到该分支——真死字段，已删。
+	if d.Runtime.Get().ActivationEnabled {
 		activated, err := d.Store.IsActivated(req.Account)
 		if err != nil {
 			writeJSON(w, 1, nil, "查询激活状态失败: "+err.Error())
@@ -263,21 +263,12 @@ type ActivateRequest struct {
 	Ticket  string `json:"ticket"`
 }
 
-// activationEnabled 读取激活码机制开关：优先运行时配置（管理员热改立即生效），
-// 无配置中心时回落静态 Deps 字段（测试直构场景）。
-func (d *Deps) activationEnabled() bool {
-	if d.Runtime != nil {
-		return d.Runtime.Get().ActivationEnabled
-	}
-	return d.ActivationEnabled
-}
-
 // handleActivate 激活账号：消耗激活码并签发会话（机制关闭时拒绝）。
 // 激活必须携带登录颁发的短期单次激活票据，且票据绑定账号
 // 与本次激活账号必须一致——激活码从此绑定"刚通过教务登录的账号"，
 // 不再允许持码者对任意已登录过本应用的账号名激活（学号可猜测的台账外接管已封堵）。
 func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
-	if !d.activationEnabled() {
+	if !d.Runtime.Get().ActivationEnabled {
 		writeJSON(w, codeActivationDisabled, nil, "激活码机制已关闭")
 		return
 	}
@@ -587,7 +578,7 @@ func requireAdminSession(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 // handleAdminCodes 激活码管理：POST 生成 / GET 列表 / DELETE 删除。
 // 激活码机制关闭时整个接口禁用（关了就根本没有）。
 func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
-	if !d.activationEnabled() {
+	if !d.Runtime.Get().ActivationEnabled {
 		writeJSON(w, codeActivationDisabled, nil, "激活码机制已关闭")
 		return
 	}

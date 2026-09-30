@@ -8,7 +8,7 @@ import (
 
 	"xuanke-auto/backend/internal/accounts"
 	"xuanke-auto/backend/internal/runtime"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // captchaSemInit 验证码识别并发信号量初始化标记（仅在首次 Register 时初始化一次）。
@@ -20,12 +20,12 @@ var captchaSemInit bool
 // **每次 Register 都跑**——每个 Register 的 accounts.Manager 是自己的实例，若被
 // captchaSemInit 短路跳掉，第二个及以后的 Register 的 Manager 模板零识别器，
 // ensure 新建客户端识别器恒 nil（"验证码识别器未初始化"）。此缺陷在删
-// zhidao.New 静默建 Vision 旁路后被暴露（此前客户端级旁路掩盖了模板级缺失）。
+// upstream.New 静默建 Vision 旁路后被暴露（此前客户端级旁路掩盖了模板级缺失）。
 func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
 	if !captchaSemInit {
 		captchaSemInit = true
 		cfg := rt.Get()
-		zhidao.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
+		upstream.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
 	}
 	applyCaptchaRecognizerFor(rt, accts)
 }
@@ -34,8 +34,8 @@ func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
 // 引擎解析交给纯函数 resolveCaptchaRecognizer，本函数只负责探测函数注入与副作用落地。
 func applyCaptchaRecognizerFor(rt *runtime.Store, accts *accounts.Manager) {
 	cfg := rt.Get()
-	r := resolveCaptchaRecognizer(cfg, zhidao.NativeDdddOcrAvailable, func() bool {
-		return zhidao.LocalDdddOcrAvailable("")
+	r := resolveCaptchaRecognizer(cfg, upstream.NativeDdddOcrAvailable, func() bool {
+		return upstream.LocalDdddOcrAvailable("")
 	})
 	if r.recognizer == nil {
 		// 无引擎：登录识别立即报错（配置的引擎不可用且未开启兜底），
@@ -46,12 +46,12 @@ func applyCaptchaRecognizerFor(rt *runtime.Store, accts *accounts.Manager) {
 	}
 	setCaptchaActiveEngine(r.engine)
 	accts.SetRecognizer(r.recognizer)
-	zhidao.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
+	upstream.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
 }
 
 // captchaResolution 引擎解析结果：识别器 + 实际生效引擎名 + 面向管理员的日志说明。
 type captchaResolution struct {
-	recognizer zhidao.CaptchaRecognizer
+	recognizer upstream.CaptchaRecognizer
 	// engine 实际生效引擎："ddddocr" / "vision" / "none"（无可用引擎）。
 	// 与配置值 CaptchaEngine 分列：兜底关闭时配置 ddddocr 而本机不可用会出现
 	// "配置=ddddocr、实际=none"，stats 只报配置值会让管理员误以为识别正常。
@@ -59,15 +59,15 @@ type captchaResolution struct {
 	note   string
 }
 
-// resolveCaptchaRecognizer 识别引擎解析（下沉后为 zhidao.ResolveCaptchaEngine 的薄适配：
+// resolveCaptchaRecognizer 识别引擎解析（下沉后为 upstream.ResolveCaptchaEngine 的薄适配：
 // 组装 EngineConfig + 注入探测函数 + 把 EngineResolution 转回 api 包内 captchaResolution）。
-// 契约（兜底开关、双引擎互不回退、探测成本）全在 zhidao 单源，表驱动测试在 zhidao/engine_test.go。
+// 契约（兜底开关、双引擎互不回退、探测成本）全在 upstream 单源，表驱动测试在 upstream/engine_test.go。
 func resolveCaptchaRecognizer(
 	cfg runtime.Config,
 	hasNative func() bool,
 	hasLocal func() bool,
 ) captchaResolution {
-	r := zhidao.ResolveCaptchaEngine(zhidao.EngineConfig{
+	r := upstream.ResolveCaptchaEngine(upstream.EngineConfig{
 		VisionBaseURL:   cfg.VisionBaseURL,
 		VisionAPIKey:    cfg.VisionAPIKey,
 		VisionModel:     cfg.VisionModel,
@@ -129,9 +129,10 @@ func Register(opts Options) http.Handler {
 
 	d := &Deps{Store: opts.Store, Stats: opts.Stats, Sched: opts.Sched, Accounts: opts.Accounts,
 		Sessions: opts.Sessions,
-		Runtime:  opts.Runtime, AdminToken: opts.AdminToken, ActivationEnabled: opts.ActivationEnabled,
+		Runtime:  opts.Runtime, AdminToken: opts.AdminToken,
 		Encrypt: opts.Encrypt, AdminName: opts.AdminName,
-		PlatformEmbedded: opts.PlatformEmbedded, Rebind: opts.Rebind}
+		PlatformEmbedded: opts.PlatformEmbedded, Rebind: opts.Rebind,
+		RebindPlatform: opts.RebindPlatform}
 	// 登录与激活各自独立限流桶——激活码输入错误不消耗登录额度、
 	// 登录尝试不消耗激活额度；且各自按（IP 维度）独立记账，学校 NAT/反代下互不锁死。
 	loginLim := newLoginLimiter()

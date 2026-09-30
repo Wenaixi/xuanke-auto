@@ -20,13 +20,25 @@ import (
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/secure"
 	"xuanke-auto/backend/internal/session"
+	"xuanke-auto/backend/internal/sites"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 const testAdminToken = "admin-123"
 
-// 构造测试用依赖：内存 db + mock zhidao server + 会话库。
+// testSite 测试用站点档案：真实内置档案（mock 服务器按同一线格式应答）。
+// 用真档案而不是测试专用副本，API 层测试才真的覆盖线上那条解码/路径链路。
+func testSite(t *testing.T) upstream.SiteDescriptor {
+	t.Helper()
+	desc, err := sites.Resolve(sites.DefaultID)
+	if err != nil {
+		t.Fatalf("内置档案不可解析: %v", err)
+	}
+	return desc
+}
+
+// 构造测试用依赖：内存 db + mock upstream server + 会话库。
 type testDeps struct {
 	srv      *httptest.Server
 	store    *store.Store
@@ -49,7 +61,7 @@ func (d *testDeps) rebuildWithStats(st StatsStore) {
 	d.api = Register(Options{
 		Mux: mux, Store: d.store, Stats: st, Sched: d.sched, Accounts: d.accts,
 		Sessions: d.sessions, AdminToken: testAdminToken, AdminName: "admin",
-		ActivationEnabled: d.rt.Get().ActivationEnabled, Encrypt: d.enc, Runtime: d.rt,
+		Encrypt: d.enc, Runtime: d.rt,
 	})
 }
 
@@ -162,7 +174,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	t.Cleanup(func() { d.Close() })
 	st := store.New(d)
 
-	accts := accounts.New(zhi.URL, zhidao.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"}, st)
+	accts := accounts.New(testSite(t), zhi.URL, upstream.VisionConfig{BaseURL: zhi.URL, APIKey: "k", Model: "m"}, st)
 	sessions := session.New(time.Hour)
 	t.Cleanup(sessions.Close) // 防清扫协程泄漏（数十测试 × 高频轮次产生数百常驻协程窗口）
 
@@ -178,6 +190,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 		VisionBaseURL:     zhi.URL,
 		VisionAPIKey:      "sk-testkeyfortestonly",
 		VisionModel:       "m",
+		PlatformID:        sites.DefaultID,
 	})
 	// 与 main 一致：注入真实 AES-256-GCM 加密（凭据与 vision_key 落库前加密）
 	masterKey := make([]byte, 32)
@@ -189,7 +202,7 @@ func newTestDepsModeName(t *testing.T, activation bool, adminName string) *testD
 	apiHandler := Register(Options{
 		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		AdminToken: testAdminToken, AdminName: adminName,
-		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: enc, Runtime: rt,
+		Encrypt: enc, Runtime: rt,
 	})
 	return &testDeps{srv: zhi, store: st, api: apiHandler, sched: sched, sessions: sessions,
 		accts: accts, rt: rt, dec: dec, enc: enc, t: t}
@@ -842,13 +855,12 @@ func TestAdminDeleteProtectsRenamedAdmin(t *testing.T) {
 	d := newTestDepsMode(t, true)
 	// 复用新 TestDeps 的底层组件，但重建 Deps 令 AdminName=root（保留原会话库/账号库/调度器）
 	renamed := &Deps{
-		Store:             d.store,
-		Sched:             d.sched,
-		Accounts:          d.accts,
-		Sessions:          d.sessions,
-		AdminToken:        testAdminToken,
-		AdminName:         "root",
-		ActivationEnabled: true,
+		Store:      d.store,
+		Sched:      d.sched,
+		Accounts:   d.accts,
+		Sessions:   d.sessions,
+		AdminToken: testAdminToken,
+		AdminName:  "root",
 	}
 	req := httptest.NewRequest("DELETE", "/api/admin/accounts", strings.NewReader(`{"account":"root"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -2154,11 +2166,11 @@ func TestHandleElectivesSelectReadErrMessage(t *testing.T) {
 func TestAdminDeleteRejectsUnnormalizedAccount(t *testing.T) {
 	d := newTestDeps(t)
 	// 第一步：先建会话、再用 store 真实 API 落一条账号 12345 的凭据。
-	// 删除请求对"账号是否存在"的判定以持久化层为准——mock zhidao 的 /login 未实现
+	// 删除请求对"账号是否存在"的判定以持久化层为准——mock upstream 的 /login 未实现
 	// (default 返回 unknown)，authenticateDirect 只 ensure 了内存客户端、不落凭据，
 	// 用它当判据会恒假失败；DeleteAccount 真正删的也是 credentials/accounts/targets/success。
 	authenticateDirect(t, d, "12345")
-	if err := d.store.SaveCredential("12345", "enc", "tok-new"); err != nil {
+	if err := d.store.SaveCredential("12345", "enc", "tok-new", sites.DefaultID); err != nil {
 		t.Fatal(err)
 	}
 	// 第二步：以管理员会话发起删除请求，但账号名带尾随空格（前端一次空格失手）

@@ -9,6 +9,7 @@ import type {
   AdminLog,
   AdminStats,
 } from "../types"
+import { isActivationDisabled } from "../lib/activationGuard"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
@@ -338,13 +339,14 @@ function CodesTab({
   })
 
   // 失败态必须区分「机制关闭」与「真加载失败」：激活码机制默认关闭
-  // （XUANKE_ACTIVATION 未设 = off），此时后端按契约对管理接口一律返回
-  // code=1「激活码机制已关闭」——旧文案把两者都写成「没能加载出来」，管理员
-  // 会当成故障反复点重试（而重试永远不会成功），真实原因与出口都被藏起来。
-  const codesErrMsg = codesQuery.isError
+  // （XUANKE_ACTIVATION 未设 = off），此时后端对管理接口回专属业务码 1002。
+  // 判据只认 code，绝不匹配 msg 中文文案——文案一改就静默退回「没能加载出来」，
+  // 而重试永远不成功，管理员会当成故障反复点，真实原因与出口都被藏起来。
+  const codesDisabled = isActivationDisabled(codesQuery.error)
+  // 真加载失败时展示后端原文（专属码的 msg 只在非机制关闭分支才读，故两者互斥）
+  const codesErrMsg = codesQuery.isError && !codesDisabled
     ? ((codesQuery.error as Error | null)?.message ?? "")
     : ""
-  const codesDisabled = codesErrMsg.includes("激活码机制已关闭")
 
   const generate = async () => {
     // 在飞幂等守卫——与 login submit / activate 同款
@@ -543,6 +545,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
   const [activationOn, setActivationOn] = useState(true)
   const [listenHost, setListenHost] = useState("127.0.0.1")
   const [listenPort, setListenPort] = useState("3091")
+  // 选课平台档案 + 站点地址覆盖（上游站点的接口形态；切换即重建各账号客户端）
+  const [platformId, setPlatformId] = useState("")
+  const [platformBaseUrl, setPlatformBaseUrl] = useState("")
   const [saving, setSaving] = useState(false)
 
   const configQuery = useQuery({
@@ -568,6 +573,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       // 监听地址回填：缺键（旧后端）时用默认值展示，绝不显示空串
       setListenHost(loaded.listen_host || "127.0.0.1")
       setListenPort(loaded.listen_port || "3091")
+      // 平台档案回填：缺键（旧后端）时留空，由用户显式选择，绝不猜一个档案。
+      setPlatformId(loaded.platform_id || "")
+      setPlatformBaseUrl(loaded.platform_base_url || "")
     }
   }, [loaded, configEpoch])
 
@@ -585,6 +593,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
       const addrChanged =
         listenHost.trim() !== (loaded.listen_host || "") ||
         listenPort.trim() !== (loaded.listen_port || "")
+      const platformChanged =
+        platformId !== (loaded.platform_id || "") ||
+        platformBaseUrl.trim() !== (loaded.platform_base_url || "")
       const body: Record<string, unknown> = {
         activation_enabled: activationOn,
         vision_base_url: baseUrl.trim(),
@@ -594,6 +605,13 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         captcha_concurrency: Math.max(1, concurrency || 1),
         listen_host: listenHost.trim(),
         listen_port: listenPort.trim(),
+      }
+      // 仅在平台配置确有改动时才带上这两个字段：平台列表未加载/未选中时提交空
+      // platform_id 会被后端整体拒绝（"选课平台不能为空"），把一次无关的保存也带崩。
+      // 带上时 platform_base_url 的空串是有效语义 = 清除覆盖、回到档案默认地址。
+      if (platformChanged) {
+        body.platform_id = platformId
+        body.platform_base_url = platformBaseUrl.trim()
       }
       // 留空 = 不改动 key（脱敏回显无法完整回填）
       if (apiKey.trim()) body.vision_api_key = apiKey.trim()
@@ -611,7 +629,9 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
         title: "配置已保存",
         description: addrChanged
           ? "已生效；监听地址已变更，请改用新地址访问（本页可能需刷新）"
-          : "已生效，无需重启服务",
+          : platformChanged
+            ? "已生效；选课平台已切换，各账号会用已保存账密自动重登（目标与成功记录保留）"
+            : "已生效，无需重启服务",
         variant: "success",
       })
       // "PUT 完成 → 用户此刻点进密钥框打字"的亚秒窄窗；且保存后才清空仍保证
@@ -624,8 +644,69 @@ function ConfigTab({ account, sessionToken }: { account: Account; sessionToken: 
     }
   }
 
+  // 当前选中的档案（用于默认地址 placeholder 与说明文案；未选中时回退后端下发的默认档案）。
+  const selectedPlatform = loaded?.platforms?.find((p) => p.id === platformId)
+
   return (
     <div className="space-y-4">
+      <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
+        <CardHeader className="pb-2 border-b border-neutral-900">
+          <div className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-neutral-400" />
+            <CardTitle className="text-sm font-medium tracking-wide text-white">选课平台</CardTitle>
+          </div>
+          <CardDescription className="text-xs text-neutral-500">
+            平台档案决定接口路径与数据格式；切换后各账号会用已保存账密自动重登，目标与成功记录保留
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-3 grid gap-4">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-neutral-400">平台档案</span>
+            <div className="grid gap-2">
+              {(loaded?.platforms ?? []).map((p) => {
+                const on = p.id === platformId
+                return (
+                  <Button
+                    key={p.id}
+                    type="button"
+                    variant={on ? "secondary" : "outline"}
+                    aria-pressed={on}
+                    onClick={() => setPlatformId(p.id)}
+                    className={`h-auto w-full justify-start px-3 py-2.5 text-left ${
+                      on ? "bg-white/15 border-white text-white hover:bg-white/20 hover:border-white" : ""
+                    }`}
+                  >
+                    <span className="flex flex-col gap-0.5 whitespace-normal">
+                      <span className="text-xs">{p.name}</span>
+                      <span className="text-2xs text-neutral-500">{p.note}</span>
+                    </span>
+                  </Button>
+                )
+              })}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="admin-config-platform-url" className="text-xs text-neutral-400">站点地址</label>
+            <Input
+              id="admin-config-platform-url"
+              value={platformBaseUrl}
+              onChange={(e) => setPlatformBaseUrl(e.target.value)}
+              placeholder={selectedPlatform?.default_base_url || loaded?.platform_default_base_url || ""}
+              className="h-10 text-sm font-mono glass-input border-neutral-800 text-white placeholder:text-neutral-600"
+            />
+            <p className="text-2xs text-neutral-600 mt-0.5">
+              留空 = 用档案默认地址；换域名/镜像时填这里（不必等新版本）
+            </p>
+            <p className="text-2xs text-neutral-500">
+              当前生效：
+              <span className="font-mono text-white">
+                {platformBaseUrl.trim() || selectedPlatform?.default_base_url || loaded?.platform_default_base_url || "—"}
+              </span>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="rounded-[var(--radius-lg)] border border-neutral-900 glass shadow-none">
         <CardHeader className="pb-2 border-b border-neutral-900">
           <div className="flex items-center gap-2">
@@ -902,6 +983,9 @@ function StatsTab({ account, sessionToken, activeTab }: { account: Account; sess
         },
         { label: "识别并发", value: String(s.captcha_concurrency ?? 1) },
         { label: "识别模型", value: s.vision_model || "（未配置）" },
+        // 当前选课平台：多档案并存时这是"跑的是哪一套接口"的唯一核对点
+        // （缺键走"未识别"以外的中性占位，绝不编造平台名）。
+        { label: "选课平台", value: s.platform_name || "—" },
       ]
     : []
 

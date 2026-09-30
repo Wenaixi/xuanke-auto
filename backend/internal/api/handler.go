@@ -21,9 +21,28 @@ import (
 	"xuanke-auto/backend/internal/runtime"
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/session"
+	"xuanke-auto/backend/internal/sites"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
+
+// 业务码（响应体 code 字段）：前端唯一据以分流的稳定契约。
+//
+// 通用失败一律用 1，那类失败"重试可能有用"；下列专属码表示**重试没有意义**
+// 或**下一步操作不同**，前端必须按 code 分流，绝不可匹配 msg 中文文案——
+// 文案一改就静默失效，且失败态会被用户当成故障反复点重试。
+// code=0 恒为成功、code=401 恒为会话失效（基础设施码，见基础设施状态码家族）。
+const (
+	// codeNotActivated 教务登录成功但该账号未激活，data 携带门票。
+	codeNotActivated = 1001
+	// codeActivationDisabled 激活码机制被关闭（XUANKE_ACTIVATION=off）。
+	codeActivationDisabled = 1002
+	// codeTicketInvalid 门票无效、已用尽或与本次账号不匹配（单次防重放）。
+	codeTicketInvalid = 1003
+	// codeSessionInvalid 教务会话失效（令牌过期），前端应回登录页。
+	codeSessionInvalid = 401
+)
+
 // Options 装配配置对象（架构深化 E：替代 Register 的 11 位置参数——位置参数
 // 要求调用者按顺序记清 11 个实参，裸实参无语义标注，两处调用点（server.go /
 // handler_test.go）都必须逐位对齐；命名对象字段即语义自文档化）。
@@ -48,21 +67,26 @@ type Options struct {
 	// Stats handleAdminStats 专用的可注入替身（窄接口，四个读方法）；nil 时回退 Store。
 	// 生产装配不设——只为让「目标数读取失败必须报 500」这条契约在测试里可被真实覆盖。
 	Stats StatsStore
+	// RebindPlatform 选课平台档案热切换（server.go 注入：解析档案 → 校验站点地址 →
+	// 读凭据 → 重建全部客户端并清空跨平台 token）。与 Rebind 同款「先验证后生效」：
+	// 返回错误即整体拒绝（不落库、不生效）；nil = 该形态不支持（测试直构 Deps）→
+	// 后台切平台时明确拒绝，绝不假装成功。
+	RebindPlatform func(platformID, baseURL string) error
 }
 
 // Deps API 层依赖。
 type Deps struct {
-	Store    *store.Store
+	Store *store.Store
 	// Stats handleAdminStats 专用的可注入替身（窄接口，四个读方法）；nil 时回退 Store。
 	// 存在的唯一理由是让「目标数读取失败 → 500」这条契约在测试里可被真实覆盖。
-	Stats StatsStore
+	Stats    StatsStore
 	Sched    *scheduler.Scheduler
 	Accounts *accounts.Manager
 	Sessions *session.Store
 	// Runtime 进程内配置中心（管理员热重载生效）。
 	Runtime *runtime.Store
 	// Encrypt 数据加密函数（main 注入：secure.Encrypt，凭据与 vision_key 落库前加密）。
-	Encrypt    func(string) (string, error)
+	Encrypt func(string) (string, error)
 	// AdminToken 管理口令（main 从环境变量/.env 注入，启动必填；管理员账号的密码）。
 	AdminToken string
 	// AdminName 管理员登录账号名（默认 admin，可用 XUANKE_ADMIN_NAME 改名）。
@@ -71,6 +95,8 @@ type Deps struct {
 	PlatformEmbedded bool
 	// Rebind 监听地址热切换（server.go 注入；nil = 不支持，改监听地址被拒）。
 	Rebind func(host, port string) error
+	// RebindPlatform 选课平台档案热切换（server.go 注入；nil = 不支持，切平台被拒）。
+	RebindPlatform func(platformID, baseURL string) error
 	// ActivationEnabled 激活码机制是否启用（XUANKE_ACTIVATION=off 时完全禁用）。
 	ActivationEnabled bool
 }
@@ -223,7 +249,7 @@ func (d *Deps) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// 教务登录成功即颁发短期单次激活票据（绑定本次登录账号），
 			// 未激活账号的 /api/activate 必须携带它才能消耗激活码，杜绝持码者对任意已登录账号激活。
 			ticket := d.Sessions.CreateTicket(req.Account)
-			writeJSON(w, 1001, map[string]string{"ticket": ticket, "account": req.Account}, "该账号尚未激活，请输入激活码")
+			writeJSON(w, codeNotActivated, map[string]string{"ticket": ticket, "account": req.Account}, "该账号尚未激活，请输入激活码")
 			return
 		}
 	}
@@ -252,7 +278,7 @@ func (d *Deps) activationEnabled() bool {
 // 不再允许持码者对任意已登录过本应用的账号名激活（学号可猜测的台账外接管已封堵）。
 func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 	if !d.activationEnabled() {
-		writeJSON(w, 1, nil, "激活码机制已关闭")
+		writeJSON(w, codeActivationDisabled, nil, "激活码机制已关闭")
 		return
 	}
 	var req ActivateRequest
@@ -269,7 +295,7 @@ func (d *Deps) handleActivate(w http.ResponseWriter, r *http.Request) {
 	// 票据在激活码校验失败时已在 ConsumeTicket 中被销毁（单次防重放
 	// 的刻意决策），用户收到"激活码无效"后需重新登录拿新票据再试——绝不因此放宽票据复用。
 	if err := d.Sessions.ConsumeTicket(req.Ticket, acct); err != nil {
-		writeJSON(w, 1, nil, "激活票据无效或已过期，请重新登录后再激活")
+		writeJSON(w, codeTicketInvalid, nil, "激活票据无效或已过期，请重新登录后再激活")
 		return
 	}
 	ok, err := d.Store.ConsumeActivationCode(strings.TrimSpace(req.Code), acct)
@@ -562,7 +588,7 @@ func requireAdminSession(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 // 激活码机制关闭时整个接口禁用（关了就根本没有）。
 func (d *Deps) handleAdminCodes(w http.ResponseWriter, r *http.Request) {
 	if !d.activationEnabled() {
-		writeJSON(w, 1, nil, "激活码机制已关闭")
+		writeJSON(w, codeActivationDisabled, nil, "激活码机制已关闭")
 		return
 	}
 	switch r.Method {
@@ -673,6 +699,19 @@ type AdminConfigView struct {
 	// PlatformEmbedded 平台内置形态（APK）：前端据此把端口输入置灰——
 	// Java 壳页面按 3091 连接，改端口会让 App 内页面失联。
 	PlatformEmbedded bool `json:"platform_embedded"`
+
+	// 选课平台档案（管理员可切换）：
+	//   platform_id              当前档案 ID
+	//   platform_name / _note    档案展示名与版本说明
+	//   platform_base_url        当前站点地址覆盖值（空 = 用档案默认地址）
+	//   platform_default_base_url 档案默认地址（输入框 placeholder 与"当前生效"提示用）
+	//   platforms                全部内置档案（下拉渲染；新增档案零前端改动）
+	PlatformID             string       `json:"platform_id"`
+	PlatformName           string       `json:"platform_name"`
+	PlatformNote           string       `json:"platform_note"`
+	PlatformBaseURL        string       `json:"platform_base_url"`
+	PlatformDefaultBaseURL string       `json:"platform_default_base_url"`
+	Platforms              []sites.Info `json:"platforms"`
 }
 
 // configView 组装配置视图（GET 与 PUT 响应共用一处，避免两边字段漏改分叉）。
@@ -688,7 +727,37 @@ func (d *Deps) configView(cfg runtime.Config) AdminConfigView {
 		ListenHost:         cfg.ListenHost,
 		ListenPort:         cfg.ListenPort,
 		PlatformEmbedded:   d.PlatformEmbedded,
+		// 档案元数据：未知 ID（不该出现——配置表已把关）也不空展示，直接把 ID 顶到名称位。
+		PlatformID:             cfg.PlatformID,
+		PlatformName:           platformName(cfg.PlatformID),
+		PlatformNote:           platformNote(cfg.PlatformID),
+		PlatformBaseURL:        cfg.PlatformBaseURL,
+		PlatformDefaultBaseURL: platformDefaultBaseURL(cfg.PlatformID),
+		Platforms:              sites.List(),
 	}
+}
+
+// platformName / platformNote / platformDefaultBaseURL 从档案取展示元数据；
+// 解析失败时名称回退为原始 ID，其余留空——绝不空展示、也绝不编造。
+func platformName(id string) string {
+	if d, err := sites.Resolve(id); err == nil {
+		return d.Name
+	}
+	return id
+}
+
+func platformNote(id string) string {
+	if d, err := sites.Resolve(id); err == nil {
+		return d.Note
+	}
+	return ""
+}
+
+func platformDefaultBaseURL(id string) string {
+	if d, err := sites.Resolve(id); err == nil {
+		return d.DefaultBaseURL
+	}
+	return ""
 }
 
 // validateListen 校验监听主机/端口：主机只填主机名（IP / 域名 / 0.0.0.0），
@@ -729,6 +798,8 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			CaptchaConcurrency *int    `json:"captcha_concurrency"`
 			ListenHost         *string `json:"listen_host"`
 			ListenPort         *string `json:"listen_port"`
+			PlatformID         *string `json:"platform_id"`
+			PlatformBaseURL    *string `json:"platform_base_url"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, 1, nil, "请求体解析失败: "+err.Error())
@@ -779,6 +850,40 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			})
 			changed = append(changed, "监听 "+host+":"+port)
 		}
+		// 选课平台与站点地址：与监听重绑同款「先真实生效、失败整体拒绝」。
+		// 顺序固定为「先监听、后平台」——两者都改时各管一层地址（本服务对外 vs 上游站点），
+		// 先本机后上游，失败时已生效的只有前者，语义可解释。
+		if req.PlatformID != nil || req.PlatformBaseURL != nil {
+			cur := d.Runtime.Get()
+			id, base := cur.PlatformID, cur.PlatformBaseURL
+			if req.PlatformID != nil {
+				id = strings.TrimSpace(*req.PlatformID)
+			}
+			if req.PlatformBaseURL != nil {
+				base = strings.TrimSpace(*req.PlatformBaseURL)
+			}
+			if id == "" {
+				writeJSON(w, 1, nil, "选课平台不能为空")
+				return
+			}
+			if d.RebindPlatform == nil {
+				writeJSON(w, 1, nil, "当前形态不支持选课平台热切换")
+				return
+			}
+			if err := d.RebindPlatform(id, base); err != nil {
+				writeJSONStatus(w, http.StatusBadRequest, 1, nil, "平台切换未生效："+err.Error())
+				return
+			}
+			d.Runtime.Update(func(c *runtime.Config) {
+				c.PlatformID = id
+				c.PlatformBaseURL = base
+			})
+			addr := base
+			if addr == "" {
+				addr = "档案默认地址"
+			}
+			changed = append(changed, "选课平台 "+id+"（"+addr+"）")
+		}
 		d.Runtime.Update(func(c *runtime.Config) {
 			if req.ActivationEnabled != nil {
 				c.ActivationEnabled = *req.ActivationEnabled
@@ -811,17 +916,17 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 				changed = append(changed, "captcha_concurrency")
 			}
 		})
-	cfg := d.Runtime.Get()
-	// 落库键名与序列化规则由 runtime 配置表统一定义（与启动还原侧同一张表）。
-	// 传 d.Encrypt 原始加密器而非 secureEncrypt——前缀由 ToSettings 统一拼接，
-	// 避免 enc: 双重前缀；未注入加密器时 ToSettings 直接报错，绝不明文入库。
-	settings, serErr := runtime.ToSettings(cfg, d.Encrypt)
-	if serErr != nil {
-		writeJSON(w, 1, nil, "配置加密失败: "+serErr.Error())
-		return
-	}
-	// 先落库、后内存生效与下游下发（落库失败也要完成下发，杜绝半生效误导）。
-	if sErr := d.saveSettings(settings); sErr != nil {
+		cfg := d.Runtime.Get()
+		// 落库键名与序列化规则由 runtime 配置表统一定义（与启动还原侧同一张表）。
+		// 传 d.Encrypt 原始加密器而非 secureEncrypt——前缀由 ToSettings 统一拼接，
+		// 避免 enc: 双重前缀；未注入加密器时 ToSettings 直接报错，绝不明文入库。
+		settings, serErr := runtime.ToSettings(cfg, d.Encrypt)
+		if serErr != nil {
+			writeJSON(w, 1, nil, "配置加密失败: "+serErr.Error())
+			return
+		}
+		// 先落库、后内存生效与下游下发（落库失败也要完成下发，杜绝半生效误导）。
+		if sErr := d.saveSettings(settings); sErr != nil {
 			// 落库失败绝不静默——配置已内存生效，但重启即回退。
 			// 如实返回 500 让管理员立即知晓持久化失败；不再跳过下游热下发，
 			// 识别引擎/Vision 仍按新配置同步给账号客户端，杜绝"半生效"误导。
@@ -853,7 +958,7 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) dispatchRuntimeConfig(cfg runtime.Config) {
 	// d.Store 为 nil 时跳过（测试直接直构 Deps 的场景；生产恒非 nil）
 	if d.Accounts != nil {
-		d.Accounts.SetVision(zhidao.VisionConfig{
+		d.Accounts.SetVision(upstream.VisionConfig{
 			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
 		})
 		applyCaptchaRecognizerFor(d.Runtime, d.Accounts)
@@ -976,8 +1081,11 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"captcha_engine":        eng,
 		"captcha_active_engine": activeEng,
 		"captcha_concurrency":   cfg.CaptchaConcurrency,
-		"token_valid":           tokValid,
-		"open_time_set":         !open.IsZero(),
+		// 当前选课平台（运行状态页展示；管理员据此确认"跑的是哪一套接口"）。
+		"platform_name": platformName(cfg.PlatformID),
+		"platform_id":   cfg.PlatformID,
+		"token_valid":   tokValid,
+		"open_time_set": !open.IsZero(),
 	}, "")
 }
 
@@ -1088,11 +1196,12 @@ func (d *Deps) allowAccountOverride(r *http.Request) bool {
 //   - 普通会话：忽略 ?account=（allowAccountOverride 仅管理员 true），返回会话绑定账号；
 //   - 管理员 + ?account=<真实账号>：透传该账号；凭据表查无 → 整体拒绝（notFoundMsg 为各点文案）；
 //   - 管理员无 ?account=：按 fallback 语义——
-//       "core"（electives/state）：回落首个有目标的核心账号；无核心 → 返回会话账号(admin)，
-//            由调用点后文守卫兜底（electives 落全局帧 / state 返回空状态）；
-//       "reject"（targets）：无核心账号 → 整体拒绝（绝不写管理员账号孤儿行，决策：目标只属学生）；
-//       "self"（select/exit）：不回落，返回会话账号(admin)，由后文 IsAdminAccountName 守卫兜底
-//         （旧实现 select/exit 本就无回落分支，行为保持）。
+//     "core"（electives/state）：回落首个有目标的核心账号；无核心 → 返回会话账号(admin)，
+//     由调用点后文守卫兜底（electives 落全局帧 / state 返回空状态）；
+//     "reject"（targets）：无核心账号 → 整体拒绝（绝不写管理员账号孤儿行，决策：目标只属学生）；
+//     "self"（select/exit）：不回落，返回会话账号(admin)，由后文 IsAdminAccountName 守卫兜底
+//     （旧实现 select/exit 本就无回落分支，行为保持）。
+//
 // 返回 handled=true 表示已写拒绝响应，调用方直接 return。
 func (d *Deps) resolveAccountForSession(w http.ResponseWriter, r *http.Request, fallback, notFoundMsg string) (acct string, handled bool) {
 	acct = sessionAccount(r)
@@ -1146,7 +1255,7 @@ func requireAuth(d *Deps, next http.HandlerFunc) http.HandlerFunc {
 		}
 		acct, ok := d.Sessions.Account(tok)
 		if !ok {
-			writeJSONStatus(w, http.StatusUnauthorized, 401, nil, "会话无效或已过期，请重新登录")
+			writeJSONStatus(w, http.StatusUnauthorized, codeSessionInvalid, nil, "会话无效或已过期，请重新登录")
 			return
 		}
 		ctx := r.Context()

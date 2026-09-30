@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { api } from "../api/client"
+import { isTicketInvalid } from "../lib/activationGuard"
 import { Button } from "../components/ui/Button"
 import { Input } from "../components/ui/Input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/Card"
@@ -81,12 +82,12 @@ export default function Login({ onLogin }: Props) {
       setPendingTicket("")
       onLogin(data.token, data.account)
     } catch (e: any) {
-      // 激活失败分两个场景引导——后端票据 5 分钟单次，
-      // 过期/已用会报"激活票据无效或已过期"；此时账号其实已激活，重新登录即可
-      // 直进，用户可能误以为激活码有问题而反复点激活（恒失败）。
-      if (/激活票据无效或已过期/.test(e.message || "")) {
+      // 激活失败分两个场景引导：判据只认后端业务码 1003（门票无效/已用尽/
+      // 与本次账号不匹配），绝不匹配 msg 中文文案——文案一改就静默退回
+      // 「检查激活码」，而正确出口是重新登录拿新门票。
+      if (isTicketInvalid(e)) {
         setPendingTicket("")
-        setActivateError("激活票据已过期或已使用，请取消后重新登录即可进入（本账号已开通）")
+        setActivateError("激活票据已过期或已使用，请取消后重新登录，再次激活时使用新票据")
         setActivationCode("")
       } else {
         // 激活码错误等非「过期/已用」失败：服务端先 ConsumeTicket 再校验激活码，失败

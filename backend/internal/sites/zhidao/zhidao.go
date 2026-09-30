@@ -47,6 +47,8 @@ func Descriptor() upstream.SiteDescriptor {
 
 		TokenParam:  "idToken",
 		TokenCookie: "zd_edu_cookie",
+		// 知到同时比对 URL token 与会话 Cookie，故走双通道（零值即此值，显式写出只为可读）。
+		AuthMode: upstream.AuthDual,
 
 		CodeUnauthorized: -1,
 

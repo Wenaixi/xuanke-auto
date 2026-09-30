@@ -331,12 +331,23 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 		cookies[k] = v
 	}
 	c.mu.Unlock()
-	u := c.baseURL + path + "?" + c.desc.TokenParam + "=" + url.QueryEscape(tok)
+	// 鉴权通道随站点而异（见 AuthMode）：Header 通道的平台不该收到查询串，
+	// Query 通道的平台不该收到 Authorization 头。
+	u := c.baseURL + path
+	switch c.desc.AuthMode {
+	case AuthDual, AuthQuery:
+		u += "?" + c.desc.TokenParam + "=" + url.QueryEscape(tok)
+	}
 	req, err := http.NewRequest(method, u, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	// Cookie 头一律统一注入（token 查询参数 + 站点声明的会话 Cookie 名双通道）。
+	// Header 鉴权通道：档案声明头名，引擎写 Bearer 语义。
+	if c.desc.AuthMode == AuthHeader && tok != "" {
+		req.Header.Set(c.desc.HeaderTokenName, "Bearer "+tok)
+	}
+	// Cookie 头与 token 通道无关：登录页 Cookie / 验证码图片与会话绑定，
+	// 纯 Header 鉴权的平台同样需要它，故无条件注入。
 	// 站点接口鉴权严格按 Cookie 头的会话 Cookie 比对，
 	// 缺失该 Cookie（即使 URL 带 token）也会被拒为"您未登录"。
 	if len(cookies) > 0 {

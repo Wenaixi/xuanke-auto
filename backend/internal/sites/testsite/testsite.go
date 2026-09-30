@@ -9,7 +9,8 @@
 //   - 无会话 Cookie（知到需 access_limit_cookie=1）；
 //   - 登录表单无设备指纹、无优先身份（知到两者都有）；
 //   - 错误分类用英文码（知到用中文文案）；
-//   - 鉴权只经 Header 语义（知到走 URL 参数 + Cookie 双通道）；
+//   - 鉴权只经 HTTP 头（知到走 URL 参数 + Cookie 双通道）；
+//   - 业务码是字符串（知到是整数 code），且无业务信封时引擎须容忍纯文本错误页；
 //   - 无学期概念、无「发布」概念（靠虚拟层补齐）；
 //   - 成败判据是单布尔 status=="OK"（知到是 code==0 && isOk 双布尔）。
 //
@@ -57,9 +58,10 @@ func Descriptor() upstream.SiteDescriptor {
 		ExitPath:      "/course/withdraw",
 		RefererPath:   "/portal",
 
-		// 鉴权载体名与知到完全不同（知到是 idToken + zd_edu_cookie）。
-		TokenParam:  "tsToken",
-		TokenCookie: "ts_session",
+		// 鉴权只经 HTTP 头。TokenParam/TokenCookie 留空即证明这两个通道可关闭
+		// （引擎曾无条件把 token 拼进查询串，纯 REST 平台接不了）。
+		AuthMode:        upstream.AuthHeader,
+		HeaderTokenName: "Authorization",
 
 		CodeUnauthorized: -9,
 

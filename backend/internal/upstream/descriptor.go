@@ -32,6 +32,25 @@ type LoginHooks struct {
 	DeviceID func(ua string, now time.Time) string
 }
 
+// AuthMode 会话 token 的下发通道。四态而非布尔：不同平台要的通道不同。
+// 为什么必须下沉：引擎曾无条件把 token 拼进查询参数（`?TokenParam=TOK`），
+// 纯 Header 鉴权的现代 API 接不了；参数名为空时更会拼出 `?=TOK` 这种畸形 URL，
+// 平台多半直接拒，而现场报的是「参数缺失」这类难定位的错误。
+type AuthMode int
+
+const (
+	// AuthDual 查询参数 + Cookie 双通道。**零值**，保留给需要冗余的站点
+	//（知到即此类：平台同时比对 URL token 与会话 Cookie）。
+	AuthDual AuthMode = iota
+	// AuthQuery 仅查询参数。
+	AuthQuery
+	// AuthCookie 仅 Cookie。
+	AuthCookie
+	// AuthHeader 仅 HTTP 头。档案须在 HeaderTokenName 声明头名
+	//（如 "Authorization"），引擎写入 `Bearer <token>`。
+	AuthHeader
+)
+
 // CaptchaSpec 平台图形验证码的规格。**零值语义统一为「不校验」**，使未声明的档案
 // 仍能工作：新平台不声明即不做字符集过滤与长度门禁，不会因规格写死而被静默丢弃识别结果。
 //
@@ -144,6 +163,13 @@ type SiteDescriptor struct {
 
 	TokenParam  string // 会话 token 的查询参数名（如 idToken）
 	TokenCookie string // 会话 token 的 Cookie 名（双通道冗余）
+	// AuthMode 会话 token 的下发通道。四态而非布尔：不同平台要的通道不同，
+	// 强制双通道会让纯 Header 平台接不了，也会让不需要 token 参数的平台
+	// 收到形如 `?=TOK` 的畸形 URL。零值 AuthDual = 既有行为，既有档案零改动。
+	AuthMode AuthMode
+	// HeaderTokenName 仅 AuthMode == AuthHeader 时必填（引擎写 `Bearer <token>`）；
+	// 其余形态忽略该字段。
+	HeaderTokenName string
 
 	CodeUnauthorized int // 未登录码（**仅在 Envelope 为 nil 时生效**，见 Envelope）
 	// Envelope 从响应体提取业务状态：返回 (业务码, 是否未登录, 解析错误)。
@@ -216,8 +242,20 @@ func (d SiteDescriptor) Validate() error {
 			return fmt.Errorf("站点档案 %s 的 %s=%q 必须以 / 开头", d.ID, name, p)
 		}
 	}
-	if d.TokenParam == "" || d.TokenCookie == "" {
-		return fmt.Errorf("站点档案 %s 缺少鉴权载体名（TokenParam/TokenCookie）", d.ID)
+	// 鉴权载体名判据随通道而变：Header 通道的平台本就没有查询参数名，
+	// 强制它非空等于把纯 REST 平台挡在门外；反之走查询通道却漏给参数名，
+	// 引擎会拼出 `?=TOK` 的畸形 URL，平台直接拒而现场报"参数缺失"。
+	if d.AuthMode == AuthHeader {
+		if strings.TrimSpace(d.HeaderTokenName) == "" {
+			return fmt.Errorf("站点档案 %s 声明 Header 鉴权但未给出 HeaderTokenName", d.ID)
+		}
+	} else if (d.AuthMode == AuthDual || d.AuthMode == AuthQuery) && strings.TrimSpace(d.TokenParam) == "" {
+		return fmt.Errorf("站点档案 %s 缺少鉴权载体名 TokenParam", d.ID)
+	}
+	// Cookie 通道没开的平台（仅查询/仅头）本就没有会话 Cookie 名，强制它非空
+	// 等于把这类平台挡在门外。
+	if (d.AuthMode == AuthDual || d.AuthMode == AuthCookie) && strings.TrimSpace(d.TokenCookie) == "" {
+		return fmt.Errorf("站点档案 %s 缺少鉴权载体名 TokenCookie", d.ID)
 	}
 	if d.Login.UserAgent == "" {
 		return fmt.Errorf("站点档案 %s 缺少 UserAgent", d.ID)

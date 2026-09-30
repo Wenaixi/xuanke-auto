@@ -5,6 +5,7 @@ package upstream
 // （Client.Timeout exceeded awaiting headers）。任一形态 miss 会让 scheduler/api
 // 对"平台可能已抢到课"的错误显示"报名失败"误导文案（黄金期重复报名被拒时 failed 残留）。
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -37,16 +38,19 @@ func TestIsReadErrCoversAllForms(t *testing.T) {
 	if !IsReadErr(&urlError{err: io.ErrUnexpectedEOF}) {
 		t.Fatalf("url.Error 包装的短读应命中（errors.Is 穿透），实际 false")
 	}
-	// 超时形态：awaiting headers（请求体已到达、等待响应头超时）
-	timeout := errors.New("Post \"https://x\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)")
-	if !IsReadErr(timeout) {
-		t.Fatalf("超时形态应命中 IsReadErr，实际 false")
+	// 超时形态：走 net.Error.Timeout() 判定，**不匹配错误文案**（标准库两种 wrap
+	// 文案随版本变化，靠 strings.Contains 匹配既脆又违反「错误分流只认结构化事实」）。
+	// context.DeadlineExceeded 实现 net.Error，是超时的标准代表。
+	if !IsReadErr(context.DeadlineExceeded) {
+		t.Fatalf("超时形态（context.DeadlineExceeded）应命中 IsReadErr，实际 false")
 	}
-	// 超时形态二：reading body（响应头已到达、正文传输超时——比 awaiting headers
-	// 更强地"平台已响应"，标准库 client.go:994 wrap 文案）
-	bodyTimeout := errors.New("context deadline exceeded (Client.Timeout or context cancellation while reading body)")
-	if !IsReadErr(bodyTimeout) {
-		t.Fatalf("reading body 超时形态应命中 IsReadErr，实际 false")
+	// 超时穿透包装链：url.Error 包装后仍应命中（errors.As 穿透）。
+	if !IsReadErr(&urlError{err: context.DeadlineExceeded}) {
+		t.Fatalf("url.Error 包装的超时应命中（errors.As 穿透），实际 false")
+	}
+	// 反向防线：非超时的普通错误不得被误判为 read 中断。
+	if IsReadErr(errors.New("Client.Timeout exceeded while awaiting headers")) {
+		t.Fatal("纯文本超时文案不实现 net.Error，不得被判为 read 中断（正是去掉文案匹配的原因）")
 	}
 	// 对照：dial/write 错误不命中（与 isConnErrRetryable 互斥）
 	if IsReadErr(&net.OpError{Op: "dial", Err: errors.New("connectex")}) {

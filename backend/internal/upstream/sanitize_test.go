@@ -8,6 +8,7 @@ package upstream
 //   2. 保留判型所需语义（net.OpError 可穿透、dial/write/read/超时形态全部命中）
 // 与 IsReadErr/isConnErrRetryable 复用同一 mock 形态（rst/dial/write/fin/shortread/timeout）。
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -55,7 +56,7 @@ func TestSanitizeErrorPreservesJudgment(t *testing.T) {
 		{"read-rst", &url.Error{Op: "Post", URL: "http://x?idToken=1", Err: &net.OpError{Op: "read", Err: errors.New("connection reset")}}, IsReadErr, true},
 		{"fin", &url.Error{Op: "Post", URL: "http://x?idToken=1", Err: io.EOF}, IsReadErr, true},
 		{"shortread", &url.Error{Op: "Post", URL: "http://x?idToken=1", Err: io.ErrUnexpectedEOF}, IsReadErr, true},
-		{"timeout", errors.New("Post \"https://x\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"), IsReadErr, true}, // 纯文本形态（非 url.Error）应原样保留
+		{"timeout", &url.Error{Op: "Post", URL: "http://x?idToken=1", Err: context.DeadlineExceeded}, IsReadErr, true}, // 超时穿透 url.Error 包装仍应命中
 		{"business", errors.New("验证码错误"), isConnErrRetryable, false},
 		{"nil", nil, isConnErrRetryable, false},
 	}

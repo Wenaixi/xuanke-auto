@@ -445,8 +445,8 @@ func isConnErrRetryable(err error) bool {
 //     headers 更强地"已处理"）：body.readLocked（transfer.go:865）对 LimitedReader
 //     短读包装为 io.ErrUnexpectedEOF，Do 层包 url.Error、errors.Is 穿透；该形态
 //     与 RST 在 body 读阶段互斥（RST 由响应头阶段的读失败产生）
-//   - 超时（平台已处理但响应超过客户端 Timeout）：两种 wrap 文案（标准库
-//     client.go:737 等待响应头 / client.go:994 读响应体中途）→ strings.Contains 判定
+//   - 超时（平台已处理但响应超过客户端 Timeout）：标准库的两种 wrap（client.go:737
+//     等待响应头 / client.go:994 读响应体中途）都实现 net.Error → Timeout() 判定
 //
 // 与 isConnErrRetryable 对称（互斥：retryable 只含 dial/write，read 恒 false）。
 func IsReadErr(err error) bool {
@@ -464,12 +464,14 @@ func IsReadErr(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	// 超时形态：平台可能已处理但响应慢于客户端超时（awaiting headers 是请求头已发送、
-	// 等待响应头超时——请求体已到达服务端；reading body 是响应头已到达、正文传输超时
-	// ——比 awaiting headers 更强地"平台已响应"。两种文案都是客户端整周期超时在
-	// 不同阶段的 wrap，标准库 client.go:737/994）
-	if strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") ||
-		strings.Contains(err.Error(), "Client.Timeout or context cancellation while reading body") {
+	// 超时形态：平台可能已处理但响应慢于客户端超时（等待响应头超时 = 请求体已到达
+	// 服务端；读响应体中途超时 = 平台已开始响应，更强地"已处理"）。
+	//
+	// **用 net.Error.Timeout() 判定，不匹配错误文案**——标准库的两种超时 wrap
+	// （client.go:737/994）都实现了 net.Error，文案随标准库版本变化，靠
+	// strings.Contains 匹配既脆又与「错误分流只认结构化事实」的契约冲突。
+	var nerrTimeout net.Error
+	if errors.As(err, &nerrTimeout) && nerrTimeout.Timeout() {
 		return true
 	}
 	// RST 形态：连接重置（*net.OpError.Op=="read"，穿透 url.Error 包装链）

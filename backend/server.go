@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,8 +20,9 @@ import (
 	"xuanke-auto/backend/internal/scheduler"
 	"xuanke-auto/backend/internal/secure"
 	"xuanke-auto/backend/internal/session"
+	"xuanke-auto/backend/internal/sites"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 	"xuanke-auto/backend/web"
 )
 
@@ -60,8 +62,8 @@ func runServer(cfg config.Config) *Started {
 	}
 
 	// d/err 生命周期归 Started.Cleanup（Android 常驻共享库：main 不返回，
-// 库内 defer 永不触发，DB/会话需随 Java 销毁显式关闭）。桌面 main 用 defer
-// 仍稳妥——Cleanup 由托盘退出路径调用，两形态共用同一收尾。
+	// 库内 defer 永不触发，DB/会话需随 Java 销毁显式关闭）。桌面 main 用 defer
+	// 仍稳妥——Cleanup 由托盘退出路径调用，两形态共用同一收尾。
 	d, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("打开数据库失败: %v", err)
@@ -76,17 +78,8 @@ func runServer(cfg config.Config) *Started {
 	encrypt := func(s string) (string, error) { return secure.Encrypt(s, masterKey) }
 	decrypt := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
 
-	// 多账号客户端注册表（每账号独立会话）+ 重启恢复
-	accts := accounts.New(cfg.BaseURL, zhidao.VisionConfig{
-		BaseURL: cfg.SFBaseURL, APIKey: cfg.SFAPIKey, Model: cfg.SFModel,
-	}, st)
-	if creds, err := st.LoadCredentials(); err != nil {
-		log.Printf("[main] 读取凭据失败: %v", err)
-	} else if len(creds) > 0 {
-		accts.Restore(creds, decrypt)
-	}
-
-	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发）
+	// 进程内配置中心（管理员可热重载：激活码开关 / Vision / 识别引擎与并发 /
+	// 监听地址 / 选课平台档案与站点地址）。
 	rt := runtime.New(runtime.Config{
 		ActivationEnabled:  cfg.ActivationCodesEnabled,
 		VisionBaseURL:      cfg.SFBaseURL,
@@ -98,6 +91,9 @@ func runServer(cfg config.Config) *Started {
 		// 启动顺序 = env 初值 → 落库值覆盖（ApplySettings）→ 按最终值真正监听。
 		ListenHost: cfg.ListenHost,
 		ListenPort: cfg.Port,
+		// 选课平台档案：env 初值 → 落库值覆盖（非法 ID 由 runtime 配置表拒绝并保留既有值）。
+		PlatformID:      cfg.PlatformID,
+		PlatformBaseURL: cfg.PlatformBaseURL,
 	})
 	// 从数据库恢复管理员上次的运行时配置（优先于环境变量，覆盖持久化值）。
 	// 键名与解析规则由 runtime 包的配置表统一定义——落库侧（api PUT）与本还原侧
@@ -109,6 +105,32 @@ func runServer(cfg config.Config) *Started {
 			runtime.ApplySettings(c, kv, decrypt)
 		})
 	}
+
+	// 选课平台档案必须在建客户端之前解析：档案决定路径/键名/解码，是客户端的构造入参。
+	// 未知 ID（只可能来自 .env，因为落库侧已被配置表把关）一律拒绝启动——
+	// 显式报错好过静默跑在另一个站点上。
+	rtCfg := rt.Get()
+	site, err := resolveStartupPlatform(rtCfg)
+	if err != nil {
+		log.Fatalf("选课平台档案无效：%v（改 data/.env 的 XUANKE_PLATFORM 后重启）", err)
+	}
+	baseURL := effectiveBaseURL(site, rtCfg.PlatformBaseURL)
+	log.Printf("[main] 选课平台：%s（%s，站点 %s）", site.Name, site.ID, baseURL)
+
+	// 多账号客户端注册表（每账号独立会话）+ 重启恢复。
+	// Restore 只恢复与本档案同源的会话 token（credentials.platform_id 比对），
+	// 跨平台 token 一律丢弃（既防凭据外泄，也避免必然 401 白跑一轮）。
+	vision := upstream.VisionConfig{BaseURL: cfg.SFBaseURL, APIKey: cfg.SFAPIKey, Model: cfg.SFModel}
+	accts := accounts.New(site, baseURL, vision, st)
+	if creds, err := st.LoadCredentials(); err != nil {
+		log.Printf("[main] 读取凭据失败: %v", err)
+	} else if len(creds) > 0 {
+		accts.Restore(creds, decrypt)
+	}
+
+	// 平台档案热切换（管理员后台「系统配置 → 选课平台」）：闭包收进具名构造函数，
+	// 让"解析档案 → 校验地址 → 读凭据 → 重建客户端"这条编排在测试里可直接断言。
+	rebindPlatform := newPlatformRebinder(st, accts, decrypt)
 
 	// 调度器（窗口到点立即探测 + 课程快照 + 按账号并发提交）
 	// 开放时间不做任何配置注入：平台 beginTimes 自动识别是唯一事实源（open_time 零值）。
@@ -158,7 +180,6 @@ func runServer(cfg config.Config) *Started {
 
 	// 监听地址：runtime 配置优先（管理员后台热改与落库值），回退 env 启动值。
 	// 默认 127.0.0.1（只允许本机）；内网 IP 开局域网、域名走穿透/公网、0.0.0.0 所有网卡。
-	rtCfg := rt.Get()
 	listenHost, listenPort := rtCfg.ListenHost, rtCfg.ListenPort
 	if listenHost == "" {
 		listenHost = "127.0.0.1"
@@ -235,12 +256,12 @@ func runServer(cfg config.Config) *Started {
 		Mux: mux, Store: st, Sched: sched, Accounts: accts, Sessions: sessions,
 		AdminToken: cfg.AdminToken, AdminName: cfg.AdminName,
 		ActivationEnabled: rt.Get().ActivationEnabled, Encrypt: encrypt, Runtime: rt,
-		PlatformEmbedded: cfg.PlatformEmbedded, Rebind: rebind,
+		PlatformEmbedded: cfg.PlatformEmbedded, Rebind: rebind, RebindPlatform: rebindPlatform,
 	})
 	mux.Handle("/", web.SpaHandler())
 	srv.Handler = apiHandler
 
-	log.Printf("[main] 至道选课自动化服务启动: http://%s（激活码机制: %v）", net.JoinHostPort(displayHost(listenHost), listenPort), cfg.ActivationCodesEnabled)
+	log.Printf("[main] 自动选课服务启动: http://%s（激活码机制: %v）", net.JoinHostPort(displayHost(listenHost), listenPort), cfg.ActivationCodesEnabled)
 	log.Printf("[main] 管理员登录：账号 %s，口令见 data/.env 的 XUANKE_ADMIN_TOKEN", adminNameOrDefault(cfg.AdminName))
 
 	started := &Started{Addr: addr, Rebind: rebind}
@@ -260,6 +281,72 @@ func runServer(cfg config.Config) *Started {
 	started.ErrCh = ch
 	go serve(ln)
 	return started
+}
+
+// resolveStartupPlatform 解析启动期的选课平台档案：空 ID 按默认档案
+// （config.Load 恒注入；直构 config.Config 的嵌入式/测试调用给空值时不炸），
+// **未知 ID 一律返回错误**——调用方 log.Fatalf 拒绝启动，绝不静默换到别的站点。
+func resolveStartupPlatform(cfg runtime.Config) (upstream.SiteDescriptor, error) {
+	id := cfg.PlatformID
+	if id == "" {
+		id = sites.DefaultID
+	}
+	// 档案自检钉在装配面：一份缺路径或缺解码钩子的档案会让运行时在第一次请求
+	// 时才炸（缺钩子是 nil 函数调用硬崩，缺路径拼出无前导斜杠 URL 让平台 404），
+	// 现场只是"未知的解析错误"。故此处拦下并由调用方 log.Fatalf 拒绝启动。
+	desc, err := sites.Resolve(id)
+	if err != nil {
+		return desc, err
+	}
+	if err := desc.Validate(); err != nil {
+		return desc, fmt.Errorf("平台档案自检未通过: %w", err)
+	}
+	return desc, nil
+}
+
+// newPlatformRebinder 组装平台热切换闭包（api PUT 的 RebindPlatform 依赖）。
+// 契约：**先验证后生效**——未知档案 ID、非法站点地址、读凭据失败一律返回错误（调用方
+// 整体拒绝、不落库），绝不留"档案换了、客户端没换"的半生效状态；
+// 成功才把新档案与地址交给 SetProfile（重建客户端 + 清跨平台 token + 落库打新标记）。
+func newPlatformRebinder(
+	st *store.Store,
+	accts *accounts.Manager,
+	decrypt func(string) (string, error),
+) func(platformID, baseURL string) error {
+	return func(platformID, baseURL string) error {
+		desc, err := sites.Resolve(platformID)
+		if err != nil {
+			return err
+		}
+		if err := upstream.ValidateBaseURL(baseURL); err != nil {
+			return err
+		}
+		// 档案自检与启动期同源：切到一份形状不完整的档案同样会让第一次请求才炸，
+		// 故在动客户端之前拦下（与上面的地址校验并列，属「先验证后生效」的一环）。
+		if err := desc.Validate(); err != nil {
+			return fmt.Errorf("平台档案自检未通过: %w", err)
+		}
+		creds, err := st.LoadCredentials()
+		if err != nil {
+			return fmt.Errorf("读取账号凭据失败: %w", err)
+		}
+		accts.SetProfile(desc, effectiveBaseURL(desc, baseURL), creds, decrypt)
+		return nil
+	}
+}
+
+// effectiveBaseURL 计算生效的站点地址：覆盖值优先（非空且合法），否则回退档案默认地址。
+// 启动期从库里读到非法覆盖（手改 DB）时记日志并回退，绝不裸拼接出非法协议的 URL。
+func effectiveBaseURL(desc upstream.SiteDescriptor, override string) string {
+	override = strings.TrimSpace(override)
+	if override == "" {
+		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
+	if err := upstream.ValidateBaseURL(override); err != nil {
+		log.Printf("[main] 站点地址覆盖 %q 非法（%v），回退档案默认地址 %s", override, err, desc.DefaultBaseURL)
+		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
+	return upstream.NormalizeBaseURL(override)
 }
 
 // displayHost 提示/日志用的主机名：0.0.0.0 / :: / 空（监听所有网卡）显示成

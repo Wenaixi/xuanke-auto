@@ -55,10 +55,6 @@ type SchedulerState struct {
 	WindowClosed  bool           `json:"window_closed"` // 探测为空快照且从未开过窗 = 选课窗口已关闭
 	TokenValid    bool           `json:"token_valid"`   // 当前账号教务 token 有效性（有效=true）
 	Courses       []CourseStatus `json:"courses"`
-	// EmptyProbeRuns "空快照且从未开窗"的连续探测轮数——WindowClosed
-	// 视同关闭判据之一（探测量变），由 probe() 入账推进、开窗/非空快照归零；零值=尚未连续
-	// 探测到 3 轮（首探 1 次、二探 2 次都不算）。json 省略：前端/外部无需感知内部量变。
-	EmptyProbeRuns int `json:"-"`
 }
 
 // 探测分阶段间隔：平日 30 秒；临门（距开放 ≤5 分钟）与已到点未开 2 秒紧密盯守。
@@ -714,9 +710,11 @@ func (s *Scheduler) StateForAccount(acct string) SchedulerState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	// WindowOpened/EmptyProbeRuns 从 ws 读（裸字段已移除），WindowClosed 实时三判据。
+	// WindowOpened 从 ws 读，WindowClosed 实时三判据。窗口关闭判据里的"空快照
+	// 连续探测轮数"是 windowState 的内部量变，绝不外泄到对外 DTO——该量变只经
+	// windowClosedLocked() 影响 WindowClosed 这一个布尔，不该让每个读 DTO 的
+	// 调用者都知道它存在。
 	st.WindowOpened = s.ws.isOpened()
-	st.EmptyProbeRuns = s.ws.emptyProbeRunsCount()
 	st.WindowClosed = s.windowClosedLocked() // 三条判据单源（含兜底），与 WindowClosed() 同真相
 	// 开放时间解析（唯一事实源 = 平台 beginTimes 自动识别）：
 	// 优先级 = 该账号自识别 openTimeDetected[acct] → 全校识别槽 openTimeDetected["*"]。

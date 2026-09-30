@@ -122,6 +122,11 @@ func (w *windowState) isOpened() bool {
 	return w.opened
 }
 
+// emptyProbeRunsCount 空快照连续探测轮数（幽灵窗口判据的量变）。
+// **仅测试消费**：生产读侧只经 isClosed 读私有字段，不走本方法。它是
+// TestGhostWindowEmptyProbesSuspend 断言"开窗点后 10s 裕量内不入账"的精确读数
+// 来源——换成 WindowClosed() 间接断言会降低强度（阈值是 3 轮，首轮恒 false，
+// 测不到"没入账"与"入了但没到阈值"的区别）。故生产读侧删净、此方法保留。
 func (w *windowState) emptyProbeRunsCount() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()

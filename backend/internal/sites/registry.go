@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"xuanke-auto/backend/internal/sites/testsite"
 	"xuanke-auto/backend/internal/sites/zhidao"
 	"xuanke-auto/backend/internal/upstream"
 )
@@ -22,7 +23,8 @@ const DefaultID = zhidao.ID
 
 // builtins 内置档案表（键 = ID）。新增档案只在此加一行。
 var builtins = map[string]upstream.SiteDescriptor{
-	zhidao.ID: zhidao.Descriptor(),
+	zhidao.ID:   zhidao.Descriptor(),
+	testsite.ID: testsite.Descriptor(),
 }
 
 // Info 档案的管理员可见元数据（后台下拉展示用；不含客户端工厂与解码钩子）。

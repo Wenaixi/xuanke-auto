@@ -29,11 +29,6 @@ interface Props {
 }
 
 
-// 是否为满员退避：失败且原因明确写"已满员"（调度器 markFullLocked 文案）
-function isFullFallback(c: { status: string; result: string }): boolean {
-  return c.status === "failed" && c.result.includes("已满员")
-}
-
 // 错误条只在会话真正失效（业务码 401）时显示"请重新登录"。
 // 网络错误/服务端 5xx 会被 react-query 重试，误判为会话失效会让用户无谓重登。
 function isSessionError(err: unknown): boolean {
@@ -586,7 +581,10 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {pub.items.map((c) => {
                           const isSuccess = c.status === "success"
-                          const isFull = isFullFallback(c)
+                          // 满员只认后端下发的 class_full（快照 ClassFull 派生字段的
+                          // 直接投影，与选课大厅同源），绝不匹配 result 中文文案——
+                          // 文案一改就静默失效，平台原文含「已满员」的非满员失败会被误判。
+                          const isFull = c.class_full === true
                           const isFailed = c.status === "failed" && !isFull
                           const isInRange = c.status === "in_range" || c.status === "submitted"
 

@@ -1,4 +1,4 @@
-// 与后端 API JSON 对应的类型定义。字段与后端 zhidao.Class 严格对齐：
+// 与后端 API JSON 对应的类型定义。字段与后端 upstream.Class 严格对齐：
 // lessons_date/apply_date/plan_count/audited_count 前后端均零消费，已剔除
 //（后端 json "-" 剔除后响应体不再下发，类型同步瘦身——绝不声明永不消费的幻影字段）。
 
@@ -48,6 +48,10 @@ export interface CourseStatus {
   // 发布名与日期前缀，Dashboard 分组零依赖 /electives（关闭≠元数据丢失）。
   publish_name?: string
   begin_date?: string
+  // 满员事实（后端快照 ClassFull 派生字段的直接投影）：看板判满员只读本字段，
+  // 绝不匹配 result 中文文案——文案一改就静默失效，且平台原文含「已满员」的
+  // 非满员失败会被误判。快照缺失（窗口关闭）时为 false，即不显满员徽章。
+  class_full?: boolean
 }
 
 export interface SchedulerState {
@@ -113,6 +117,25 @@ export interface AdminConfig {
   listen_port: string
   // 平台内置形态（APK）：端口输入置灰（App 内页面按 3091 连接，改端口会失联）。
   platform_embedded: boolean
+
+  // 选课平台档案（上游站点的接口形态）。平台差异全在档案里：切换档案 = 换一套
+  // 接口路径/键名/解码，流程（探测/提交/退避/黄金期）与前端一行不动。
+  platform_id: string
+  platform_name: string
+  platform_note: string
+  // 站点地址覆盖：空 = 用档案默认地址（换域名/镜像时填，免发版）。
+  platform_base_url: string
+  platform_default_base_url: string
+  // 全部内置档案（下拉直接渲染，新增档案零前端改动）。
+  platforms: PlatformInfo[]
+}
+
+// 一个内置选课平台档案的管理员可见元数据。
+export interface PlatformInfo {
+  id: string
+  name: string
+  note: string
+  default_base_url: string
 }
 
 // 运行状态总览（GET /api/admin/stats）
@@ -139,6 +162,9 @@ export interface AdminStats {
   open_time_set?: boolean
   // 各账号教务 token 有效性（账号名 -> 是否有效），缺省视作全部有效
   token_valid?: Record<string, boolean>
+  // 当前选课平台（管理员确认"跑的是哪一套接口"的唯一核对点）
+  platform_id?: string
+  platform_name?: string
 }
 
 // 账号管理条目（GET /api/admin/accounts）

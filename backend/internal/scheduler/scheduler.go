@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // Target 目标课程（同发布多门备选，Priority 越小越先提交）。
@@ -38,6 +38,10 @@ type CourseStatus struct {
 	Result      string `json:"result"`
 	PublishName string `json:"publish_name,omitempty"` // 发布名（发布元数据透传，窗口关闭仍可显示）
 	BeginDate   string `json:"begin_date,omitempty"`   // 发布日期（YYYY-MM-DD 前缀，窗口关闭仍可分组）
+	// ClassFull 满员事实（快照 ClassFull 派生字段的直接投影）：前端判满员
+	// 只读本字段，绝不匹配 Result 中文文案，也不反查嵌套快照结构。快照
+	// 缺失（窗口关闭后 publishes 为空）时为 false，即不显满员徽章。
+	ClassFull bool `json:"class_full"`
 }
 
 // SchedulerState 对外状态快照。
@@ -114,9 +118,10 @@ type Prewarmer interface {
 	Prewarm() error
 }
 
-// Client 调度器依赖的至道客户端能力（*zhidao.Client 隐式满足）。
+// Client 调度器依赖的上游客户端能力（*upstream.Client 隐式满足）：与站点档案无关，
+// 换平台时本接口一行不动。
 type Client interface {
-	FindElectives() (*zhidao.ElectivesData, error)
+	FindElectives() (*upstream.ElectivesData, error)
 	SelectClass(classID int) (string, error)
 	ExitClass(classID int) (string, error)
 	IsClassFull(classID int) (bool, error)
@@ -151,36 +156,36 @@ type Scheduler struct {
 	store    Store
 	interval time.Duration
 
-	mu               sync.Mutex
-	acctTargets      map[string][]Target // 按账号隔离的目标课程
-	state            SchedulerState
-	ws               *windowState // 窗口状态机（openTimeDetected/opened/closed/emptyProbeRuns/syncFailStreak 写侧收敛，见 window_state.go）
-	inflight         map[string]map[int]bool // [账号][classID] 正在提交
-	done             map[string]map[int]bool // [账号][classID] 已成功
-	full             map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
-	refused          map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
-	lastProbe        time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入
-	lastSubmit       time.Time               // 上次提交时间（submitAll 节流）
-	lastData         *zhidao.ElectivesData   // 内存课程快照（超高性能：/electives 直读）
-	lastDataAt       time.Time
-	acctData         map[string]*zhidao.ElectivesData // [账号] 专属课程快照（年级物理隔离）
-	acctDataAt       map[string]time.Time             // [账号] 专属快照时间戳
-	tokenValid       map[string]bool                  // [账号] token 失效标记（false=有效，缺失即有效）
-	reloginAt        map[string]time.Time             // [账号] 上次重登时间（30s 节流 + 退避计时基准）
-	reloginFail      map[string]int                   // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
-	relogging        map[string]bool                  // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
-	reloginMu        sync.Mutex                       // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
-	reloginResults   chan reloginResult               // 重登结果回传（异步结果在 tick 主循环统一处理）
-	warnedNoTargets  bool                             // 无目标空转警告只打一次
+	mu              sync.Mutex
+	acctTargets     map[string][]Target // 按账号隔离的目标课程
+	state           SchedulerState
+	ws              *windowState            // 窗口状态机（openTimeDetected/opened/closed/emptyProbeRuns/syncFailStreak 写侧收敛，见 window_state.go）
+	inflight        map[string]map[int]bool // [账号][classID] 正在提交
+	done            map[string]map[int]bool // [账号][classID] 已成功
+	full            map[string]map[int]bool // [账号][classID] 已确认满员（快照显示不满时解除）
+	refused         map[string]map[int]bool // [账号][classID] 用户手动退选（自动引擎绝不抢回，直到重设目标）
+	lastProbe       time.Time               // 全校正规探测节流闸门：只归 probe()/ProbeNow 写入
+	lastSubmit      time.Time               // 上次提交时间（submitAll 节流）
+	lastData        *upstream.ElectivesData // 内存课程快照（超高性能：/electives 直读）
+	lastDataAt      time.Time
+	acctData        map[string]*upstream.ElectivesData // [账号] 专属课程快照（年级物理隔离）
+	acctDataAt      map[string]time.Time               // [账号] 专属快照时间戳
+	tokenValid      map[string]bool                    // [账号] token 失效标记（false=有效，缺失即有效）
+	reloginAt       map[string]time.Time               // [账号] 上次重登时间（30s 节流 + 退避计时基准）
+	reloginFail     map[string]int                     // [账号] 连续重登失败次数（指数退避：fail 次后间隔 30s<<fail，封顶 10min）
+	relogging       map[string]bool                    // [账号] 重登进行中标记（区别于"已失效待重登"，保证失败后可再试）
+	reloginMu       sync.Mutex                         // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
+	reloginResults  chan reloginResult                 // 重登结果回传（异步结果在 tick 主循环统一处理）
+	warnedNoTargets bool                               // 无目标空转警告只打一次
 
-	clockOffset      time.Duration // 服务端时钟对齐偏差 (server - local)
-	lastSyncTime     time.Time     // 上次时钟对齐成功采样时间（仅成功推进）
-	lastSyncStart    time.Time     // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
-	lastSyncFailAt   time.Time     // 上次同步失败时刻（失败退避计时基准）
-	syncing          bool          // 同步进行中标记（防 tick 叠加发起并发同步）
-	probing          bool          // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑）
-	lastPrewarm      time.Time     // 上次连接池预热时间
-	rateLimited      map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
+	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
+	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进）
+	lastSyncStart  time.Time                    // 当前正在进行的同步发起时刻（成功时回写 lastSyncTime）
+	lastSyncFailAt time.Time                    // 上次同步失败时刻（失败退避计时基准）
+	syncing        bool                         // 同步进行中标记（防 tick 叠加发起并发同步）
+	probing        bool                         // 探测进行中标记（单飞：同一时刻全校只允许一次 probe 在跑）
+	lastPrewarm    time.Time                    // 上次连接池预热时间
+	rateLimited    map[string]map[int]time.Time // [账号][classID] 风控退避截止时刻
 
 	chainMu sync.Mutex
 	chains  map[string]bool // 链活跃标记：key=acct+"\x00"+publishID
@@ -193,7 +198,7 @@ type Scheduler struct {
 }
 
 // sameClientFor 复核账号在注册表中的客户端是否仍是发起提交时的同一身份（需持 s.mu）。
-// 仅判"账号名存在"挡不住同名重建——删号后同名重建会用新 *zhidao.Client 顶替，
+// 仅判"账号名存在"挡不住同名重建——删号后同名重建会用新 *upstream.Client 顶替，
 // 旧链返回后 ClientFor(acct) 仍 ok 却指向新身份。接口值比对用反射的指针身份（unpack
 // 具体类型指针取 Pointer 值），nil 视为非同一身份；账号已删（ClientFor 不存在）也非同一。
 // 调用点：spawnChain 成功/失效分支写状态与落库前。
@@ -206,7 +211,7 @@ func (s *Scheduler) sameClientFor(acct string, chainClient Client) bool {
 }
 
 // clientIdentity 返回客户端接口动态值的唯一身份标识（指针值）。
-// scheduler.Client 是接口，*zhidao.Client 与测试的 *fakeClient 都是具体指针实现——
+// scheduler.Client 是接口，*upstream.Client 与测试的 *fakeClient 都是具体指针实现——
 // reflect.ValueOf(x).Pointer() 对指针动态类型返回底层指针值，同一实例恒等。
 func clientIdentity(c Client) uintptr {
 	if c == nil {
@@ -234,26 +239,26 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
-		clients:          clients,
-		store:            store,
-		interval:         interval,
-		acctTargets:      make(map[string][]Target),
-		inflight:         make(map[string]map[int]bool),
-		done:             make(map[string]map[int]bool),
-		full:             make(map[string]map[int]bool),
-		refused:          make(map[string]map[int]bool),
-		tokenValid:       make(map[string]bool),
-		reloginAt:        make(map[string]time.Time),
-		reloginFail:      make(map[string]int),
-		relogging:        make(map[string]bool),
-		rateLimited:      make(map[string]map[int]time.Time),
-		chains:           make(map[string]bool),
-		probeSem:         make(chan struct{}, 4), // per-account 探测并发上限
-		acctData:         make(map[string]*zhidao.ElectivesData),
-		acctDataAt:       make(map[string]time.Time),
-		ws:               newWindowState(),
-		ctx:              ctx,
-		cancel:           cancel,
+		clients:     clients,
+		store:       store,
+		interval:    interval,
+		acctTargets: make(map[string][]Target),
+		inflight:    make(map[string]map[int]bool),
+		done:        make(map[string]map[int]bool),
+		full:        make(map[string]map[int]bool),
+		refused:     make(map[string]map[int]bool),
+		tokenValid:  make(map[string]bool),
+		reloginAt:   make(map[string]time.Time),
+		reloginFail: make(map[string]int),
+		relogging:   make(map[string]bool),
+		rateLimited: make(map[string]map[int]time.Time),
+		chains:      make(map[string]bool),
+		probeSem:    make(chan struct{}, 4), // per-account 探测并发上限
+		acctData:    make(map[string]*upstream.ElectivesData),
+		acctDataAt:  make(map[string]time.Time),
+		ws:          newWindowState(),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	s.reloginResults = make(chan reloginResult, 8)
 	// 非零 openTime 入参 → 写入全校识别槽（见 New 头注释）。零值（生产路径）不写。
@@ -534,7 +539,7 @@ func (s *Scheduler) RestoreTargets(acct string, targets []Target) {
 // SetTargetsForAccount 注释——HTTP 直存时专属帧常过期/为空，全校帧更可能带本轮批次）。
 // 两者都无 → 保持原样（semantics：窗口重开后重存目标自愈）。
 func (s *Scheduler) enrichTargetPubMetaLocked(acct string, targets []Target) []Target {
-	var pubs []zhidao.Publish
+	var pubs []upstream.Publish
 	if data := s.acctData[acct]; data != nil {
 		pubs = data.Publishes
 	} else if data := s.lastData; data != nil {
@@ -586,6 +591,10 @@ func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target
 			status = "pending"
 			result = "已手动退选（自动引擎不再接管，可重新设为目标恢复）"
 		}
+		// 满员事实随状态下发：classFullInSnapshot 是满员判据单源（与
+		// spawnChain 提交前的满员跳过、Select 路由读 class_full 同源）。
+		// 快照查不到课程时返回 false（不判满员放行），窗口关闭后自然退化。
+		classFull := s.classFullInSnapshot(acct, t.ClassID)
 		s.state.Courses = append(s.state.Courses, CourseStatus{
 			Account:     acct,
 			PublishID:   t.PublishID,
@@ -596,6 +605,7 @@ func (s *Scheduler) rebuildCoursesForAccountLocked(acct string, targets []Target
 			Result:      result,
 			PublishName: t.PublishName, // 发布元数据随目标透传（窗口关闭后分组/展示仍在）
 			BeginDate:   t.BeginDate,
+			ClassFull:   classFull,
 		})
 	}
 }
@@ -765,7 +775,7 @@ func (s *Scheduler) AccountsWithTargets() []string {
 
 // ElectivesSnapshotFor 返回指定账号的内存课程快照（40 秒内有效）。
 // 若该账号暂无专属快照或已过期，则回退全局快照。
-func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bool) {
+func (s *Scheduler) ElectivesSnapshotFor(acct string) (*upstream.ElectivesData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 目标账号（已配置目标）必须用该账号专属年级快照渲染，
@@ -816,7 +826,7 @@ func (s *Scheduler) ElectivesSnapshotFor(acct string) (*zhidao.ElectivesData, bo
 //
 // 账号不存在时返回明确错误，绝不回退 ProbeNow 直打教务上游——
 // 否则 ?account= 对任意不存在账号可绕过调度器 30s 探测节流 + 账号枚举。
-func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) {
+func (s *Scheduler) ProbeForAccount(acct string) (*upstream.ElectivesData, error) {
 	if s.clients == nil {
 		return nil, errors.New("没有任何已登录账号")
 	}
@@ -826,7 +836,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	}
 	data, err := client.FindElectives()
 	if err != nil {
-		if errors.Is(err, zhidao.ErrUnauthorized) {
+		if errors.Is(err, upstream.ErrUnauthorized) {
 			s.maybeRelogin(acct)
 		}
 		return nil, err
@@ -848,7 +858,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 	// 写入必须在 s.mu 锁内（与 tick/openTimeForLocked 持锁读并发）——map 无锁并发
 	// 读写是 Go 数据竞争（runtime 可 throw），识别槽是调度器核心读路径（每 300ms tick）。
 	// 身份防线：本函数入口已取 client 指针，但网络往返（FindElectives 最长
-	// 15s）期间账号可能被删号 + 同名重建（新 *zhidao.Client 顶替）。回写段锁内必须
+	// 15s）期间账号可能被删号 + 同名重建（新 *upstream.Client 顶替）。回写段锁内必须
 	// 复核"当前注册表客户端仍是发起探测时的同一身份"（与 spawnChain 六分支
 	// sameClientFor 同族）——否则旧链会把过期快照写进重建账号的 acctData 条目、
 	// 或覆盖其 openTimeDetected 识别槽（年级串线/过期数据一帧可见，下个探测自愈）。
@@ -864,7 +874,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 		log.Printf("[scheduler] 账号 %s 识别到开放时间 %s（平台 beginTimes）", acct, time.UnixMilli(data.BeginTimes[0]).Format("2006-01-02 15:04:05"))
 	}
 	if s.acctData == nil {
-		s.acctData = make(map[string]*zhidao.ElectivesData)
+		s.acctData = make(map[string]*upstream.ElectivesData)
 		s.acctDataAt = make(map[string]time.Time)
 	}
 	s.acctData[acct] = data
@@ -882,7 +892,7 @@ func (s *Scheduler) ProbeForAccount(acct string) (*zhidao.ElectivesData, error) 
 }
 
 // ElectivesSnapshot 返回内存课程快照（40 秒内有效）。超高性能核心：页面浏览零上游请求。
-func (s *Scheduler) ElectivesSnapshot() (*zhidao.ElectivesData, bool) {
+func (s *Scheduler) ElectivesSnapshot() (*upstream.ElectivesData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lastData == nil || s.nowAlignedLocked().Sub(s.lastDataAt) > snapshotTTL {
@@ -930,7 +940,7 @@ func (s *Scheduler) windowClosedLocked() bool {
 // ProbeNow 立即执行一次课程探测并刷新快照（/api/electives 快照过期时调用）。
 // 命中 token 失效（ErrUnauthorized）时同步触发该账号自动重登——用户刷新课程页
 // 不必等调度器下个 30s 周期探测才发现并恢复（异步重登，不阻塞响应）。
-func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
+func (s *Scheduler) ProbeNow() (*upstream.ElectivesData, error) {
 	if s.clients == nil {
 		return nil, errors.New("没有任何已登录账号")
 	}
@@ -940,7 +950,7 @@ func (s *Scheduler) ProbeNow() (*zhidao.ElectivesData, error) {
 	}
 	data, err := client.FindElectives()
 	if err != nil {
-		if errors.Is(err, zhidao.ErrUnauthorized) {
+		if errors.Is(err, upstream.ErrUnauthorized) {
 			if acct, _, ok := s.clients.AnyClientWithAccount(); ok {
 				s.maybeRelogin(acct)
 			}
@@ -1077,7 +1087,7 @@ func (s *Scheduler) probe() {
 		s.probing = false
 		s.lastProbe = now // 失败同样计入节流闸门，网络故障时不会每 300ms 疯狂重试
 		s.mu.Unlock()
-		if errors.Is(err, zhidao.ErrUnauthorized) {
+		if errors.Is(err, upstream.ErrUnauthorized) {
 			// 探测账号的 token 失效 → 自动重登（网络类失败绝不重登）
 			if acct, _, ok := s.clients.AnyClientWithAccount(); ok {
 				s.maybeRelogin(acct)
@@ -1583,7 +1593,7 @@ func (s *Scheduler) spawnChain(acct string, ts []Target) {
 			// 与 SelectClass 分支对称触发自动重登（ErrUnauthorized 才是"重登中"语义），
 			// 否则本次失败被当普通失败处理、下个 tick 又重打报名接口（token 已失效的
 			// 报名必然再失败），失效恢复路径被延迟到探测/手动路径才发现。
-			if cErr != nil && errors.Is(cErr, zhidao.ErrUnauthorized) {
+			if cErr != nil && errors.Is(cErr, upstream.ErrUnauthorized) {
 				s.mu.Unlock()
 				s.maybeRelogin(acct)
 				s.mu.Lock()
@@ -1682,7 +1692,7 @@ func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 // 两帧都无 / 快照为 nil / 课程不存在返回 nil——找不到的决策（放行/保守保持/
 // 判不满）由调用方各自表达，本函数只承载"怎么找到这门课"这步导航。
 // 快照形状变更（字段/层级）只改本函数一处，与手册"满员判据单一记忆点"同族。
-func (s *Scheduler) findClassInSnapshot(acct string, classID int) *zhidao.Class {
+func (s *Scheduler) findClassInSnapshot(acct string, classID int) *upstream.Class {
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
 			for _, p := range d.Publishes {
@@ -1730,6 +1740,11 @@ func (s *Scheduler) markFullLocked(acct string, t Target) {
 	}
 	s.full[acct][t.ClassID] = true
 	s.setStateLocked(s.statusIndexLocked(acct, t.ClassID), "failed", "该课程已满员，退避至下一备选")
+	// 满员事实同步进状态行：前端 Dashboard 只读 class_full 判徽章，若此处不
+	// 同步，手动报名触发的满员（rebuild 之后才发生）在看板上不可见。
+	if idx := s.statusIndexLocked(acct, t.ClassID); idx >= 0 {
+		s.state.Courses[idx].ClassFull = true
+	}
 	s.appendLog(acct, t.ClassID, "select", "账号 "+acct+": 课程 "+t.CourseName+" 已满员，切换备选", false)
 }
 
@@ -1756,6 +1771,9 @@ func (s *Scheduler) releaseFullIfFreedLocked(acct string, classID int) {
 	if idx >= 0 {
 		s.state.Courses[idx].Status = "pending"
 		s.state.Courses[idx].Result = ""
+		// 解封同步回落满员事实：快照已明确有余量，前端徽章必须随之消失，
+		// 否则看板会继续显示已满员而引擎已在捡漏重报。
+		s.state.Courses[idx].ClassFull = false
 	}
 }
 
@@ -1812,7 +1830,7 @@ func (s *Scheduler) setStateLocked(idx int, status, result string) {
 func (s *Scheduler) checkClassSelectable(acct string, classID int) (reason string, selectable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var data *zhidao.ElectivesData
+	var data *upstream.ElectivesData
 	var fresh bool
 	if acct != "" && s.acctData != nil {
 		if d, ok := s.acctData[acct]; ok && d != nil {
@@ -2025,6 +2043,7 @@ func (s *Scheduler) removeDone(acct string, classID int, origin Client) error {
 //     捕获的 client）。此前此处写的是"无跨请求身份顶替窗口、仅 ClientFor 覆盖"，
 //     与同文件 MarkDone 注释自承的"在飞手动报名（SelectClass 最长 15s）竞态"矛盾，
 //     且同名重建形态下 ClientFor 存在性判据恒通过、拦不住陈旧写回。
+//
 // 补核实挖出的缺口：重登退避期（tokenValidForLocked=false）手动点报名必须短路——
 // 自动链重登退避期内手动路径此前照发 SelectClass 烧平台请求，这里前置检查。
 func (s *Scheduler) ManualSelect(acct string, classID int, courseName string) (string, error) {

@@ -359,10 +359,7 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", c.desc.Login.UserAgent)
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-	req.Header.Set("Origin", c.baseURL)
-	req.Header.Set("Referer", c.baseURL+c.desc.RefererPath)
+	c.applyHeaders(req)
 
 	resp, err := httpDo(c.http, req)
 	if err != nil {
@@ -401,6 +398,32 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 		return data, fmt.Errorf("%w（%s）", ErrUnauthorized, c.desc.Decode.Msg(data))
 	}
 	return data, nil
+}
+
+// applyHeaders 写入「附加请求头」：档案声明优先，零值档案回落引擎默认头集。
+// 为什么必须下沉：`X-Requested-With: XMLHttpRequest` 与
+// `Accept: application/json, text/javascript, */*; q=0.01` 是 jQuery 1.x 的字节级
+// 指纹，纯 REST 平台既不需要也可能被 WAF 拦；而任何档案要加自己的头
+// （X-API-Key、租户 ID 等）此前都没有入口。
+// 约定：档案 Headers 的值为空串 = 显式删除该头（故默认头集与档案声明互斥——
+// 声明了 map 即逐条接管，"删除"才有意义）。Content-Type/User-Agent 由调用方
+// 先行设置，Origin/Referer 在本函数末尾固定补上：它们是引擎与档案的公共约定，
+// 不交给档案覆盖（覆盖 Referer 只会破坏错误页的同源语义）。
+func (c *Client) applyHeaders(req *http.Request) {
+	if len(c.desc.Headers) == 0 {
+		// 零值档案 = 引擎默认（保留既有实测行为，避免未声明 Headers 的档案行为漂移）
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	}
+	for k, v := range c.desc.Headers {
+		if v == "" {
+			req.Header.Del(k)
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Referer", c.baseURL+c.desc.RefererPath)
 }
 
 // readBody 按 ContentLength 预分配的一次性响应体读取。

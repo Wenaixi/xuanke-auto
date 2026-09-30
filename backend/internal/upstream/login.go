@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -149,14 +150,47 @@ func (e *LoginEngine) submitLogin(sess *http.Client, ua, captchaText, identifica
 	if e.desc.Form.PriorityID != "" {
 		form.Set(e.desc.Form.PriorityID, "")
 	}
+	// 登录表单体编码随站点而变：jQuery 时代是 form 编码（绝大多数平台），
+	// 现代 API 常要 JSON 体。档案 Form 的空键名契约在两条路径上完全一致
+	//（无此键就不提交，绝不写出 `=value`）。
+	payload := form.Encode()
+	contentType := "application/x-www-form-urlencoded"
+	if e.desc.FormEncoding == "json" {
+		obj := make(map[string]string, len(form))
+		for k, v := range form {
+			if k == "" {
+				continue
+			}
+			obj[k] = v[0]
+		}
+		buf, err := json.Marshal(obj)
+		if err != nil {
+			return "", fmt.Errorf("编码登录表单失败: %w", err)
+		}
+		payload = string(buf)
+		contentType = "application/json"
+	}
 	req, err := http.NewRequest(http.MethodPost, e.baseURL+e.desc.DoLoginPath,
-		strings.NewReader(form.Encode()))
+		strings.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", ua)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Content-Type", contentType)
+	// 附加头走与已登录接口同一套档案约定（空 map = 引擎默认 XHR 头集）。
+	// 登录链路不设 Origin/Referer 之外的引擎固定头：登录页是浏览器导航，
+	// 平台不依赖同源头；确需 Origin 的平台由档案 Headers 显式声明。
+	if len(e.desc.Headers) == 0 {
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	} else {
+		for k, v := range e.desc.Headers {
+			if v == "" {
+				req.Header.Del(k)
+				continue
+			}
+			req.Header.Set(k, v)
+		}
+	}
 	req.Header.Set("Referer", e.baseURL+e.desc.LoginPath)
 	resp, err := sess.Do(req)
 	if err != nil {
@@ -177,7 +211,12 @@ func (e *LoginEngine) submitLogin(sess *http.Client, ua, captchaText, identifica
 	if e.cookies == nil {
 		e.cookies = map[string]string{}
 	}
-	e.cookies[e.desc.TokenCookie] = token
+	// 会话 Cookie 只在档案声明了 Cookie 名时写入：纯 Header 鉴权的平台
+	// TokenCookie 为空，无条件写会产出「空键名 Cookie」（形如 `=TOK`），
+	// 平台多半直接拒——与档案 Form 空键名同一条「空名绝不提交」契约。
+	if e.desc.TokenCookie != "" {
+		e.cookies[e.desc.TokenCookie] = token
+	}
 	if u, _ := url.Parse(e.baseURL); u != nil {
 		for _, ck := range sess.Jar.Cookies(u) {
 			if ck.Name != "" && ck.Value != "" {

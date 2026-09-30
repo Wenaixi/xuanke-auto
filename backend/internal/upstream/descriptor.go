@@ -170,6 +170,16 @@ type SiteDescriptor struct {
 	// HeaderTokenName 仅 AuthMode == AuthHeader 时必填（引擎写 `Bearer <token>`）；
 	// 其余形态忽略该字段。
 	HeaderTokenName string
+	// Headers 该站点要求/期望的附加请求头，引擎逐条覆盖写入已登录接口与登录提交。
+	// **空 map = 引擎默认头集**（见 applyHeaders 的 X-Requested-With/Accept），
+	// 保留既有实测行为；声明了 map 才逐条接管。值为空串 = 显式删除该头，
+	// 供纯 REST 平台去掉 jQuery 时代的后台指纹（如 text/javascript 与 q=0.01）。
+	Headers map[string]string
+	// FormEncoding 登录表单的请求体编码。""（零值）/"form" =
+	// application/x-www-form-urlencoded（jQuery 默认，绝大多数平台）；
+	// "json" = application/json，体为档案 Form 各键值组成的 JSON 对象
+	// （空键名仍不提交，与 form 路径同契约）。
+	FormEncoding string
 
 	CodeUnauthorized int // 未登录码（**仅在 Envelope 为 nil 时生效**，见 Envelope）
 	// Envelope 从响应体提取业务状态：返回 (业务码, 是否未登录, 解析错误)。
@@ -294,6 +304,11 @@ func (d SiteDescriptor) Validate() error {
 	// 声明了设备指纹却没给键名：同理会把指纹拼到空键名上。
 	if strings.TrimSpace(d.Form.UniqueID) == "" && d.Login.DeviceID != nil && d.Login.DeviceID("ua", time.Now()) != "" {
 		return fmt.Errorf("站点档案 %s 的 DeviceID 钩子会产出非空值但未给出表单字段名 Form.UniqueID", d.ID)
+	}
+	// 登录体编码只认两种形态：写错值不会崩，只会让平台收到无法解析的请求体，
+	// 现场报的是"参数错误"这类难定位的问题，故在装配面拦下。
+	if d.FormEncoding != "" && d.FormEncoding != "form" && d.FormEncoding != "json" {
+		return fmt.Errorf("站点档案 %s 的 FormEncoding=%q 非法（只允许 form/json）", d.ID, d.FormEncoding)
 	}
 	return nil
 }

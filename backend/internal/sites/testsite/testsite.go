@@ -36,6 +36,12 @@ const defaultBaseURL = "https://testsite.example.com"
 // userAgent 站点要求的统一 UA。
 const userAgent = "Mozilla/5.0 (compatible; TestSiteBot/1.0)"
 
+// 站点业务状态（字符串，与知到的整数 code 刻意不同）。
+const (
+	statusOK           = "OK"
+	statusUnauthorized = "UNAUTHORIZED"
+)
+
 // errRejected 登录被拒（站点不返回可读文案时用它兜底）。
 var errRejected = errors.New("登录被拒绝")
 
@@ -77,6 +83,15 @@ func Descriptor() upstream.SiteDescriptor {
 		},
 		CaptchaCacheBustParam: "",        // 不拼防缓存参数
 		SessionCookies:       map[string]string{}, // 无会话 Cookie 需求
+		// 附加请求头：去掉 jQuery 指纹（知到后台靠它识别 XHR），改为纯 REST 形态。
+		// 空串值 = 显式删除该头——这是档案「关掉引擎默认头」的唯一入口。
+		Headers: map[string]string{
+			"X-Requested-With": "",
+			"Accept":           "application/json",
+		},
+		// 业务状态是字符串而非整数：知到的 `{"code":int}` 引擎硬解会崩，
+		// 而「状态键名不同」更会静默把未登录当成功。Envelope 让引擎不再自解键名。
+		Envelope: decodeEnvelope,
 
 		Form: upstream.FormFields{
 			Year:           "year",
@@ -117,7 +132,7 @@ func decodeTerms(body []byte) ([]upstream.YearTerm, error) {
 // Selectable 恒为 nil——testsite 不下发开窗信号，引擎据此走退化模式。
 func decodeElectives(body []byte) (*upstream.ElectivesData, error) {
 	var raw struct {
-		Code int `json:"code"`
+		Status string `json:"status"` // 字符串业务状态（知到是整数 code）
 		Data struct {
 			Classes []struct {
 				ID       int    `json:"id"`
@@ -182,7 +197,7 @@ func mapAction(a string) string {
 // decodeCounts 实时人数（字段名与形态也随站点：知到是 countList/selectedCount）。
 func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 	var raw struct {
-		Code int `json:"code"`
+		Status string `json:"status"`
 		Data []struct {
 			ID       int `json:"id"`
 			Enrolled int `json:"enrolled"`
@@ -199,33 +214,49 @@ func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 	return out, nil
 }
 
-// decodeOpResult 成败判据 = code==0 && status=="OK"（单布尔约定，
-// 与知到的 code==0 && isOk 双布尔刻意不同）。
+// decodeOpResult 成败判据 = status=="OK"（**单字符串约定**，与知到的
+// code==0 && isOk 双布尔刻意不同）。未登录由 Envelope 钩子先行拦截，
+// 这里只判「成功与否」这一位事实。
 func decodeOpResult(body []byte) (string, bool, error) {
 	var j struct {
-		Code   int    `json:"code"`
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
 		return "", false, err
 	}
-	ok := j.Code == 0 && j.Status == "OK"
-	return j.Status, ok, nil
+	return j.Status, j.Status == statusOK, nil
 }
 
-// decodeLogin 登录响应取 token；code 非 0 或 token 空一律判被拒。
+// decodeLogin 登录响应取 token；状态非 OK 或 token 空一律判被拒。
 func decodeLogin(body []byte) (string, error) {
 	var j struct {
-		Code  int    `json:"code"`
-		Token string `json:"token"`
+		Status string `json:"status"`
+		Token  string `json:"token"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
 		return "", err
 	}
-	if j.Code != 0 || j.Token == "" {
+	if j.Status != statusOK || j.Token == "" {
 		return "", errRejected
 	}
 	return j.Token, nil
+}
+
+// decodeEnvelope 从响应体取业务状态：站点的状态是字符串（知到是整数 code）。
+// 三态返回对应引擎的三种处置：
+//   - status=="UNAUTHORIZED" → 未登录，引擎上抛 ErrUnauthorized 触发自动重登；
+//   - 正常 JSON（无 status 或其他状态）→ 交给各接口解码器自行判成败；
+//   - 非 JSON（如平台回纯文本错误页）→ 返回 err，引擎据此跳过信封检查。
+// 第三态是本包存在的关键理由之一：引擎曾写死解 `{"code":int}`，
+// 纯文本响应体会让它在第一次请求就崩（invalid character 'U'）。
+func decodeEnvelope(body []byte) (int, bool, error) {
+	var j struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &j); err != nil {
+		return 0, false, err
+	}
+	return 0, j.Status == statusUnauthorized, nil
 }
 
 // decodeMsg 提取可读文案（英文码）；解析失败返回空串。

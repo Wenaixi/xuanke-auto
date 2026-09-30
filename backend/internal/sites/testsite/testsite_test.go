@@ -84,15 +84,16 @@ func TestDecodeTermsVirtualSingleTerm(t *testing.T) {
 	}
 }
 
-// TestDecodeOpResultStatusOK 成败判据 = status=="OK"（知到是 code==0 && isOk 双布尔）。
+// TestDecodeOpResultStatusOK 成败判据 = status=="OK" 单一字符串
+// （知到是 code==0 && isOk 双布尔，且站点状态是整数而非字符串）。
 func TestDecodeOpResultStatusOK(t *testing.T) {
-	if _, ok, err := decodeOpResult([]byte(`{"code":0,"status":"OK"}`)); err != nil || !ok {
+	if _, ok, err := decodeOpResult([]byte(`{"status":"OK"}`)); err != nil || !ok {
 		t.Fatalf("status=OK 应判成功，ok=%v err=%v", ok, err)
 	}
 	for _, bad := range []string{
-		`{"code":0,"status":"FULL"}`,
-		`{"code":0,"status":"WINDOW_CLOSED"}`,
-		`{"code":1,"status":"OK"}`, // code 非 0 即失败（与知到的 code 优先一致）
+		`{"status":"FULL"}`,
+		`{"status":"WINDOW_CLOSED"}`,
+		`{"status":""}`, // 无状态键 = 未确认成功，绝不放过
 	} {
 		if _, ok, err := decodeOpResult([]byte(bad)); err != nil || ok {
 			t.Fatalf("%s 应判失败，ok=%v err=%v", bad, ok, err)
@@ -179,15 +180,15 @@ func TestDecodeCounts(t *testing.T) {
 	}
 }
 
-// TestDecodeLogin 登录响应取 token；code 非 0 或 token 空一律判被拒。
+// TestDecodeLogin 登录响应取 token；状态非 OK 或 token 空一律判被拒。
 func TestDecodeLogin(t *testing.T) {
-	tok, err := decodeLogin([]byte(`{"code":0,"token":"ts-token-1"}`))
+	tok, err := decodeLogin([]byte(`{"status":"OK","token":"ts-token-1"}`))
 	if err != nil || tok != "ts-token-1" {
 		t.Fatalf("成功响应应返回 token，got %q %v", tok, err)
 	}
 	for _, bad := range []string{
-		`{"code":1,"token":"x"}`,
-		`{"code":0,"token":""}`,
+		`{"status":"REJECTED","token":"x"}`,
+		`{"status":"OK","token":""}`,
 		`not-json`,
 	} {
 		if _, err := decodeLogin([]byte(bad)); err == nil {

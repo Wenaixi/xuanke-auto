@@ -133,13 +133,20 @@ func runServer(cfg config.Config) *Started {
 		accts.Restore(creds, decrypt)
 	}
 
-	// 平台档案热切换（管理员后台「系统配置 → 选课平台」）：闭包收进具名构造函数，
-	// 让"解析档案 → 校验地址 → 读凭据 → 重建客户端"这条编排在测试里可直接断言。
-	rebindPlatform := newPlatformRebinder(st, accts, decrypt)
-
 	// 调度器（窗口到点立即探测 + 课程快照 + 按账号并发提交）
 	// 开放时间不做任何配置注入：平台 beginTimes 自动识别是唯一事实源（open_time 零值）。
 	sched := scheduler.New(accts, st, time.Time{}, 300*time.Millisecond)
+	// 启动期按当前档案同步开窗信号能力（New 默认 true，此处按档案纠正：
+	// 无信号平台必须走退化模式，否则永远判不出开窗）。
+	sched.SetHasWindowSignal(site.HasWindowSignal)
+
+	// 平台档案热切换（管理员后台「系统配置 → 选课平台」）：闭包收进具名构造函数，
+	// 让"解析档案 → 校验地址 → 读凭据 → 重建客户端"这条编排在测试里可直接断言。
+	// onProfile 同步调度器的开窗信号能力——平台切换必须同步，否则会用旧站点的
+	// 信号语义判新站点（切到无信号平台后开窗永远判不出来，调度器全线停摆）。
+	rebindPlatform := newPlatformRebinder(st, accts, decrypt, func(desc upstream.SiteDescriptor) {
+		sched.SetHasWindowSignal(desc.HasWindowSignal)
+	})
 
 	if success, err := st.LoadSuccess(); err != nil {
 		log.Printf("[main] 读取成功记录失败: %v", err)
@@ -317,6 +324,11 @@ func newPlatformRebinder(
 	st *store.Store,
 	accts *accounts.Manager,
 	decrypt func(string) (string, error),
+	// onProfile 档案切换成功后的额外编排（可为 nil）。调度器经此同步
+	// hasWindowSignal——**平台切换必须同步它**，否则会用旧站点的开窗信号语义判新站点：
+	// 从"下发in_date_range"的档案切到"不下发"的档案后，若仍按"必须见到 selectable=true"
+	// 判定，开窗将永远判不出来，调度器全线停摆。
+	onProfile func(desc upstream.SiteDescriptor),
 ) func(platformID, baseURL string) error {
 	return func(platformID, baseURL string) error {
 		desc, err := sites.Resolve(platformID)
@@ -336,6 +348,9 @@ func newPlatformRebinder(
 			return fmt.Errorf("读取账号凭据失败: %w", err)
 		}
 		accts.SetProfile(desc, effectiveBaseURL(desc, baseURL), creds, decrypt)
+		if onProfile != nil {
+			onProfile(desc)
+		}
 		return nil
 	}
 }

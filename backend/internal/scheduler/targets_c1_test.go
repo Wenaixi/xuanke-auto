@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // failTargetsStore 带失败开关的目标落库假存储：验证 SetTargetsForAccount
@@ -103,5 +103,5 @@ func TestSetTargetsForAccountNilStoreSkipsPersist(t *testing.T) {
 	}
 }
 
-// 确保 zhidao 包被引用（夹具依赖），避免误删 import 时编译错。
-var _ = zhidao.ElectivesData{}
+// 确保 upstream 包被引用（夹具依赖），避免误删 import 时编译错。
+var _ = upstream.ElectivesData{}

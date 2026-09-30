@@ -15,8 +15,12 @@ export interface ClassItem {
   // 0=名额未公布绝不误判满员；前端 isFull/筛选/排序/徽章一律读本字段，不再各自手写判据。
   class_full: boolean
   can_select: boolean
-  btn_type: number
-  btn_text: string
+  // 中立操作类型（后端适配器把站点按钮编码映射到此）：
+  // enroll=可报名 / withdraw=可退选 / none=不渲染操作按钮。
+  // 前端只认这三个值，绝不认任何站点的原始按钮编码。
+  action: "enroll" | "withdraw" | "none"
+  // 站点下发的操作文案（空 = 用前端默认文案）。
+  action_text: string
   title: string
 }
 
@@ -24,7 +28,9 @@ export interface Publish {
   publish_id: number
   publish_name: string
   begin_date: string
-  in_date_range: boolean
+  // 三态开窗信号：true=站点明确已开/ false=站点明确未开 / null=站点不下发该信号。
+  // null 走引擎侧退化模式（探测到数据即视为开窗），前端不得把它读成"未开放"。
+  selectable: boolean | null
   can_select: number
   has_selected: number
   group_count: number

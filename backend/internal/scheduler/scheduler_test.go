@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // fakeStore 内存日志存储。
@@ -171,7 +171,7 @@ func (b *syncLogBuffer) Reset() {
 // fakeClient 可编程 mock：控制课程数据与报名结果。
 type fakeClient struct {
 	mu          sync.Mutex
-	data        *zhidao.ElectivesData
+	data        *upstream.ElectivesData
 	err         error
 	selectErr   map[int]error
 	selectCalls map[int]int
@@ -201,11 +201,17 @@ func (f *fakeClient) setOpen(open bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i := range f.data.Publishes {
-		f.data.Publishes[i].InDateRange = open
+		f.data.Publishes[i].Selectable = boolPtr(open)
 	}
 }
 
-func (f *fakeClient) FindElectives() (*zhidao.ElectivesData, error) {
+// boolPtr 测试辅助：三态 selectable 的 true/false 分支。
+func boolPtr(v bool) *bool { return &v }
+
+// setSelectable 测试辅助：给发布设三态 selectable。
+func setSelectable(p *upstream.Publish, v bool) { p.Selectable = &v }
+
+func (f *fakeClient) FindElectives() (*upstream.ElectivesData, error) {
 	f.mu.Lock()
 	if f.err != nil {
 		err := f.err
@@ -219,12 +225,12 @@ func (f *fakeClient) FindElectives() (*zhidao.ElectivesData, error) {
 		f.mu.Lock()
 	}
 	defer f.mu.Unlock()
-	// 深拷贝后返回：调用方在锁外遍历 Publishes，避免与 setAllOpened 并发写 InDateRange 触发数据竞争
+	// 深拷贝后返回：调用方在锁外遍历 Publishes，避免与 setAllOpened 并发写 Selectable 触发数据竞争
 	cp := *f.data
-	cp.Publishes = make([]zhidao.Publish, len(f.data.Publishes))
+	cp.Publishes = make([]upstream.Publish, len(f.data.Publishes))
 	for i := range f.data.Publishes {
 		p := f.data.Publishes[i]
-		p.Classes = append([]zhidao.Class(nil), f.data.Publishes[i].Classes...)
+		p.Classes = append([]upstream.Class(nil), f.data.Publishes[i].Classes...)
 		cp.Publishes[i] = p
 	}
 	return &cp, nil
@@ -292,17 +298,17 @@ func (f *fakeClient) IsClassFull(classID int) (bool, error) {
 
 func newFakeClient(open bool) *fakeClient {
 	return &fakeClient{
-		data: &zhidao.ElectivesData{
-			Publishes: []zhidao.Publish{
+		data: &upstream.ElectivesData{
+			Publishes: []upstream.Publish{
 				// BeginDate 镜像平台真实形态（"2026-09-13 09:00:00" 带时分秒）——
 				// 发布元数据补全/持久化测试依赖它（窗口关闭后 /state 分组的唯一数据源）
-				{PublishID: 1, PublishName: "高二年体育", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
+				{PublishID: 1, PublishName: "高二年体育", BeginDate: "2026-09-13 09:00:00", Selectable: boolPtr(open), Classes: []upstream.Class{
 					{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
 				}},
-				{PublishID: 2, PublishName: "高二年校本1", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
+				{PublishID: 2, PublishName: "高二年校本1", BeginDate: "2026-09-13 09:00:00", Selectable: boolPtr(open), Classes: []upstream.Class{
 					{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 29},
 				}},
-				{PublishID: 3, PublishName: "高二年校本2", BeginDate: "2026-09-13 09:00:00", InDateRange: open, Classes: []zhidao.Class{
+				{PublishID: 3, PublishName: "高二年校本2", BeginDate: "2026-09-13 09:00:00", Selectable: boolPtr(open), Classes: []upstream.Class{
 					{ID: 61276, CourseName: "健身瑜伽", SelectedCount: 0, MaxCount: 29},
 				}},
 			},
@@ -628,9 +634,9 @@ func TestProbeNowConcurrentLocking(t *testing.T) {
 // 也应立即触发该账号自动重登（而非等调度器下个 30s 周期）。
 func TestProbeNowUnauthorizedTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.err = zhidao.ErrUnauthorized // ProbeNow 探测返回失效
-	relogStart := make(chan bool)   // 重登开始信号
-	relogDone := make(chan bool)    // 重登完成信号（阻塞重登，让测试断言已触发）
+	fc.err = upstream.ErrUnauthorized // ProbeNow 探测返回失效
+	relogStart := make(chan bool)     // 重登开始信号
+	relogDone := make(chan bool)      // 重登完成信号（阻塞重登，让测试断言已触发）
 	fa := &fakeAccts{c: fc, relog: func() {
 		relogStart <- true
 		<-relogDone
@@ -687,7 +693,7 @@ func TestBackupFallbackOnFull(t *testing.T) {
 	fc := newFakeClient(false)
 	// 第一备选健美操已满 36/36；第二备选篮球空
 	fc.mu.Lock()
-	fc.data.Publishes[0].Classes = []zhidao.Class{
+	fc.data.Publishes[0].Classes = []upstream.Class{
 		{ID: 61115, CourseName: "健美操", SelectedCount: 36, MaxCount: 36, ClassFull: true},
 		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36, ClassFull: false},
 	}
@@ -739,9 +745,9 @@ func TestReloginLogs(t *testing.T) {
 	defer log.SetOutput(old)
 
 	fc := newFakeClient(false)
-	fc.err = zhidao.ErrUnauthorized // 探测命中 token 失效
-	relogStart := make(chan bool)   // 重登开始信号
-	relogDone := make(chan bool)    // 重登完成信号（阻塞重登，让测试断言"重登中"）
+	fc.err = upstream.ErrUnauthorized // 探测命中 token 失效
+	relogStart := make(chan bool)     // 重登开始信号
+	relogDone := make(chan bool)      // 重登完成信号（阻塞重登，让测试断言"重登中"）
 	fa := &fakeAccts{c: fc, relog: func() {
 		relogStart <- true
 		<-relogDone
@@ -778,7 +784,7 @@ func TestReloginFailureLogs(t *testing.T) {
 	defer log.SetOutput(old)
 
 	fc := newFakeClient(false)
-	fc.err = zhidao.ErrUnauthorized
+	fc.err = upstream.ErrUnauthorized
 	relogDone := make(chan bool) // 阻塞重登完成，让失败路径先断言日志
 	fa := &fakeAccts{c: fc, relogErr: errors.New("验证码识别失败"), relog: func() {
 		<-relogDone
@@ -1032,9 +1038,9 @@ func TestProbeIntervalFor(t *testing.T) {
 // TestTokenInvalidTriggersRelogin 探测命中 ErrUnauthorized → 标记失效 → 自动重登 → 恢复有效。
 func TestTokenInvalidTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.err = zhidao.ErrUnauthorized // 探测返回失效
-	relogStart := make(chan bool)   // 重登开始信号（在标记失效后触发）
-	relogDone := make(chan bool)    // 重登完成信号
+	fc.err = upstream.ErrUnauthorized // 探测返回失效
+	relogStart := make(chan bool)     // 重登开始信号（在标记失效后触发）
+	relogDone := make(chan bool)      // 重登完成信号
 	fa := &fakeAccts{c: fc, relog: func() {
 		relogStart <- true // 通知已进入重登（此时 token 已标记失效但尚未恢复）
 		<-relogDone        // 阻塞重登完成，让测试断言"重登中"状态
@@ -1067,7 +1073,7 @@ func TestTokenInvalidTriggersRelogin(t *testing.T) {
 // 下个 30s 节流窗口过后仍可再触发重登。
 func TestReloginFailureRecoversNextCycle(t *testing.T) {
 	fc := newFakeClient(false)
-	fc.err = zhidao.ErrUnauthorized // 探测命中失效
+	fc.err = upstream.ErrUnauthorized // 探测命中失效
 	relogStart := make(chan bool, 10)
 	relogDone := make(chan bool)
 	fa := &fakeAccts{c: fc, relogErr: errors.New("验证码识别失败"), relogBlocking: true, relog: func() {
@@ -1116,8 +1122,8 @@ func TestReloginFailureRecoversNextCycle(t *testing.T) {
 // 探测只走 order[0] 账号，其他账号的 token 失效靠报名提交命中 ErrUnauthorized 感知——
 // 这是非探测账号失效无感知的专项回归测试。
 func TestSubmitUnauthorizedTriggersRelogin(t *testing.T) {
-	fc := newFakeClient(true)                    // 窗口已开，探测正常
-	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
+	fc := newFakeClient(true)                      // 窗口已开，探测正常
+	fc.selectErr[61115] = upstream.ErrUnauthorized // 报名返回失效
 	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(time.Hour), 10*time.Millisecond)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
 	s.Start()
@@ -1206,7 +1212,7 @@ func TestRealtimeRecheckDeletedAccountDropsLog(t *testing.T) {
 // （删号竞态链的分支级缺口，链顶防线只护链顶与取 client 处）。
 func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 	fc := newFakeClient(true)
-	fc.selectErr[61115] = zhidao.ErrUnauthorized // 报名返回失效
+	fc.selectErr[61115] = upstream.ErrUnauthorized // 报名返回失效
 	fa := &fakeAccts{c: fc, removed: map[string]bool{}}
 	st := &countingLogStore{fakeStore: &fakeStore{}}
 	fa.relogErr = errors.New("relog fail") // 重登失败（无关断言，仅需 gh 不 panic）
@@ -1277,7 +1283,7 @@ func TestUnauthorizedBranchDeletedAccountSkipsState(t *testing.T) {
 // lastProbe 保持较新（30s 未到）时，提交重试仍每 1 秒进行——证明提交与探测节流解耦。
 // 关键构造：open 取未来 5 秒（而非过去时刻）——tick 提交守卫
 // `!opened && !now.After(open)` 对过去 open 恒放行（黄金期兜底刻意语义），
-// 窗口未开（探测 InDateRange=false）时也会提交，首段 pending 断言即被 connection reset
+// 窗口未开（探测 selectable=false）时也会提交，首段 pending 断言即被 connection reset
 // 破坏（实测 90 次 4 FAIL 的抖动源）。未来 open + opened=false 使提交正确挂起；
 // setAllOpened 后手动 resetProbe 让下一 tick 探测立即读新数据置 opened=true，
 // 提交才开始——探测节流仍不挡提交（lastProbe 新近、分支 B 对未来 open 不触发）。
@@ -1889,7 +1895,9 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 场景 2：时钟兜底判据（syncFailStreak≥3 + 开放时间已过）
 	s2 := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
 	s2.mu.Lock()
-	s2.ws.noteSyncFailure(); s2.ws.noteSyncFailure(); s2.ws.noteSyncFailure()
+	s2.ws.noteSyncFailure()
+	s2.ws.noteSyncFailure()
+	s2.ws.noteSyncFailure()
 	s2.mu.Unlock()
 	if !s2.WindowClosed() {
 		t.Fatal("前置：syncFailStreak=3 + 开放时间已过应视同关闭")
@@ -1901,7 +1909,9 @@ func TestStateForAccountMirrorsWindowClosed(t *testing.T) {
 	// 判据2 原实现只查"开放时间非零"，未来开窗点 + 平台故障恢复后黄金期提交被挂起。
 	s2b := New(&fakeAccts{c: newFakeClient(false)}, &fakeStore{}, time.Now().Add(time.Hour), time.Hour)
 	s2b.mu.Lock()
-	s2b.ws.noteSyncFailure(); s2b.ws.noteSyncFailure(); s2b.ws.noteSyncFailure()
+	s2b.ws.noteSyncFailure()
+	s2b.ws.noteSyncFailure()
+	s2b.ws.noteSyncFailure()
 	s2b.mu.Unlock()
 	if s2b.WindowClosed() {
 		t.Fatal("时钟失败 3 次但开放时间在未来，绝不能视同关闭（黄金期提交必须存活）")
@@ -1947,10 +1957,10 @@ func TestReleaseFullIfFreedEvenIfSnapshotOld(t *testing.T) {
 		{Account: acct, ClassID: classID, Status: "failed", Result: "已满员"},
 	}
 	// 快照时间在 50 秒前（已超过 40s snapshotTTL），但名额未满 (35/36)
-	s.acctData[acct] = &zhidao.ElectivesData{
-		Publishes: []zhidao.Publish{
+	s.acctData[acct] = &upstream.ElectivesData{
+		Publishes: []upstream.Publish{
 			{
-				Classes: []zhidao.Class{
+				Classes: []upstream.Class{
 					{ID: classID, SelectedCount: 35, MaxCount: 36},
 				},
 			},
@@ -2144,12 +2154,12 @@ func TestCheckClassSelectable(t *testing.T) {
 	fs := &fakeStore{}
 	fc := newFakeClient(false) // 默认窗口关闭
 	fc.mu.Lock()
-	fc.data.Publishes[0].InDateRange = true // 发布 1 窗口开启
-	fc.data.Publishes[0].Classes = []zhidao.Class{
+	setSelectable(&fc.data.Publishes[0], true) // 发布 1 窗口开启
+	fc.data.Publishes[0].Classes = []upstream.Class{
 		{ID: 61115, CourseName: "健美操", CanSelect: true, SelectedCount: 0, MaxCount: 36},
 		{ID: 61116, CourseName: "满员课", CanSelect: false, SelectedCount: 36, MaxCount: 36, ClassFull: true},
 	}
-	fc.data.Publishes[1].InDateRange = false // 发布 2 窗口关闭
+	setSelectable(&fc.data.Publishes[1], false) // 发布 2 窗口关闭
 	fc.mu.Unlock()
 	s := New(&fakeAccts{c: fc}, fs, time.Now(), time.Hour)
 	s.SetTargetsForAccount("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操", Priority: 0}})
@@ -2340,8 +2350,8 @@ func TestWindowClosedReleasesNoFull(t *testing.T) {
 	}
 	s.full[acct][classID] = true
 	// 窗口关闭特征：快照存在但 Publishes 为空（平台 findElectivesData 返回 code:0 空 publishes）
-	s.acctData[acct] = &zhidao.ElectivesData{Publishes: nil}
-	s.lastData = &zhidao.ElectivesData{Publishes: nil}
+	s.acctData[acct] = &upstream.ElectivesData{Publishes: nil}
+	s.lastData = &upstream.ElectivesData{Publishes: nil}
 	s.mu.Unlock()
 
 	s.releaseFullIfFreedLocked(acct, classID)
@@ -2367,8 +2377,8 @@ func TestReleaseFullIfFreedKeepsFullOnUnknown(t *testing.T) {
 	}
 	s.full[acct][classID] = true
 	// 快照存在但课程 61115 不在其中（只有 61116）：未知状态
-	s.acctData[acct] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
-		{Classes: []zhidao.Class{{ID: 61116, SelectedCount: 0, MaxCount: 30}}},
+	s.acctData[acct] = &upstream.ElectivesData{Publishes: []upstream.Publish{
+		{Classes: []upstream.Class{{ID: 61116, SelectedCount: 0, MaxCount: 30}}},
 	}}
 	s.mu.Unlock()
 
@@ -2658,8 +2668,8 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 
 	// 预置：调度器已探测过全局帧（lastData = 高三帧，仅 1 门体育）且"目标账号"acct1 已配置目标
 	s.mu.Lock()
-	s.lastData = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
-		{PublishID: 9, PublishName: "高三体育", InDateRange: false, Classes: []zhidao.Class{
+	s.lastData = &upstream.ElectivesData{Publishes: []upstream.Publish{
+		{PublishID: 9, PublishName: "高三体育", Selectable: boolPtr(false), Classes: []upstream.Class{
 			{ID: 61999, CourseName: "高三排球", SelectedCount: 0, MaxCount: 36},
 		}},
 	}}
@@ -2675,8 +2685,8 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 
 	// 断言 2：专属快照写入后（模拟 ProbeForAccount 成功），ElectivesSnapshotFor 返回该账号帧
 	s.mu.Lock()
-	s.acctData["acct1"] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
-		{PublishID: 1, PublishName: "高二年体育", InDateRange: false, Classes: []zhidao.Class{
+	s.acctData["acct1"] = &upstream.ElectivesData{Publishes: []upstream.Publish{
+		{PublishID: 1, PublishName: "高二年体育", Selectable: boolPtr(false), Classes: []upstream.Class{
 			{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
 		}},
 	}}
@@ -2696,14 +2706,14 @@ func TestManualSnapshotFallbackOnlyWhenOwnFresh(t *testing.T) {
 	// 场景：browse 账号"student1"（无目标）专属帧高二（PublishID=1）已过期 41s，全局帧
 	// 高三（PublishID=9）新鲜。
 	s.mu.Lock()
-	s.acctData["student1"] = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
-		{PublishID: 1, PublishName: "高二年体育", InDateRange: false, Classes: []zhidao.Class{
+	s.acctData["student1"] = &upstream.ElectivesData{Publishes: []upstream.Publish{
+		{PublishID: 1, PublishName: "高二年体育", Selectable: boolPtr(false), Classes: []upstream.Class{
 			{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 36},
 		}},
 	}}
 	s.acctDataAt["student1"] = time.Now().Add(-(snapshotTTL + time.Second))
-	s.lastData = &zhidao.ElectivesData{Publishes: []zhidao.Publish{
-		{PublishID: 9, PublishName: "高三体育", InDateRange: false, Classes: []zhidao.Class{
+	s.lastData = &upstream.ElectivesData{Publishes: []upstream.Publish{
+		{PublishID: 9, PublishName: "高三体育", Selectable: boolPtr(false), Classes: []upstream.Class{
 			{ID: 61999, CourseName: "高三排球", SelectedCount: 0, MaxCount: 36},
 		}},
 	}}
@@ -2916,7 +2926,7 @@ func TestRealtimeRecheckUnauthorizedTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(true) // 窗口已开
 	fc.mu.Lock()
 	fc.selectErr[61115] = errors.New("该课程已满员") // 报名失败 → 走实时复核路径
-	fc.fullErr = zhidao.ErrUnauthorized        // 复核命中 token 失效（学生数接口同样鉴权）
+	fc.fullErr = upstream.ErrUnauthorized      // 复核命中 token 失效（学生数接口同样鉴权）
 	fc.mu.Unlock()
 	relogStart := make(chan bool)
 	relogDone := make(chan bool)
@@ -3077,7 +3087,7 @@ func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
 	acct := "acct1"
 
 	// 探测命中 token 失效 → 触发自动重登
-	fc.err = zhidao.ErrUnauthorized
+	fc.err = upstream.ErrUnauthorized
 	s.maybeRelogin(acct)
 	select {
 	case <-relogStart:
@@ -3107,7 +3117,7 @@ func TestReloginSuccessWithNilStoreNoPanic(t *testing.T) {
 // TestDeletedAccountRebuiltSameNameChainDropsSuccess 删除账号后同名重建（换绑/误删加回）
 // 时，陈旧在飞链返回成功不得写回重建身份——同名重建核心场景。
 // 缺陷形态：spawnChain 成功分支只校验"账号名当前是否在注册表"（ClientFor ok），不校验
-// "客户端是否仍是发起提交时的同一身份"。删号后同名重建会用新 *zhidao.Client 顶替，
+// "客户端是否仍是发起提交时的同一身份"。删号后同名重建会用新 *upstream.Client 顶替，
 // 旧链在 SelectClass 网络往返期间被顶替，返回后 ClientFor(acct) 仍 ok（新客户端）→
 // 旧链把 success 状态与 success 行写进**重建身份**（重启后假成功 / 已删账号状态复活）。
 // 修复：链 goroutine 启动时捕获发起提交的 client 指针，返回后与 ClientFor(acct) 结果做
@@ -3221,7 +3231,7 @@ func TestDeletedAccountRebuiltSameNameChainDropsRelogin(t *testing.T) {
 	// （perAccount 值被替换），旧链发起时捕获的是旧 *fakeClient——指针身份比对必然不等。
 	oldClient := newFakeClient(true)
 	oldClient.mu.Lock()
-	oldClient.selectErr[61115] = zhidao.ErrUnauthorized // 旧链报名命中失效
+	oldClient.selectErr[61115] = upstream.ErrUnauthorized // 旧链报名命中失效
 	oldClient.mu.Unlock()
 	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
 	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
@@ -3455,7 +3465,7 @@ func TestDeletedAccountRebuiltSameNameChainDropsRealtimeRecheckFull(t *testing.T
 // "已开窗"面前放行提交——否则前端显示 window_opened=true 而引擎黄金期 250ms 冲刺 0 次，
 // 产品语义分叉（修复前零值守卫先于两条提判据返回，自动链被永久挂起）。
 func TestSubmitAllowedWhenWindowOpenedWithZeroOpenTime(t *testing.T) {
-	fc := newFakeClient(true) // InDateRange=true：probe 确证开窗；不带 BeginTimes → 识别槽恒空
+	fc := newFakeClient(true) // selectable=true：probe 确证开窗；不带 BeginTimes → 识别槽恒空
 	fc.mu.Lock()
 	fc.data.BeginTimes = nil // 平台批次未下发非空 beginTimes
 	fc.mu.Unlock()
@@ -3528,7 +3538,7 @@ func TestDeletedAccountRebuiltSameNameChainRealtimeUnauthorizedDropsRelogin(t *t
 	// 新客户端（重建身份）IsClassFull 命中 token 失效——复核经 ClientFor 拿到新身份
 	newClient := newFakeClient(true)
 	newClient.mu.Lock()
-	newClient.fullErr = zhidao.ErrUnauthorized
+	newClient.fullErr = upstream.ErrUnauthorized
 	newClient.mu.Unlock()
 	fa := &fakeAccts{c: oldClient, perAccount: map[string]*fakeClient{"acct1": oldClient}}
 	s := New(fa, &fakeStore{}, time.Now().Add(-time.Minute), 10*time.Millisecond)
@@ -3664,12 +3674,12 @@ func TestScheduleIntervalClamped(t *testing.T) {
 
 // TestClassFullInSnapshotReadsDerivedField 满员判据收敛为 class_full 派生字段：
 // 快照课程显式带 ClassFull 与数字矛盾时，classFullInSnapshot 必须**读派生字段**
-//（架构深化 C：单一记忆点，解析端算一次）而非重算 MaxCount>0 && SelectedCount>=MaxCount——
+// （架构深化 C：单一记忆点，解析端算一次）而非重算 MaxCount>0 && SelectedCount>=MaxCount——
 // 旧实现按数字重算返回 false，新实现读 ClassFull 返回 true，红绿分明。
 func TestClassFullInSnapshotReadsDerivedField(t *testing.T) {
 	fc := newFakeClient(true)
 	fc.mu.Lock()
-	fc.data.Publishes[0].Classes = []zhidao.Class{
+	fc.data.Publishes[0].Classes = []upstream.Class{
 		// 数字未满（0<10）但派生字段确证满员——旧实现误判未满，新实现必须读字段
 		{ID: 61115, CourseName: "健美操", SelectedCount: 0, MaxCount: 10, ClassFull: true},
 		{ID: 61205, CourseName: "篮球", SelectedCount: 0, MaxCount: 36, ClassFull: false},

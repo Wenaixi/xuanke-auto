@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // TestProbeDeletedThenRebuiltSameNameDropsSnapshot（回归钉）：
@@ -18,9 +18,9 @@ func TestProbeDeletedThenRebuiltSameNameDropsSnapshot(t *testing.T) {
 	newFc := newFakeClient(true)
 	// 新身份返回不同数据（模拟换绑年级/新批次热更）+ 带 beginTimes 识别槽
 	newFc.mu.Lock()
-	newFc.data = &zhidao.ElectivesData{
+	newFc.data = &upstream.ElectivesData{
 		BeginTimes: []int64{1789261200000},
-		Publishes:  []zhidao.Publish{{PublishID: 99}},
+		Publishes:  []upstream.Publish{{PublishID: 99}},
 	}
 	newFc.mu.Unlock()
 
@@ -176,9 +176,9 @@ func TestProbeForAccountDropsWriteWhenRemoved(t *testing.T) {
 func TestProbeChainSameClientIdentity(t *testing.T) {
 	newFc := newFakeClient(true)
 	newFc.mu.Lock()
-	newFc.data = &zhidao.ElectivesData{
+	newFc.data = &upstream.ElectivesData{
 		BeginTimes: []int64{1789261200000},
-		Publishes:  []zhidao.Publish{{PublishID: 77}},
+		Publishes:  []upstream.Publish{{PublishID: 77}},
 	}
 	newFc.mu.Unlock()
 

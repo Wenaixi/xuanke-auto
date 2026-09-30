@@ -571,9 +571,12 @@ type Class struct {
 	// 手写同式判据统一收敛为读本字段（架构深化 C），0=名额未公布绝不误判满员。
 	ClassFull bool   `json:"class_full"`
 	CanSelect bool   `json:"can_select"`
-	BtnType   int    `json:"btn_type"`
-	BtnText   string `json:"btn_text"`
-	Title     string `json:"title"`
+	// Action 中立操作类型：enroll（可报名）/ withdraw（可退选）/ none（不渲染操作按钮）。
+	// 各站点的按钮编码（如知到的 btn_type 1/2）由适配器映射，引擎与前端零感知。
+	Action string `json:"action"`
+	// ActionText 站点下发的操作文案（空 = 前端用默认文案）。已中立化命名。
+	ActionText string `json:"action_text"`
+	Title      string `json:"title"`
 }
 
 // Publish 选课发布。
@@ -581,11 +584,17 @@ type Publish struct {
 	PublishID   int     `json:"publish_id"`
 	PublishName string  `json:"publish_name"`
 	BeginDate   string  `json:"begin_date"`
-	InDateRange bool    `json:"in_date_range"`
-	CanSelect   int     `json:"can_select"`
-	HasSelected int     `json:"has_selected"`
-	GroupCount  int     `json:"group_count"`
-	TotalCount  int     `json:"total_count"`
+	// Selectable 本发布是否开放选课。**三态**而非布尔：
+	//   true  = 站点明确说本发布已开窗
+	//   false = 站点明确说本发布未开窗
+	//   nil   = 站点根本不下发该信号（HasWindowSignal=false 的平台）
+	// 「站点说未开」与「平台无此信号」是不同事实——前者可据此拒绝报名，
+	// 后者必须走退化模式（探测到数据即视为开窗），混为一谈会让无信号平台永远开不了窗。
+	Selectable  *bool `json:"selectable"`
+	CanSelect   int    `json:"can_select"`
+	HasSelected int    `json:"has_selected"`
+	GroupCount  int    `json:"group_count"`
+	TotalCount  int    `json:"total_count"`
 	Classes     []Class `json:"classes"`
 }
 

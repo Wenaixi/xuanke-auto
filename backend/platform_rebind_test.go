@@ -43,7 +43,7 @@ func TestPlatformRebinderWiring(t *testing.T) {
 		t.Fatalf("夹具前置不成立：客户端在册且 token 已丢弃，实际 ok=%v", ok)
 	}
 
-	rebind := newPlatformRebinder(st, accts, func(s string) (string, error) { return "pwd", nil })
+	rebind := newPlatformRebinder(st, accts, func(s string) (string, error) { return "pwd", nil }, nil)
 
 	// 1) 未知档案：整体拒绝，客户端不动
 	if err := rebind("no-such-platform", ""); err == nil {
@@ -125,4 +125,54 @@ func TestEffectiveBaseURL(t *testing.T) {
 	if got := effectiveBaseURL(d, "https://mirror.example.com/"); got != "https://mirror.example.com" {
 		t.Fatalf("合法覆盖应生效且去尾斜杠，实际 %q", got)
 	}
+}
+
+// TestPlatformRebinderNotifiesProfile 切换成功后必须回调 onProfile 并交出**新档案**。
+// 调度器经此同步 hasWindowSignal——漏调或调早调晚都会让它用旧站点的开窗信号语义
+// 判新站点（切到"不下发开窗信号"的档案后开窗永远判不出来，调度器全线停摆）。
+// 判据三态：成功切换调一次、失败路径不调、回调拿到的是新档案而非旧档案。
+func TestPlatformRebinderNotifiesProfile(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	st := store.New(d)
+	accts := accounts.New(mustResolveProfile(t), "", upstream.VisionConfig{}, st)
+
+	var calls int
+	var gotID string
+	rebind := newPlatformRebinder(st, accts, func(string) (string, error) { return "pwd", nil },
+		func(desc upstream.SiteDescriptor) {
+			calls++
+			gotID = desc.ID
+		})
+
+	// 失败路径（未知档案）不得回调——否则会把没生效的档案同步给调度器。
+	if err := rebind("no-such-platform", ""); err == nil {
+		t.Fatal("未知档案应被拒")
+	}
+	if calls != 0 {
+		t.Fatalf("失败切换不得回调 onProfile，实际调用 %d 次", calls)
+	}
+
+	if err := rebind(sites.DefaultID, ""); err != nil {
+		t.Fatalf("合法切换应成功: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("成功切换应回调 onProfile 恰好一次，实际 %d 次", calls)
+	}
+	if gotID != sites.DefaultID {
+		t.Fatalf("回调应拿到新档案 %s，实际 %s", sites.DefaultID, gotID)
+	}
+}
+
+// mustResolveProfile 解析当前默认档案（测试装配用）。
+func mustResolveProfile(t *testing.T) upstream.SiteDescriptor {
+	t.Helper()
+	d, err := sites.Resolve(sites.DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }

@@ -111,7 +111,6 @@ func TestMarkFullAndReleaseSyncClassFull(t *testing.T) {
 		t.Fatalf("markFullLocked 应同时置 failed 状态，实际 %q", got)
 	}
 
-
 	// 解除 full：快照显示有名额空余（其他同学退选）——解封判据读派生字段
 	// ClassFull 而非数字（数字矛盾时以派生字段为准），故必须同时清掉它。
 	fc.mu.Lock()

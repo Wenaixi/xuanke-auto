@@ -116,15 +116,21 @@ func decodeElectives(body []byte) (*upstream.ElectivesData, error) {
 		Msg                 string  `json:"msg"`
 		BeginTimes          []int64 `json:"beginTimes"`
 		SelectElectivesData []struct {
-			PublishID   int              `json:"publishId"`
-			PublishName string           `json:"publishName"`
-			BeginDate   string           `json:"beginDate"`
-			InDateRange bool             `json:"inDateRange"`
-			CanSelect   int              `json:"canSelect"`
-			HasSelected int              `json:"hasSelected"`
-			GroupCount  int              `json:"groupCount"`
-			TotalCount  int              `json:"totalCount"`
-			Classes     []upstream.Class `json:"electivesClassList"`
+			PublishID   int    `json:"publishId"`
+			PublishName string `json:"publishName"`
+			BeginDate   string `json:"beginDate"`
+			InDateRange bool   `json:"inDateRange"`
+			CanSelect   int    `json:"canSelect"`
+			HasSelected int    `json:"hasSelected"`
+			GroupCount  int    `json:"groupCount"`
+			TotalCount  int    `json:"totalCount"`
+			// 课程用站点原始结构体接收，btn_type 在此映射为中立的 Action——
+			// 不能直接反序列化成 upstream.Class（那样站点的 1/2 编码会原样进引擎）。
+			Classes []struct {
+				upstream.Class
+				BtnType int    `json:"btn_type"`
+				BtnText string `json:"btn_text"`
+			} `json:"electivesClassList"`
 		} `json:"selectElectivesData"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -138,24 +144,44 @@ func decodeElectives(body []byte) (*upstream.ElectivesData, error) {
 	}
 	out := &upstream.ElectivesData{BeginTimes: raw.BeginTimes}
 	for _, p := range raw.SelectElectivesData {
-		// class_full 单一记忆点：派生判据只在解析端算一次，
-		// 调度器与前端一律读本字段，不再各自手写 MaxCount>0 && SelectedCount>=MaxCount。
-		for i := range p.Classes {
-			p.Classes[i].ClassFull = p.Classes[i].MaxCount > 0 && p.Classes[i].SelectedCount >= p.Classes[i].MaxCount
+		classes := make([]upstream.Class, 0, len(p.Classes))
+		for _, c := range p.Classes {
+			// class_full 单一记忆点：派生判据只在解析端算一次，
+			// 调度器与前端一律读本字段，不再各自手写 MaxCount>0 && SelectedCount>=MaxCount。
+			c.ClassFull = c.MaxCount > 0 && c.SelectedCount >= c.MaxCount
+			c.Action = mapBtnType(c.BtnType)
+			c.ActionText = c.BtnText
+			classes = append(classes, c.Class)
 		}
+		// inDateRange 映射为中立的 selectable 三态：知到确实下发该信号，
+		// 故恒为 true/false 指针（nil 分支留给 HasWindowSignal=false 的平台）。
+		selectable := p.InDateRange
 		out.Publishes = append(out.Publishes, upstream.Publish{
 			PublishID:   p.PublishID,
 			PublishName: p.PublishName,
 			BeginDate:   p.BeginDate,
-			InDateRange: p.InDateRange,
+			Selectable:  &selectable,
 			CanSelect:   p.CanSelect,
 			HasSelected: p.HasSelected,
 			GroupCount:  p.GroupCount,
 			TotalCount:  p.TotalCount,
-			Classes:     p.Classes,
+			Classes:     classes,
 		})
 	}
 	return out, nil
+}
+
+// mapBtnType 把知到的按钮编码映射为中立操作类型。
+// 真实前端逆向契约（记忆库第 4 节）：1=退选、2=报名、其他值不渲染操作按钮。
+// 判据只存在于站点包内——引擎与前端只认 enroll/withdraw/none。
+func mapBtnType(t int) string {
+	switch t {
+	case 1:
+		return "withdraw"
+	case 2:
+		return "enroll"
+	}
+	return "none"
 }
 
 // decodeCounts 实时人数：countList（站点不下发 maxCount，故 MaxCount 恒 0，仅防御性保留）。

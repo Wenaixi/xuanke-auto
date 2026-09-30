@@ -173,6 +173,11 @@ type Scheduler struct {
 	reloginMu       sync.Mutex                         // 重登决策串行化（持锁时间极短，仅 map 读写；Login 在锁外执行）
 	reloginResults  chan reloginResult                 // 重登结果回传（异步结果在 tick 主循环统一处理）
 	warnedNoTargets bool                               // 无目标空转警告只打一次
+	// hasWindowSignal 站点是否下发开窗信号（档案事实，平台切换时同步）。
+	// false = 退化模式：探测到非空课程数据即视为开窗。**不存整份档案**——
+	// 开窗判定只需要这一个布尔，传整个 SiteDescriptor 会让调度器多一处该跟着
+	// 档案变却可能忘记更新的状态。
+	hasWindowSignal bool
 
 	clockOffset    time.Duration                // 服务端时钟对齐偏差 (server - local)
 	lastSyncTime   time.Time                    // 上次时钟对齐成功采样时间（仅成功推进）
@@ -255,6 +260,10 @@ func New(clients AccountClients, store Store, openTime time.Time, interval time.
 		ws:          newWindowState(),
 		ctx:         ctx,
 		cancel:      cancel,
+		// 默认按"站点下发开窗信号"初始化（知到是主平台）。装配面在平台切换时用
+		// SetHasWindowSignal 按档案覆盖——**零值 false 会让全部探测走退化模式**
+		// （有数据即开窗），使"窗口未开"的判定彻底失效，故刻意不取零值。
+		hasWindowSignal: true,
 	}
 	s.reloginResults = make(chan reloginResult, 8)
 	// 非零 openTime 入参 → 写入全校识别槽（见 New 头注释）。零值（生产路径）不写。
@@ -1111,13 +1120,9 @@ func (s *Scheduler) probe() {
 	s.lastProbe = now
 	s.lastData = data
 	s.lastDataAt = now
-	opened := false
-	for _, p := range data.Publishes {
-		if p.InDateRange {
-			opened = true
-			break
-		}
-	}
+	// 开窗判定收口到 windowSignalLocked（按档案声明的三态 selectable + 退化模式）。
+	// 调用方已持 s.mu，故用 Locked 变体。
+	opened := s.windowSignalLocked(data)
 	// 先捕获上一轮 WindowOpened 状态，再覆写本轮——关闭判定需要
 	// "至少开过窗"作为前提（见下），若在覆写后读取 prevOpened 拿到的恒是本次 opened 值。
 	prevOpened := s.ws.isOpened()
@@ -1844,7 +1849,10 @@ func (s *Scheduler) checkClassSelectable(acct string, classID int) (reason strin
 			if c.ID != classID {
 				continue
 			}
-			if !p.InDateRange {
+			// 三态 selectable：nil = 站点不下发该信号 → **不据此拒绝**（退化模式
+			// 已在 windowSignalLocked 里按"有数据即开窗"处理），否则无信号平台
+			// 手动报名会被永久锁死。
+			if p.Selectable != nil && !*p.Selectable {
 				return "选课窗口未开放，暂不能报名", false
 			}
 			if !c.CanSelect || c.ClassFull {

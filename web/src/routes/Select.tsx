@@ -87,11 +87,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     queryKey: ["electives", account, sessionToken],
     queryFn: () => api<ElectivesData>("/electives?account=" + encodeURIComponent(account), { session: sessionToken }),
     refetchInterval: (query) => {
-      // 轮询判定来源：in_date_range 与 window_opened 双信号合并。
-      // 窗口即将开启的瞬间平台会短暂返回空 publishes，此时仅凭 in_date_range 会把
+      // 轮询判定来源：selectable 与 window_opened 双信号合并。
+      // 窗口即将开启的瞬间平台会短暂返回空 publishes，此时仅凭 selectable 会把
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
       // 窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
-      // 清空，继续 10s 高频打 findElectivesData 纯浪费；与 /state 同信号降 30s，全站统一。
+      // 清空，继续 10s 高频打课程数据接口纯浪费；与 /state 同信号降 30s，全站统一。
       // 自身失败态优先降频——react-query 失败后 data 为最后一次成功值或
       // undefined（失败不清缓存 data），原回调在 /state 失败（缓存无 data，st===undefined）
       // 期间只看 inRange：开窗瞬间 publishes 短暂为空时 inRange=false → 每 10s 慢轮询进
@@ -107,9 +107,9 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       if (query.state.error || query.state.status === "error") return 30000
       const st = queryClient.getQueryData<SchedulerState>(["state", account, sessionToken])
       const pubs = query.state.data?.publishes ?? []
-      const inRange = pubs.some((p) => p.in_date_range)
+      const selectable = pubs.some((p) => p.selectable === true)
       if (st?.window_closed) return 30000
-      return inRange || st?.window_opened ? 2000 : 10000
+      return selectable || st?.window_opened ? 2000 : 10000
     },
   })
 
@@ -348,7 +348,7 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       publishes.map((p) => ({
         ...p,
         label: p.publish_name || `发布 #${p.publish_id}`,
-        open: p.in_date_range,
+        open: p.selectable === true,
         tip: `可选 ${p.can_select} 门 · 已选 ${p.has_selected} 门 · 共 ${p.total_count} 门班次`,
       })),
     [publishes]
@@ -757,13 +757,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
 
                             {/* 操作按钮区 */}
                             <div className="pt-2 border-t border-neutral-800/70 mt-0.5 flex flex-col gap-1.5">
-                              {/* 官网按钮以 btn_type 为唯一渲染判据（官网逆向契约：1=退选、2=报名、
-                                  其他值不渲染操作按钮）：platform 窗口未开照样下发 btn_type=2 +
+                              {/* 中立操作类型：各站点的按钮编码由后端适配器映射为 enroll/withdraw/none，
+                                  其他值映射为 none（不渲染按钮）。平台窗口未开照样下发 enroll +
                                   can_select=false（title="不在选修报名时间范围内，无法选课！"），
                                   本项目隐藏官网按钮后若开窗瞬间窗口信号缺失（识别槽未建立 /
-                                  in_date_range 刹那 false）手动抢课通道会被锁死——故按钮置灰与否
+                                  selectable 刹那 false）手动抢课通道会被锁死——故按钮置灰与否
                                   由 can_select 决定（disabled + title），不再依赖窗口信号。 */}
-                              {c.btn_type === 1 && (
+                              {c.action === "withdraw" && (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -773,10 +773,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   className="w-full flex items-center justify-center gap-1.5 text-xs h-10 sm:h-8 border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 active:bg-red-500/20 transition-colors"
                                 >
                                   <LogOut className="h-3.5 w-3.5" />
-                                  <span>{actionLoading.has(c.id) ? "退选中..." : (c.btn_text || "退选")}</span>
+                                  <span>{actionLoading.has(c.id) ? "退选中..." : (c.action_text || "退选")}</span>
                                 </Button>
                               )}
-                              {c.btn_type === 2 && (
+                              {c.action === "enroll" && (
                                 <Button
                                   variant="primary"
                                   size="sm"
@@ -786,13 +786,13 @@ export default function Select({ account, sessionToken, onDone }: Props) {
                                   className="w-full flex items-center justify-center gap-1.5 text-xs h-10 sm:h-8 disabled:opacity-40"
                                 >
                                   <Check className="h-3.5 w-3.5" />
-                                  <span>{actionLoading.has(c.id) ? "报名中..." : (c.btn_text || "报名")}</span>
+                                  <span>{actionLoading.has(c.id) ? "报名中..." : (c.action_text || "报名")}</span>
                                 </Button>
                               )}
                               {/* 本项目特冲刺/预选目标按钮：以窗口信号决定形态（开窗后收敛为
                                   ghost 小按钮避免淹没了官网报名主操作；闭窗前 primary 预选），
                                   only affects itself */}
-                              {t.in_date_range || stateData?.window_opened ? (
+                              {t.selectable === true || stateData?.window_opened ? (
                                 <Button
                                   variant={isSelected ? "outline" : "ghost"}
                                   size="sm"

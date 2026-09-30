@@ -92,7 +92,7 @@ func TestDecodeElectives(t *testing.T) {
 	if p.PublishID != 3225 || p.PublishName != "高二年体育" {
 		t.Fatalf("发布解析错误: %+v", p)
 	}
-	if p.InDateRange {
+	if p.Selectable != nil && *p.Selectable {
 		t.Fatal("窗口应未开放")
 	}
 	if len(p.Classes) != 1 || p.Classes[0].ID != 61115 || p.Classes[0].CourseName != "健美操" {
@@ -273,5 +273,58 @@ func TestClassifyOpError(t *testing.T) {
 				t.Fatalf("classifyOpError(%q) = %v, want %v", c.msg, got, c.want)
 			}
 		})
+	}
+}
+
+
+// TestDecodeElectivesMapsBtnTypeToNeutralAction站点按钮编码必须映射为中立操作类型。
+// 引擎与前端只认enroll/withdraw/none，绝不认btn_type 的 1/2 编码——
+// 「站点怎么表示按钮」属站点事实，泄漏进 UI 就等于把某年的接口形态焊死。
+func TestDecodeElectivesMapsBtnTypeToNeutralAction(t *testing.T) {
+	body := []byte(`{"code":0,"selectElectivesData":[{"publishId":1,"electivesClassList":[
+		{"id":1,"btn_type":1,"can_select":true,"max_count":0,"selected_count":0},
+		{"id":2,"btn_type":2,"can_select":true,"max_count":0,"selected_count":0},
+		{"id":3,"btn_type":9,"can_select":true,"max_count":0,"selected_count":0}
+	]}]}`)
+	data, err := decodeElectives(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := data.Publishes[0].Classes
+	if len(cs) != 3 {
+		t.Fatalf("应解出 3 门课，实际 %d", len(cs))
+	}
+	if cs[0].Action != "withdraw" {
+		t.Fatalf("btn_type=1 应映射 withdraw，实际 %q", cs[0].Action)
+	}
+	if cs[1].Action != "enroll" {
+		t.Fatalf("btn_type=2 应映射 enroll，实际 %q", cs[1].Action)
+	}
+	if cs[2].Action != "none" {
+		t.Fatalf("btn_type=9（其他值，官网不渲染按钮）应映射 none，实际 %q", cs[2].Action)
+	}
+}
+
+// TestDecodeElectivesSelectableTriState 发布级开窗信号必须映射为三态 selectable。
+// nil = 站点不下发该信号（退化模式据此判定），与"站点说未开"是不同事实。
+func TestDecodeElectivesSelectableTriState(t *testing.T) {
+	body := []byte(`{"code":0,"selectElectivesData":[
+		{"publishId":1,"inDateRange":true,"electivesClassList":[]},
+		{"publishId":2,"inDateRange":false,"electivesClassList":[]}
+	]}`)
+	data, err := decodeElectives(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Publishes) != 2 {
+		t.Fatalf("应解出 2 个发布，实际 %d", len(data.Publishes))
+	}
+	p1 := data.Publishes[0]
+	if p1.Selectable == nil || !*p1.Selectable {
+		t.Fatalf("inDateRange=true 应映射 selectable=true，实际 %v", p1.Selectable)
+	}
+	p2 := data.Publishes[1]
+	if p2.Selectable == nil || *p2.Selectable {
+		t.Fatalf("inDateRange=false 应映射 selectable=false，实际 %v", p2.Selectable)
 	}
 }

@@ -4,7 +4,7 @@ package scheduler
 // 只做"账号名存在"复核，缺 spawnChain 那道 sameClientFor 指针身份比对。
 //
 // 场景：手动报名发起 → SelectClass 网络往返（最长 15s）→ 期间账号被删除并同名重建
-// （注册表换成新 *zhidao.Client，指针不同但账号名仍存在）→ 报名成功返回 → MarkDone
+// （注册表换成新 *upstream.Client，指针不同但账号名仍存在）→ 报名成功返回 → MarkDone
 // 只判 ClientFor 存在性（ok，新身份确实存在）→ 把 success 写进新身份 + 落库 success 行。
 //
 // 后果与 spawnChain 第六分支（自动链实时复核）防的完全同源：重启后 RestoreDone 把

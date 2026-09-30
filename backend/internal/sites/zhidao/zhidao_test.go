@@ -57,8 +57,8 @@ func TestDescriptorMatchesLegacyContract(t *testing.T) {
 		}
 	}
 
-	if d.CodeOK != 0 || d.CodeUnauthorized != -1 {
-		t.Fatalf("状态码语义错误: ok=%d unauthorized=%d", d.CodeOK, d.CodeUnauthorized)
+	if d.CodeUnauthorized != -1 {
+		t.Fatalf("未登录码语义错误: unauthorized=%d", d.CodeUnauthorized)
 	}
 	// 登录钩子必须接真算法（UA 与真实浏览器一致、账密走 RSA、设备指纹复刻前端 JS）。
 	if d.Login.UserAgent == "" {

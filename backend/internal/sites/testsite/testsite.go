@@ -61,7 +61,6 @@ func Descriptor() upstream.SiteDescriptor {
 		TokenParam:  "tsToken",
 		TokenCookie: "ts_session",
 
-		CodeOK:           0,
 		CodeUnauthorized: -9,
 
 		// 不下发任何开窗信号 → 引擎走退化模式（探测到数据即视为开窗）。

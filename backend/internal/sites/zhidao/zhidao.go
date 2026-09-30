@@ -48,7 +48,6 @@ func Descriptor() upstream.SiteDescriptor {
 		TokenParam:  "idToken",
 		TokenCookie: "zd_edu_cookie",
 
-		CodeOK:           0,
 		CodeUnauthorized: -1,
 
 		// 下发inDateRange 与 beginTimes 两种开窗信号，引擎走精确判定。

@@ -145,8 +145,17 @@ type SiteDescriptor struct {
 	TokenParam  string // 会话 token 的查询参数名（如 idToken）
 	TokenCookie string // 会话 token 的 Cookie 名（双通道冗余）
 
-	CodeOK           int // 业务成功码
-	CodeUnauthorized int // 未登录码（引擎据此上抛 ErrUnauthorized）
+	CodeUnauthorized int // 未登录码（**仅在 Envelope 为 nil 时生效**，见 Envelope）
+	// Envelope 从响应体提取业务状态：返回 (业务码, 是否未登录, 解析错误)。
+	// 信封形态随站点而异——整数码 `{"code":0}`、字符串码 `{"status":"OK"}`、
+	// 嵌套状态甚至纯文本错误页，引擎不自解任何固定键名。
+	// nil = 回落引擎默认（解 `{"code":int}` 并与 CodeUnauthorized 比较），
+	// 保留给沿用该信封的档案。**字符串码/纯文本错误页的站点必须显式提供**：
+	// 缺钩子时前者会因类型不匹配直接崩、后者同样崩，而「状态键名不同的
+	// 未登录响应」更糟——会被当成成功静默放行，令 token 失效后的自动重登永不触发。
+	// err != nil 表示「该响应体不是本形态」（如平台返回纯文本页），
+	// 引擎据此跳过信封检查，把判定交给各接口的解码钩子。
+	Envelope func(body []byte) (code int, unauthorized bool, err error)
 
 	// HasWindowSignal 站点是否下发开窗信号（时间戳或布尔）。
 	// false = **退化模式**：探测到非空课程数据即视为开窗。绝不因平台缺此信号而拒绝加载，

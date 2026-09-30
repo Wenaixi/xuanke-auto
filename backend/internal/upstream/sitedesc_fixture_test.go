@@ -31,7 +31,6 @@ func testDescriptor(baseURL string) SiteDescriptor {
 		TokenParam:  "idToken",
 		TokenCookie: "zd_edu_cookie",
 
-		CodeOK:           0,
 		CodeUnauthorized: -1,
 
 		// 夹具模拟"有图形验证码"的站点：登录测试的 mock 会校验表单里的captcha 键。

@@ -367,6 +367,19 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 		return nil, err
 	}
 
+	// 业务状态判据来自档案：信封形态（整数码/字符串码/嵌套状态/纯文本）随站点而异，
+	// 引擎不自解固定键名——写死 `{"code":int}` 会让字符串码站点在第一次请求就崩，
+	// 更隐蔽的是「未登录状态键名不同」的站点会被当成功静默放行，
+	// 令 token 失效后的自动重登永不触发、调度器无声停摆。
+	if c.desc.Envelope != nil {
+		_, unauthorized, envErr := c.desc.Envelope(data)
+		if envErr == nil && unauthorized {
+			return data, fmt.Errorf("%w（%s）", ErrUnauthorized, c.desc.Decode.Msg(data))
+		}
+		// envErr != nil：响应体不是本形态（如平台返回纯文本错误页），
+		// 交由下层各接口的解码钩子各自判成败，引擎不因此报错也不猜内容。
+		return data, nil
+	}
 	var j struct {
 		Code int `json:"code"`
 	}

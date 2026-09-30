@@ -82,3 +82,41 @@
 （当初恰是漏了这两项，才让按钮编码泄漏进 UI 而守卫全绿），并新增四条**正向**断言
 （`action` 中立枚举、`selectable` 三态、无 `btn_type` 声明、消费点读中立名）——
 只有黑名单会在「字段被删掉」时误判为通过，正向断言补上这一缺口。
+
+#### 传输层补齐（2026-10-01）
+
+上两轮把「站点返回什么数据」彻底档案化了，但深度审查（逐行核实 + 实测，非推测）
+确认「怎么发请求、怎么读信封」这一层仍写死在引擎里。四种信封的实测结果：
+
+| 站点信封 | 改动前引擎行为 |
+|---|---|
+| `{"code":"UNAUTHORIZED"}` | 崩：`cannot unmarshal string into int` |
+| 纯文本 `UNAUTHORIZED` | 崩：`invalid character 'U'` |
+| `{"status":401,"data":null}` | **`err=nil` 静默通过** |
+| `{"data":{...}}`（无信封） | 通过（侥幸） |
+
+第三行最隐蔽：token 失效被判成成功，自动重登永不触发，调度器静默停摆且无日志线索。
+
+补齐四个档案字段（全部**零值兼容**，既有档案不写任何一项则行为逐字不变）：
+
+- `Envelope func(body) (code int, unauthorized bool, err error)`：业务状态判据下沉。
+  `unauthorized` 直载「是否未登录」这一位事实，档案不必把字符串码映射回 int 空间；
+  `err` 表示「响应体不是本形态」，引擎据此跳过信封检查交下层解码器。
+- `AuthMode`（四态）+ `HeaderTokenName`：token 通道可关闭。零值 `AuthDual`。
+- `Headers map[string]string`：附加头可增删，**空串值 = 显式删除**（这是关掉
+  jQuery 指纹的唯一入口）。空 map = 引擎默认头集。
+- `FormEncoding`（`form`/`json`）：登录体编码可切换，两条路径共用「空键名绝不提交」契约。
+
+同时删除死字段 `CodeOK`——全仓零消费点，纯维护陷阱。
+
+**方法论留档**：本轮所有新行为都用负向验证确认过「测试真能抓回归」，且抓到的
+报错正是审查阶段实测的缺口本身（拆掉 `Envelope` 钩子后报 `err=<nil>`；
+把 `AuthHeader` 误加进查询分支后报出 `=TOK123`）。这比「测试通过」有说服力得多。
+
+`testsite` 同步升级为传输层真覆盖：字符串业务码、纯文本错误页、Header-only 鉴权、
+无 XHR 指纹头四个维度各有一条真实 HTTP 往返断言。它上轮遗留的包注释
+「鉴权只经 Header 语义」本是**虚假声明**（实际填着 URL 参数 + Cookie，而引擎
+当时根本不支持 Header 鉴权）——虚假覆盖比没有覆盖更糟，已改成真话。
+
+顺带修一处实测隐患：`submitLogin` 曾无条件写 `cookies[TokenCookie]`，纯 Header
+平台该字段为空，会产出「空键名 Cookie」（形如 `=TOK`）。

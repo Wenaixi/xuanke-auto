@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // ManualSelect / ManualExit 深方法（手动决策树收进调度器）的测试。
@@ -57,22 +57,43 @@ func TestManualSelectSuccessClearsInflightAndRefused(t *testing.T) {
 	}
 }
 
-// TestManualSelectRateLimitedMarksBackoff 风控文案 → 记 30s 退避 + 返回友好错误。
+// TestManualSelectRateLimitedMarksBackoff 平台分类为风控 → 记 30s 退避 + 返回友好错误。
+// 判据是**结构化** SiteError.Kind，不再是中文文案匹配（文案判据只存在于站点适配器内）。
 func TestManualSelectRateLimitedMarksBackoff(t *testing.T) {
 	fc := newFakeClient(true)
-	fc.selectErr[61115] = errors.New("操作过于频繁，请稍后重试")
+	fc.selectErr[61115] = &upstream.SiteError{
+		Kind: upstream.OpErrorRateLimited,
+		Msg:  "报名失败: 操作过于频繁，请稍后重试",
+	}
 	s, _ := manualTestSched(t, fc)
 	acct := "acct1"
 
 	_, err := s.ManualSelect(acct, 61115, "健美操")
 	if err == nil {
-		t.Fatal("风控文案应返回错误，而不是成功")
+		t.Fatal("风控错误应返回错误，而不是成功")
 	}
 	if !s.isRateLimitedLocked(acct, 61115, s.nowAlignedLocked()) {
-		t.Fatal("风控文案应记 30s 退避（与自动链同语义）")
+		t.Fatal("风控应记 30s 退避（与自动链同语义）")
 	}
 	if s.inflightHas(acct, 61115) {
 		t.Fatal("失败路径也应清 inflight（defer release 保证）")
+	}
+}
+
+// TestManualSelectPlainErrorWithRateLimitWordingNoBackoff 反向防线：
+// 未分类的普通业务错误即使**文案含风控字样**也不得记退避。
+// 这正是中文文案匹配方案的根本失败模式：站点换一次文案就静默改错行为。
+func TestManualSelectPlainErrorWithRateLimitWordingNoBackoff(t *testing.T) {
+	fc := newFakeClient(true)
+	fc.selectErr[61115] = errors.New("报名失败: 该课程因频繁被取消，请稍后重试")
+	s, _ := manualTestSched(t, fc)
+	acct := "acct1"
+
+	if _, err := s.ManualSelect(acct, 61115, "健美操"); err == nil {
+		t.Fatal("普通业务错误应返回错误")
+	}
+	if s.isRateLimitedLocked(acct, 61115, s.nowAlignedLocked()) {
+		t.Fatal("未分类错误不得记风控退避（文案含风控字样也不认）")
 	}
 }
 
@@ -81,7 +102,7 @@ func TestManualSelectRateLimitedMarksBackoff(t *testing.T) {
 // 断言核心是"MaybeRelogin 被触发"（relogCalls>0）+ 返回文案，而非失效标记残留。
 func TestManualSelectAuthTriggersRelogin(t *testing.T) {
 	fc := newFakeClient(true)
-	fc.selectErr[61115] = zhidao.ErrUnauthorized
+	fc.selectErr[61115] = upstream.ErrUnauthorized
 	s, accts := manualTestSched(t, fc)
 	acct := "acct1"
 

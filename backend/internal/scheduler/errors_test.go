@@ -2,31 +2,36 @@ package scheduler
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"testing"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // TestClassifyPlatformError 平台错误分类纯函数（表驱动）。
-// 手动/自动报名决策树合一后共用同一分类：token 失效 / read 中断 / 窗口关闭 /
-// 风控退避 / 普通业务错误 五族归一。文案匹配为逐字迁移的子串集合，
-// zhidao.ErrUnauthorized 与 IsReadErr 判定收口。
+// 手动/自动报名决策树共用同一分类：token 失效 / read 中断 / 窗口关闭 / 风控退避 /
+// 满员 / 普通业务错误。**判据只认结构化事实**（ErrUnauthorized / IsReadErr /
+// SiteError.Kind），绝不匹配平台文案。
 func TestClassifyPlatformError(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
 		want platformErrorKind
 	}{
-		{"未登录 token 失效", zhidao.ErrUnauthorized, errAuth},
+		{"未登录 token 失效", upstream.ErrUnauthorized, errAuth},
 		{"read 中断（RST 形态）", &net.OpError{Op: "read", Err: errors.New("connection reset")}, errRead},
 		{"read EOF（FIN 形态）", io.EOF, errRead},
-		{"窗口关闭文案", errors.New("不在选修报名时间范围内，无法选课！"), errWindowClosed},
-		{"未开启文案", errors.New("选课未开启"), errWindowClosed},
-		{"报名时间已结束", errors.New("报名时间已结束"), errWindowClosed},
-		{"风控频繁文案", errors.New("操作过于频繁，请稍后重试"), errRateLimit},
-		{"429 文案", errors.New("HTTP 429 Too Many Requests"), errRateLimit},
+		// 结构化分类：三条 SiteError 分支
+		{"档案分类为风控", &upstream.SiteError{Kind: upstream.OpErrorRateLimited, Msg: "任意文案", Code: 1}, errRateLimit},
+		{"档案分类为窗口关闭", &upstream.SiteError{Kind: upstream.OpErrorWindowClosed, Msg: "任意文案", Code: 1}, errWindowClosed},
+		{"档案分类为满员", &upstream.SiteError{Kind: upstream.OpErrorClassFull, Msg: "任意文案", Code: 1}, errFull},
+		{"档案未分类", &upstream.SiteError{Kind: upstream.OpErrorUnknown, Msg: "课程不存在", Code: 1}, errOther},
+		// 关键防线：含「已满员」字样的普通错误绝不能被误判成满员——
+		// 这正是中文文案匹配方案的根本失败模式（旧实现会判 errOther，此处锁死）。
+		{"含已满员字样但未分类", errors.New("该课程已满员，无法退选"), errOther},
+		{"含已结束字样但未分类", errors.New("学期已结束，请下学期再试"), errOther},
 		{"普通业务错误", errors.New("课程不存在"), errOther},
 		{"nil 错误", nil, errOther},
 	}
@@ -36,5 +41,15 @@ func TestClassifyPlatformError(t *testing.T) {
 				t.Fatalf("classifyPlatformError(%v) = %v, want %v", c.err, got, c.want)
 			}
 		})
+	}
+}
+
+// TestClassifyPlatformErrorUnwrapsSiteError SiteError 被包装后仍能穿透分类
+// （errors.As 穿透 fmt.Errorf 的 %w 包装链）——热路径的错误都带上下文包装。
+func TestClassifyPlatformErrorUnwrapsSiteError(t *testing.T) {
+	inner := &upstream.SiteError{Kind: upstream.OpErrorRateLimited, Msg: "操作过于频繁", Code: 1}
+	wrapped := fmt.Errorf("报名失败: %w", inner)
+	if got := classifyPlatformError(wrapped); got != errRateLimit {
+		t.Fatalf("包装后的 SiteError 应仍判风控，实际 %v", got)
 	}
 }

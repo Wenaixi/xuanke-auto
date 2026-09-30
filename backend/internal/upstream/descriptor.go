@@ -3,6 +3,7 @@ package upstream
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -29,6 +30,57 @@ type LoginHooks struct {
 	EncryptIdentification func(account, password string) (string, error)
 	// DeviceID 设备指纹（复刻站点前端 JS 的 getUniqueDeviceId 生成规则）。
 	DeviceID func(ua string, now time.Time) string
+}
+
+// CaptchaSpec 平台图形验证码的规格。**零值语义统一为「不校验」**，使未声明的档案
+// 仍能工作：新平台不声明即不做字符集过滤与长度门禁，不会因规格写死而被静默丢弃识别结果。
+//
+// 为什么必须下沉：曾把「3~5 位 + 纯英数字」写死在引擎 seam，那是知到的图片规格；
+// 换个平台（4 位纯数字、含中文、6 位混合）会让识别结果被引擎静默丢弃，登录三次重试全废。
+type CaptchaSpec struct {
+	// Enabled 站点是否有图形验证码。false = 登录链路跳过取图与识别。
+	Enabled bool
+	// Charset 允许的字符集（正则字符类内容，如 "A-Za-z0-9"、"0-9"）。
+	// 空串 = 不做字符集过滤，只去首尾空白（适配字符集不定的平台）。
+	// 非法表达式在档案 Validate（装配面）被拒，绝不拖到运行时。
+	Charset string
+	// MinLen 识别长度下限。0 = 不校验下限。
+	MinLen int
+	// MaxLen 识别长度上限。0 = 不校验上限。
+	MaxLen int
+}
+
+// Normalize 按本规格净化识别结果：按 Charset 过滤字符（空 = 只去首尾空白）。
+// 非法 Charset 兜底不过滤（Validate 已在装配面拦下，运行时不 panic）。
+func (s CaptchaSpec) Normalize(raw string) string {
+	return normalizeByCharset(raw, s.Charset)
+}
+
+// Acceptable 识别长度是否落在声明区间内。MinLen/MaxLen 为 0 表示该侧不校验。
+func (s CaptchaSpec) Acceptable(n int) bool {
+	if s.MinLen > 0 && n < s.MinLen {
+		return false
+	}
+	if s.MaxLen > 0 && n > s.MaxLen {
+		return false
+	}
+	return true
+}
+
+// normalizeByCharset 按正则字符类内容过滤掉不在集合内的字符。
+// charset 为空 = 只去首尾空白（适配字符集不定的平台）。
+// 非法字符集兜底为「不过滤」——档案 Validate 已在装配面拦下非法声明，
+// 运行时不 panic 也不静默丢字符。
+func normalizeByCharset(raw, charset string) string {
+	raw = strings.TrimSpace(raw)
+	if charset == "" {
+		return raw
+	}
+	re, err := regexp.Compile("[^" + charset + "]")
+	if err != nil {
+		return raw
+	}
+	return re.ReplaceAllString(raw, "")
 }
 
 // Decoders 各接口响应的解码钩子：字段名与响应形态由站点决定，引擎不猜任何键名。
@@ -71,6 +123,23 @@ type SiteDescriptor struct {
 
 	CodeOK           int // 业务成功码
 	CodeUnauthorized int // 未登录码（引擎据此上抛 ErrUnauthorized）
+
+	// HasWindowSignal 站点是否下发开窗信号（时间戳或布尔）。
+	// false = **退化模式**：探测到非空课程数据即视为开窗。绝不因平台缺此信号而拒绝加载，
+	// 代价是该平台失去黄金期 250ms 冲刺精度（退化为 1s 轮询）。
+	HasWindowSignal bool
+	// OpErrorClassifier 平台错误分类钩子：把站点响应归一为 OpErrorKind。
+	// nil = 全部归 OpErrorUnknown（普通业务错误，调用方原文透传）。
+	// 判据（码/文案匹配）**只允许存在于站点适配器包内**——这是引擎与调度器零站点感知的保证。
+	OpErrorClassifier func(msg string, code int) OpErrorKind
+	// Captcha 图形验证码规格（零值 = 不校验）。
+	Captcha CaptchaSpec
+	// SessionCookies 登录后需补齐的会话 Cookie 占位值（键=Cookie名，值=占位内容）。
+	// 用于平台要求某些固定 Cookie 而它只在特定响应里下发的场景（如知到的
+	// access_limit_cookie=1）。空 map = 不需要。真实会话值由登录动态更新，此处仅占位。
+	SessionCookies map[string]string
+	// CaptchaCacheBustParam 验证码 URL 的防缓存参数名（引擎拼 ?<name>=<毫秒>）。空串 = 不拼。
+	CaptchaCacheBustParam string
 
 	Form   FormFields
 	Login  LoginHooks

@@ -185,7 +185,7 @@ func (e *LoginEngine) submitLogin(sess *http.Client, ua, captchaText, identifica
 			}
 		}
 	}
-	// 会话 Cookie 占位由档案声明（知到需要 access_limit_cookie=1；无此需求的平台
+	// 会话 Cookie 占位由档案声明（某站需要频次标记 Cookie；无此需求的平台
 	// 声明空 map，此段零成本跳过）。只在缺失时补，绝不覆盖登录动态拿到的真实会话值。
 	for name, val := range e.desc.SessionCookies {
 		if _, ok := e.cookies[name]; !ok {

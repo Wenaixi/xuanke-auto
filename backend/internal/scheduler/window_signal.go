@@ -7,7 +7,7 @@ import (
 // SetHasWindowSignal 同步档案的开窗信号能力（平台切换时由装配面调用）。
 //
 // **平台切换必须同步它**，否则会用旧站点的信号语义判新站点：例如从知到
-// （下发 in_date_range）切到无信号平台后，若仍按"必须见到 selectable=true"判定，
+// （下发布级开窗布尔）切到无信号平台后，若仍按"必须见到 selectable=true"判定，
 // 开窗将永远判不出来，调度器全线停摆（黄金期冲刺、提交守卫、关闭判定全部失效）。
 func (s *Scheduler) SetHasWindowSignal(v bool) {
 	s.mu.Lock()

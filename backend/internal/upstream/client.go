@@ -159,7 +159,7 @@ func (c *Client) SetCredentials(account, password, token string) {
 	c.cookies[c.desc.TokenCookie] = token
 }
 
-// SetCookies 设置附加 Cookie（如 access_limit_cookie），用于复用现有会话。
+// SetCookies 设置附加 Cookie（键名与占位值由档案声明），用于复用现有会话。
 // 合并语义：只写入给定键，绝不删除未提及的既有 Cookie——
 // 恢复旧会话时若整体覆盖，会清掉登录流程收集的 _jfinal_captcha/_jfinal_token
 // 等服务端会话 Cookie，导致平台鉴权缺失。
@@ -244,7 +244,7 @@ func (c *Client) Login(account, password string) (string, error) {
 	// "客户端内部账密唯一绑定"语义完全一致——每个客户端只用自己的账密重登自己，
 	// 绝不交叉污染；ReloginIfNeeded 仍用内部 account/password，不受调用方参数影响。
 	c.SetCredentials(account, password, token)
-	// 登录会话 Cookie 从登录引擎同步回客户端（zd_edu_cookie + 服务端会话 Cookie），
+	// 登录会话 Cookie 从登录引擎同步回客户端（档案声明的 token Cookie + 服务端会话 Cookie），
 	// 保证 doRequest 的 Cookie 双通道携带完整会话。
 	c.SetCookies(c.loginEngine.SnapshotCookies())
 	return token, nil
@@ -380,7 +380,7 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 }
 
 // readBody 按 ContentLength 预分配的一次性响应体读取。
-// 大响应（findElectivesData 全量课程 ~30KB）下 io.ReadAll 的指数分块
+// 大响应（全量课程数据 ~30KB）下 io.ReadAll 的指数分块
 // 净赚 ~64KB 峰值内存 + 16 次分配，且对读到的数据做最终整块拷贝；
 // 平台 gzip 响应在 Transport 解压后 ContentLength ≥0（不压缩应答同样知长），
 // 预分配一次到位：分配从 16 降到 3、峰值 64KB 降到 33KB、零最终拷贝。
@@ -572,7 +572,7 @@ type Class struct {
 	ClassFull bool   `json:"class_full"`
 	CanSelect bool   `json:"can_select"`
 	// Action 中立操作类型：enroll（可报名）/ withdraw（可退选）/ none（不渲染操作按钮）。
-	// 各站点的按钮编码（如知到的 btn_type 1/2）由适配器映射，引擎与前端零感知。
+	// 各站点的按钮编码（数字/字符串各异）由适配器映射，引擎与前端零感知。
 	Action string `json:"action"`
 	// ActionText 站点下发的操作文案（空 = 前端用默认文案）。已中立化命名。
 	ActionText string `json:"action_text"`
@@ -679,20 +679,20 @@ func (c *Client) SelectClass(classID int) (string, error) {
 	return c.classOp(c.desc.SelectPath, classID, "报名")
 }
 
-// ExitClass 退选。请求体与报名一致（form classId），路径为 exitElectivesClass。
+// ExitClass 退选。请求体与报名一致（单键表单，键名由档案声明），路径亦取自档案。
 // doRequest 对 code=-1 已统一返回 ErrUnauthorized（服务端会话过期），
 // classOp 对其余 code!=0 业务错误原样回传，无需特判。
 func (c *Client) ExitClass(classID int) (string, error) {
 	return c.classOp(c.desc.ExitPath, classID, "退选")
 }
 
-// CountEntry 实时人数（findElectivesStudentCount）。
+// CountEntry 实时人数（字段名随站点，解码由档案钩子负责）。
 // 字段实证（对照 archive/legacy/website-source 真实 select.js 轮询回调 + HAR）：响应仅确证
 // id/selectedCount/auditedCount 三键——真实前端只读这 3 个（`t.id` 匹配、`t.selectedCount`
 // 写 selected_count 列、`t.auditedCount` 写 audited_count 列），全文件 0 处消费 maxCount，
 // 两 HAR 也无该接口请求/响应样本。maxCount 按"平台未下发"判定：JSON 静默忽略恒 0。
 // 保留字段仅为"若平台未来下发"的防御性解（零成本受益），绝不可当作满员判据——
-// 真满员判定以快照字段 max_count（findElectivesData 课程级，实证）为准（classFullInSnapshot）。
+// 真满员判定以快照字段 max_count（课程级，实证）为准（classFullInSnapshot）。
 type CountEntry struct {
 	ID            int `json:"id"`
 	SelectedCount int `json:"selectedCount"`

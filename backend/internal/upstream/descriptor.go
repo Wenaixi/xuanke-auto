@@ -160,7 +160,7 @@ type SiteDescriptor struct {
 	Captcha CaptchaSpec
 	// SessionCookies 登录后需补齐的会话 Cookie 占位值（键=Cookie名，值=占位内容）。
 	// 用于平台要求某些固定 Cookie 而它只在特定响应里下发的场景（如知到的
-	// access_limit_cookie=1）。空 map = 不需要。真实会话值由登录动态更新，此处仅占位。
+	// 某站的频次标记 Cookie）。空 map = 不需要。真实会话值由登录动态更新，此处仅占位。
 	SessionCookies map[string]string
 	// CaptchaCacheBustParam 验证码 URL 的防缓存参数名（引擎拼 ?<name>=<毫秒>）。空串 = 不拼。
 	CaptchaCacheBustParam string

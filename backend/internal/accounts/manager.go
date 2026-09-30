@@ -116,7 +116,7 @@ func (m *Manager) profileID() string {
 }
 
 // sessionCookies 当前档案声明的会话 Cookie 占位（读锁快照）。
-// 站点会话 Cookie 属档案事实（知到需access_limit_cookie=1，无此需求的平台声明空 map），
+// 站点会话 Cookie 属档案事实（某站需频次标记 Cookie，无此需求的平台声明空 map），
 // accounts 层只消费不硬编码——换平台时随档案自动改变。
 func (m *Manager) sessionCookies() map[string]string {
 	m.mu.Lock()
@@ -321,7 +321,7 @@ func (m *Manager) LoginByPassword(acct, password string, encrypt func(string) (s
 // 一律不注入——否则会把 A 平台的会话 token 发往 B 平台（凭据外泄），且必然 401 白跑一轮。
 // 账密照常注入，调度器随即自动重登建新会话。
 // SetCredentials 已写入档案声明的会话 Cookie；SetCookies 为合并语义，
-// 只补齐 access_limit_cookie，绝不覆盖登录流程收集的服务端会话 Cookie。
+// 只补齐档案声明的占位 Cookie，绝不覆盖登录流程收集的服务端会话 Cookie。
 func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, error)) {
 	cur := m.profileID()
 	cookies := m.sessionCookies()
@@ -345,7 +345,7 @@ func (m *Manager) Restore(creds []Credential, decrypt func(string) (string, erro
 			}
 		}
 		c.SetCredentials(cd.Account, pwd, token)
-		// 会话 Cookie 占位由档案声明（知到需 access_limit_cookie=1；无需求的平台空 map）。
+		// 会话 Cookie 占位由档案声明（某站需频次标记 Cookie；无需求的平台空 map）。
 		// 只做占位补充，不覆盖真实会话值（合并语义由 SetCookies 保证）。
 		c.SetCookies(cookies)
 		log.Printf("[accounts] 恢复账号 %s 的会话（token %s）", cd.Account, tokenShort(token))

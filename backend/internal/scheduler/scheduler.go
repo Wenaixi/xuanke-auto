@@ -1010,7 +1010,7 @@ func (s *Scheduler) tick() {
 	// 维持上一轮值，因此这里不会把已开启的窗口误判为关闭。
 	// open 为零值（未识别 / 识别过期）且窗口未被探测确证开启时恒满足
 	// !now.After(open) → 提交循环永续放行。此时无有效开窗点——挂起提交，绝不放行。
-	// 例外：WindowOpened=true（probe 已用发布级 inDateRange 确证平台开窗）但识别槽为空
+	// 例外：WindowOpened=true（probe 已用发布级 selectable 确证平台开窗）但识别槽为空
 	// （平台批次未下发非空 beginTimes）时，零值守卫不得挂起提交——否则前端显示
 	// window_opened=true 而黄金期 250ms 冲刺 0 次，产品语义分叉（开窗时刻的缺失只应
 	// 影响展示层"未识别到开放时间"，绝不影响已确证开启的窗口提交）。
@@ -1049,7 +1049,7 @@ func (s *Scheduler) tick() {
 func (s *Scheduler) probe() {
 	// 探测单飞守卫——probe() 的最长耗时是 FindElectives 网络往返
 	// （15s 超时），HTTP 侧 /api/electives 在快照过期时并发的 ProbeForAccount/ProbeNow
-	// 会与 tick 探测同时打上游，N 账号部署下开窗全期形成 N+1 并发 findElectivesData。
+	// 会与 tick 探测同时打上游，N 账号部署下开窗全期形成 N+1 并发课程数据请求。
 	// probing 在持 s.mu 时置位，保证"置位-检查"原子（零值守卫同款窗口）。
 	// 命中单飞直接放弃本次探测：最长推迟一个 tick（300ms），临门/黄金期无实质损失。
 	s.mu.Lock()
@@ -1066,7 +1066,7 @@ func (s *Scheduler) probe() {
 	// 独立维护：并发探测所有已配置目标的账号，独立刷新各自年级的专属快照。
 	// 的 probing 单飞只保护"probe() 主体（任意客户端 FindElectives）"，这里
 	// 每账号各起 goroutine 调 ProbeForAccount 不受保护——临门/开窗期 probeIntervalNear
-	// 2s 周期触发时，N 账号部署每 2s 变 N+1 并发 findElectivesData 直打上游，与
+	// 2s 周期触发时，N 账号部署每 2s 变 N+1 并发课程数据直打上游，与
 	// "访问过于频繁 1 分钟熔断"实证契约冲突。
 	// 修复：probeSem 结构化信号量（cap 4）封顶 per-account 并发——峰值从 N 降到 4，
 	// 跨批（2s 周期短于一批耗时）受同一信号量约束绝不叠加；全局 FindElectives 主体
@@ -1681,9 +1681,9 @@ func (s *Scheduler) markRateLimitedLocked(acct string, classID int, d time.Durat
 
 // classFullInSnapshot 快照人数确认满员（需持锁）。查找收 findClassInSnapshot
 // 回退 seam（专属帧优先、全校帧兜底）；课程不在快照中（nil）视为不满员放行。
-// 满员判定用快照级字段 max_count/selected_count（findElectivesData 课程级，真实
+// 满员判定用快照级字段 max_count/selected_count（课程级，真实
 // select.js 实证，表列定义 max_count/selected_count/audited_count 同屏）——这是
-// 调度器"真满员退避"的实证主路径；实时接口 findElectivesStudentCount 未实证
+// 调度器"真满员退避"的实证主路径；实时人数接口未实证
 // maxCount（CountEntry 注释），实时复核实际不可判满员。
 func (s *Scheduler) classFullInSnapshot(acct string, classID int) bool {
 	c := s.findClassInSnapshot(acct, classID)

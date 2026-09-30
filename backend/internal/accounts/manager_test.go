@@ -11,17 +11,18 @@ import (
 	"testing"
 	"time"
 
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/sites"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // readyProbe 夹具就绪探测：向 mock 服务器发一条健康请求，把 Windows 回环冷启动窗口
-// 前移到夹具构造期（与 api/zhidao 包同款根治——accounts 是唯一
+// 前移到夹具构造期（与 api/upstream 包同款根治——accounts 是唯一
 // 无就绪前移的包，两测试 mock /login 首请求 connectex 正是夹具缺口）。
-// 连接层失败轮询重试（200ms×10 + 显式 2s 超时，总窗口 ~2s，与 api/zhidao 宽栅栏
+// 连接层失败轮询重试（200ms×10 + 显式 2s 超时，总窗口 ~2s，与 api/upstream 宽栅栏
 // 一次性配平——accounts 曾是收敛后残余面最低收敛点，当前被
-// 包序天然保护（store 高耗时后接 zhidao 而非 accounts），包序变化即暴露），全部
+// 包序天然保护（store 高耗时后接 upstream 而非 accounts），包序变化即暴露），全部
 // 失败才上抛由调用方 Fatal。
-// 三处夹具未有 socketPreheat 双保险（zhidao/api 有 socket 预创建），
+// 三处夹具未有 socketPreheat 双保险（upstream/api 有 socket 预创建），
 // 8 轮全绿实证无残余；若未来 accounts 再出冷启动 flake 第一候选即补 socketPreheat。
 func readyProbe(t *testing.T, baseURL string) {
 	t.Helper()
@@ -50,23 +51,39 @@ func readyProbe(t *testing.T, baseURL string) {
 	t.Fatalf("mock 服务器就绪探测失败: %v", lastErr)
 }
 
-// fakeStore 内存假凭据持久化（记录 SaveCredential 调用，供断言"有效登录才落库"）。
+// fakeStore 内存假凭据持久化（记录 SaveCredential 调用，供断言"有效登录才落库"
+// 与"切平台时清 token + 打新平台标记"）。
 type fakeStore struct {
-	saved bool
+	saved    bool
+	platform string
+	idToken  string
 }
 
-func (f *fakeStore) SaveCredential(acct, passwordEnc, idToken string) error {
+func (f *fakeStore) SaveCredential(acct, passwordEnc, idToken, platformID string) error {
 	f.saved = true
+	f.platform = platformID
+	f.idToken = idToken
 	return nil
 }
 
 func (f *fakeStore) LoadCredentials() ([]Credential, error) { return nil, nil }
 
+// testSite 测试用站点档案：真实内置档案（mock 服务器按同一线格式应答），
+// 生效地址由各夹具的 httptest 服务器提供。
+func testSite(t *testing.T) upstream.SiteDescriptor {
+	t.Helper()
+	desc, err := sites.Resolve(sites.DefaultID)
+	if err != nil {
+		t.Fatalf("内置档案不可解析: %v", err)
+	}
+	return desc
+}
+
 // visionSrvManager 构造带显式 Vision 识别引擎的 Manager（New 不再静默建引擎，
 // 夹具显式注入——模拟生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→SetRecognizer 通道）。
-func visionSrvManager(_ *testing.T, baseURL string, st Store) *Manager {
-	m := New(baseURL, zhidao.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}, st)
-	m.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}))
+func visionSrvManager(t *testing.T, baseURL string, st Store) *Manager {
+	m := New(testSite(t), baseURL, upstream.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}, st)
+	m.SetRecognizer(upstream.NewVisionRecognizer(upstream.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}))
 	return m
 }
 
@@ -100,10 +117,10 @@ func loginRejectSrv(t *testing.T) *httptest.Server {
 // Restore/SetCredentials 后的工作客户端），模拟该账号此前已正常工作的现场。
 func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string) {
 	t.Helper()
-	c := zhidao.New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	// zhidao.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
+	c := upstream.New(testSite(t), srv.URL, upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	// upstream.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
 	// 显式注入（模拟生产 applyCaptchaRecognizerFor 的 SetRecognizer 通道）
-	c.SetRecognizer(zhidao.NewVisionRecognizer(zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
+	c.SetRecognizer(upstream.NewVisionRecognizer(upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
 	c.SetCredentials(acct, "pwd", "tok-valid")
 	m.mu.Lock()
 	m.clients[acct] = c
@@ -243,7 +260,7 @@ func (r minimalRecognizer) Recognize(img []byte) (string, error) { return "abcd"
 
 // TestNewClientAfterSetRecognizerGetsEngine：SetRecognizer 必须把引擎同时写进
 // m.vision 模板——否则 SetRecognizer 只注入当前已有客户端，此后 ensure 新建客户端经
-// zhidao.New(m.baseURL, m.vision) 时 recognizer 恒为 nil：默认兜底仅认 APIKey（SF_API_KEY
+// upstream.New(m.desc, m.baseURL, m.vision) 时 recognizer 恒为 nil：默认兜底仅认 APIKey（SF_API_KEY
 // 留空的 ddddocr 典型部署），新账号登录识别直接报"未配置验证码识别引擎"（识别 3 次全败、
 // 登录失败），系统从第一个新账号起无法登录任何新账号。既有客户端因 SetRecognizer 注入
 // 过引擎不受影响，掩盖了该问题在重启前不被发现。
@@ -256,12 +273,12 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	readyProbe(t, srv.URL)
-	m := New(srv.URL, zhidao.VisionConfig{BaseURL: srv.URL, APIKey: "", Model: ""}, &fakeStore{})
+	m := New(testSite(t), srv.URL, upstream.VisionConfig{BaseURL: srv.URL, APIKey: "", Model: ""}, &fakeStore{})
 
 	// 模拟 initCaptchaAtStartup：配置 ddddocr 引擎（SF_API_KEY 留空的典型部署）
 	m.SetRecognizer(minimalRecognizer{name: "ddddocr"})
 
-	// 新账号登录：ensure 走 zhidao.New(m.baseURL, m.vision)，新客户端识别器必须生效
+	// 新账号登录：ensure 走 upstream.New(m.desc, m.baseURL, m.vision)，新客户端识别器必须生效
 	if _, err := m.LoginByPassword("newbie", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
 		t.Fatalf("新账号登录应成功（识别器必须从模板透传），实际失败: %v", err)
 	}
@@ -269,7 +286,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	if !ok {
 		t.Fatal("登录后客户端应已注册")
 	}
-	cc, _ := c.(*zhidao.Client)
+	cc, _ := c.(*upstream.Client)
 	if r := cc.CurrentRecognizer(); r == nil {
 		t.Fatal("SetRecognizer 后新建的客户端必须拿到识别引擎（模板 recognizer 恒 nil 致新账号登录全败）")
 	} else if l, ok := r.(minimalRecognizer); !ok || l.name != "ddddocr" {
@@ -278,7 +295,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 
 	// 对偶守卫：热更新 Vision 配置后（SetVision→SetRecognizer 之间），模板引擎仍保留——
 	// 若 SetVision 直接覆盖 m.vision，此后再 ensure 的新客户端会短暂拿到 nil 引擎
-	m.SetVision(zhidao.VisionConfig{BaseURL: "http://new", APIKey: "", Model: ""})
+	m.SetVision(upstream.VisionConfig{BaseURL: "http://new", APIKey: "", Model: ""})
 	m.SetRecognizer(minimalRecognizer{name: "ddddocr"})
 	if _, err := m.LoginByPassword("newbie2", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
 		t.Fatalf("SetVision+SetRecognizer 后新账号登录应成功: %v", err)
@@ -287,7 +304,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	if !ok {
 		t.Fatal("第二个新账号客户端应已注册")
 	}
-	cc2, _ := c2.(*zhidao.Client)
+	cc2, _ := c2.(*upstream.Client)
 	if r := cc2.CurrentRecognizer(); r == nil {
 		t.Fatal("SetVision 不得清掉模板引擎（新客户端必须继续拿到 ddddocr）")
 	}

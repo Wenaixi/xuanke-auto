@@ -601,7 +601,7 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
                                   #{c.publish_id} · {priorityName(c.priority)}
                                 </Badge>
                                 <Badge
-                                  variant={isSuccess ? "primary" : isFull ? "destructive" : isFailed ? "destructive" : isInRange ? "primary" : "outline"}
+                                  variant={isSuccess ? "primary" : isFull ? "default" : isFailed ? "default" : isInRange ? "primary" : "outline"}
                                   className="text-2xs"
                                 >
                                   {isSuccess

@@ -4,15 +4,14 @@ import { cn } from "../../lib/utils"
 export interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value?: number
   max?: number
-  indicatorColor?: "emerald" | "amber" | "rose" | "cyan" | "default"
+  indicatorColor?: "emerald" | "amber" | "rose" | "cyan"
 }
 
 export const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
-  ({ className, value = 0, max = 100, indicatorColor = "default", ...props }, ref) => {
+  ({ className, value = 0, max = 100, indicatorColor = "cyan", ...props }, ref) => {
     const percentage = Math.min(Math.max((value / max) * 100, 0), 100)
 
     const colorMap = {
-      default: "bg-[var(--cyan)]",
       cyan: "bg-[var(--cyan)]",
       emerald: "bg-[var(--emerald)]",
       amber: "bg-[var(--amber)]",

@@ -2,7 +2,7 @@ import * as React from "react"
 import { cn } from "../../lib/utils"
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: "default" | "success" | "warning" | "destructive" | "primary" | "outline" | "secondary" | "active"
+  variant?: "default" | "success" | "primary" | "outline"
 }
 
 // 徽章文字一律纯白：夹在 6% 半透明面板上的小字原本是 100/200/300 三档灰，
@@ -12,11 +12,7 @@ const badgeVariants: Record<NonNullable<BadgeProps["variant"]>, string> = {
   default: "bg-white/10 text-white border-neutral-700",
   primary: "bg-white/20 text-white border-white/50 font-semibold",
   success: "bg-white/10 text-white border-neutral-600",
-  warning: "bg-white/10 text-white border-neutral-700",
-  destructive: "bg-white/10 text-white border-neutral-700",
   outline: "bg-transparent text-white border-neutral-700",
-  secondary: "bg-white/10 text-white border-neutral-700",
-  active: "bg-white/20 text-white border-white/50 font-semibold",
 }
 
 export function Badge({ className, variant = "default", ...props }: BadgeProps) {

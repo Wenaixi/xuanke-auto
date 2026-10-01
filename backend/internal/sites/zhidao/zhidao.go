@@ -185,7 +185,9 @@ func mapBtnType(t int) string {
 	return "none"
 }
 
-// decodeCounts 实时人数：countList（站点不下发 maxCount，故 MaxCount 恒 0，仅防御性保留）。
+// decodeCounts 实时人数：countList（zhidao 档案不下发 maxCount，MaxCount 恒 0）。
+// 该恒 0 是档案事实而非结构必然——防御性保留 MaxCount 字段，未来档案下发时
+// 实时满员判据（IsClassFull）自动生效；当前真满员判定以快照 max_count 为准。
 func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 	var j struct {
 		Code      int                   `json:"code"`

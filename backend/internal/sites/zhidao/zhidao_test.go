@@ -333,3 +333,24 @@ func TestDecodeElectivesSelectableTriState(t *testing.T) {
 		t.Fatalf("inDateRange=false 应映射 selectable=false，实际 %v", p2.Selectable)
 	}
 }
+
+// TestDecodeCountsMaxCountZeroForCountList 实时人数档案事实：站点 countList 不下发
+// maxCount（真实 select.js 全文件 0 消费），解析后 MaxCount 必须恒 0——与 testsite
+// 假档案（enrolled/capacity → MaxCount 有值）形成档案对照。这是下游 IsClassFull
+// "恒 false、永不确证满员"（实时复核仅兜底，真满员以快照判据为准）的根因锚点，
+// 防止未来误给 countList 加键名或改判定破坏防轰炸语义。
+func TestDecodeCountsMaxCountZeroForCountList(t *testing.T) {
+	counts, err := decodeCounts([]byte(`{"code":0,"countList":[{"id":1001,"selectedCount":30,"auditedCount":30}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts) != 1 || counts[0].ID != 1001 {
+		t.Fatalf("应解出 1 条 id=1001，实际 %+v", counts)
+	}
+	if counts[0].SelectedCount != 30 || counts[0].AuditedCount != 30 {
+		t.Fatalf("人数字段映射错误: %+v", counts[0])
+	}
+	if counts[0].MaxCount != 0 {
+		t.Fatalf("zhidao 档案 countList 不下发 maxCount，必须恒 0（IsClassFull 恒 false 的根因），实际 %d", counts[0].MaxCount)
+	}
+}

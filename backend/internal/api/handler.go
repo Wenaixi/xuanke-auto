@@ -706,6 +706,7 @@ type AdminConfigView struct {
 
 // configView 组装配置视图（GET 与 PUT 响应共用一处，避免两边字段漏改分叉）。
 func (d *Deps) configView(cfg runtime.Config) AdminConfigView {
+	meta, _ := siteMeta(cfg.PlatformID)
 	return AdminConfigView{
 		ActivationEnabled:  cfg.ActivationEnabled,
 		VisionBaseURL:      cfg.VisionBaseURL,
@@ -719,37 +720,33 @@ func (d *Deps) configView(cfg runtime.Config) AdminConfigView {
 		PlatformEmbedded:   d.PlatformEmbedded,
 		// 档案元数据：未知 ID（不该出现——配置表已把关）也不空展示，直接把 ID 顶到名称位。
 		PlatformID:             cfg.PlatformID,
-		PlatformName:           platformName(cfg.PlatformID),
-		PlatformNote:           platformNote(cfg.PlatformID),
+		PlatformName:           meta.Name,
+		PlatformNote:           meta.Note,
 		PlatformBaseURL:        cfg.PlatformBaseURL,
-		PlatformDefaultBaseURL: platformDefaultBaseURL(cfg.PlatformID),
+		PlatformDefaultBaseURL: meta.DefaultBaseURL,
 		Platforms:              sites.List(),
 	}
 }
 
-// platformName / platformNote / platformDefaultBaseURL 从档案取展示元数据；
+// siteMeta 档案展示元数据单点：名称/备注/默认地址同源解析（sites.List 同字段）。
 // 解析失败时名称回退为原始 ID，其余留空——绝不空展示、也绝不编造。
-func platformName(id string) string {
-	if d, err := sites.Resolve(id); err == nil {
-		return d.Name
+func siteMeta(id string) (sites.Info, bool) {
+	for _, m := range sites.List() {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return sites.Info{ID: id, Name: id}, false
+}
+
+// siteMetaName 只取名称（/admin/stats 展示用）：未知 ID 回退原始 ID。
+func siteMetaName(id string) string {
+	m, _ := siteMeta(id)
+	if m.Name != "" {
+		return m.Name
 	}
 	return id
 }
-
-func platformNote(id string) string {
-	if d, err := sites.Resolve(id); err == nil {
-		return d.Note
-	}
-	return ""
-}
-
-func platformDefaultBaseURL(id string) string {
-	if d, err := sites.Resolve(id); err == nil {
-		return d.DefaultBaseURL
-	}
-	return ""
-}
-
 // validateListen 校验监听主机/端口：主机只填主机名（IP / 域名 / 0.0.0.0），
 // 不带方案与端口——否则 "127.0.0.1:3091" 再拼一次端口会变成
 // "127.0.0.1:3091:3091"（net.Listen 才报错，管理员只看到含糊的绑定失败）。
@@ -1069,7 +1066,7 @@ func (d *Deps) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		"captcha_active_engine": activeEng,
 		"captcha_concurrency":   cfg.CaptchaConcurrency,
 		// 当前选课平台（运行状态页展示；管理员据此确认"跑的是哪一套接口"）。
-		"platform_name": platformName(cfg.PlatformID),
+		"platform_name": siteMetaName(cfg.PlatformID),
 		"platform_id":   cfg.PlatformID,
 		"token_valid":   tokValid,
 		"open_time_set": !open.IsZero(),

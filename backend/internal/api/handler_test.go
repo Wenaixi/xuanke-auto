@@ -2326,3 +2326,24 @@ func TestStudentSetTargetsWithoutAccountOK(t *testing.T) {
 		t.Fatalf("学生会话设置目标应照常成功: %d %v", code, j)
 	}
 }
+
+// TestSiteMeta 档案元数据单点：已知档案三字段同源；未知 ID 名称回退原始 ID。
+func TestSiteMeta(t *testing.T) {
+	m, ok := siteMeta(sites.DefaultID)
+	if !ok {
+		t.Fatalf("内置档案 %q 应可解析", sites.DefaultID)
+	}
+	if m.Name == "" || m.ID != sites.DefaultID {
+		t.Fatalf("已知档案元数据错误: %+v", m)
+	}
+	u, ok := siteMeta("no-such")
+	if ok {
+		t.Fatal("未知档案不应解析成功")
+	}
+	if u.Name != "no-such" || u.Note != "" {
+		t.Fatalf("未知档案回退语义错误: %+v", u)
+	}
+	if got := siteMetaName("no-such"); got != "no-such" {
+		t.Fatalf("siteMetaName 未知 ID 应回退原始 ID，got %q", got)
+	}
+}

@@ -150,13 +150,19 @@ func (c *Client) SyncServerTime() (time.Duration, error) {
 
 // SetCredentials 设置保存的账密与 token（重启恢复时调用）。
 // token 即站点档案声明的会话 Cookie 的值，同步维护 cookie。
+// 会话 Cookie 只在档案声明了 Cookie 名时写入：纯 Header 鉴权的平台
+// TokenCookie 为空，无条件写会产出「空键名 Cookie」（形如 `=TOK`），
+// 平台多半直接拒——与档案 Form 空键名同一条「空名绝不提交」契约。
+// 切平台（accounts.SetProfile）与跨平台恢复（Restore 置空 token）都会走到这里。
 func (c *Client) SetCredentials(account, password, token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.account = account
 	c.password = password
 	c.token = token
-	c.cookies[c.desc.TokenCookie] = token
+	if c.desc.TokenCookie != "" {
+		c.cookies[c.desc.TokenCookie] = token
+	}
 }
 
 // SetCookies 设置附加 Cookie（键名与占位值由档案声明），用于复用现有会话。

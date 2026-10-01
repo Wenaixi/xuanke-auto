@@ -11,10 +11,11 @@ import (
 // 回归动机：引擎曾无条件拼 `?TokenParam=TOK`，纯 Header 鉴权的现代 API 接不了；
 // 参数名为空时更会拼出 `?=TOK` 的畸形 URL，平台直接拒而现场报"参数缺失"。
 func TestAuthModeHeaderOnlyNoQueryString(t *testing.T) {
-	var gotQuery, gotAuth string
+	var gotQuery, gotAuth, gotCookie string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		gotAuth = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
 		w.Write([]byte(`{"code":0}`))
 	}))
 	defer srv.Close()
@@ -35,6 +36,11 @@ func TestAuthModeHeaderOnlyNoQueryString(t *testing.T) {
 	}
 	if gotAuth != "Bearer TOK123" {
 		t.Fatalf("Authorization 头应为 Bearer TOK123，实际: %q", gotAuth)
+	}
+	// 档案无 Cookie 通道时不得发出任何 Cookie——SetCredentials 曾无条件写
+	// cookies[TokenCookie]，TokenCookie 为空即产出「空键名 Cookie」（形如 `=TOK123`）。
+	if gotCookie != "" {
+		t.Fatalf("Header 通道不该带 Cookie 头，实际: %q", gotCookie)
 	}
 }
 
@@ -96,5 +102,44 @@ func TestAuthModeHeaderRejectsMissingHeaderName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HeaderTokenName") {
 		t.Fatalf("报错应点名 HeaderTokenName，实际: %v", err)
+	}
+}
+
+// TestSetCredentialsSkipsEmptyTokenCookie 档案无 Cookie 通道时，SetCredentials
+// 绝不能产出「空键名 Cookie」。
+//
+// 回归动机：SetCredentials 曾无条件写 cookies[TokenCookie]。触发面比想象的宽——
+// 切平台（accounts.SetProfile 对每个账号调 SetCredentials(acct, pwd, "")）与
+// 跨平台恢复（Restore 把 token 置空）都会走到，纯 Header 档案当场产出
+// `Cookie: =TOK`，平台多半直接拒而现场报的是难定位的鉴权错误。
+//
+// 变异验证：摘掉 SetCredentials 里的 TokenCookie 判空，本测试必须红。
+func TestSetCredentialsSkipsEmptyTokenCookie(t *testing.T) {
+	const base = "http://x.test"
+	d := testDescriptor(base)
+	d.AuthMode = AuthHeader
+	d.HeaderTokenName = "Authorization"
+	d.TokenParam = ""
+	d.TokenCookie = ""
+	c := New(d, base, VisionConfig{})
+
+	c.SetCredentials("acct", "pw", "TOK123")
+	c.SetCookies(map[string]string{"_jfinal_token": "sess-cookie"})
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, bad := c.cookies[""]; bad {
+		t.Fatalf("cookies 不得含空键名项，实际 map=%v", c.cookies)
+	}
+	for k, v := range c.cookies {
+		if k == "" {
+			t.Fatalf("Cookie 键名不得为空（会写出 `=%s`）", v)
+		}
+	}
+	if c.token != "TOK123" {
+		t.Fatalf("token 字段仍须保存（仅 Cookie 写入受判空约束），got %q", c.token)
+	}
+	if c.cookies["_jfinal_token"] != "sess-cookie" {
+		t.Fatal("档案声明的非空键名 Cookie 必须照常保留")
 	}
 }

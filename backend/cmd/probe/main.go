@@ -43,10 +43,20 @@ func main() {
 	for name, val := range desc.SessionCookies {
 		cookies = append(cookies, name+"="+val)
 	}
-	cookies = append(cookies, desc.TokenCookie+"="+token)
+	// 空键名绝不提交：TokenCookie 为空即该平台无 Cookie 通道，写出 `=TOK`
+	// 这种畸形 Cookie 平台多半直接拒（与档案 Form 空键名同一条契约）。
+	if desc.TokenCookie != "" {
+		cookies = append(cookies, desc.TokenCookie+"="+token)
+	}
 	cookieHeader := strings.Join(cookies, "; ")
 
-	u := base + desc.ElectivesPath + "?" + desc.TokenParam + "=" + url.QueryEscape(token)
+	// token 查询串只在该平台用查询参数鉴权时拼：Header 通道（AuthHeader）平台
+	// TokenParam 为空，无条件拼会写出 `?=TOKEN` 的畸形 URL。与 doRequest 的通道
+	// 判定同口径（上游 client.go）。
+	u := base + desc.ElectivesPath
+	if (desc.AuthMode == upstream.AuthDual || desc.AuthMode == upstream.AuthQuery) && desc.TokenParam != "" {
+		u += "?" + desc.TokenParam + "=" + url.QueryEscape(token)
+	}
 	req, err := http.NewRequest(http.MethodPost, u, nil)
 	if err != nil {
 		fmt.Println("ERR 构造请求:", err)

@@ -80,10 +80,11 @@ func testSite(t *testing.T) upstream.SiteDescriptor {
 }
 
 // visionSrvManager 构造带显式 Vision 识别引擎的 Manager（New 不再静默建引擎，
-// 夹具显式注入——模拟生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→SetRecognizer 通道）。
+// 夹具显式注入——模拟生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→UpdateCaptchaEngine 通道）。
 func visionSrvManager(t *testing.T, baseURL string, st Store) *Manager {
 	m := New(testSite(t), baseURL, upstream.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}, st)
-	m.SetRecognizer(upstream.NewVisionRecognizer(upstream.VisionConfig{BaseURL: baseURL, APIKey: "k", Model: "m"}))
+	// 单出口注入（等价生产 initCaptchaAtStartup→applyCaptchaRecognizerFor→UpdateCaptchaEngine）
+	m.UpdateCaptchaEngine(upstream.EngineConfig{VisionBaseURL: baseURL, VisionAPIKey: "k", VisionModel: "m", CaptchaEngine: "vision"})
 	return m
 }
 
@@ -119,8 +120,8 @@ func seedValidClient(t *testing.T, m *Manager, srv *httptest.Server, acct string
 	t.Helper()
 	c := upstream.New(testSite(t), srv.URL, upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	// upstream.New 不再静默自建 Vision 引擎——种子客户端登录/重登路径需要识别器，
-	// 显式注入（模拟生产 applyCaptchaRecognizerFor 的 SetRecognizer 通道）
-	c.SetRecognizer(upstream.NewVisionRecognizer(upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
+	// 显式注入（模拟生产 applyCaptchaRecognizerFor 的 UpdateCaptchaEngine 通道）
+	c.UpdateCaptcha(upstream.NewVisionRecognizer(upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), upstream.VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	c.SetCredentials(acct, "pwd", "tok-valid")
 	m.mu.Lock()
 	m.clients[acct] = c
@@ -258,25 +259,37 @@ type minimalRecognizer struct {
 
 func (r minimalRecognizer) Recognize(img []byte) (string, error) { return "abcd", nil }
 
-// TestNewClientAfterSetRecognizerGetsEngine：SetRecognizer 必须把引擎同时写进
-// m.vision 模板——否则 SetRecognizer 只注入当前已有客户端，此后 ensure 新建客户端经
+// TestNewClientAfterUpdateCaptchaEngineGetsEngine：UpdateCaptchaEngine 必须把引擎同时写进
+// m.vision 模板——否则 UpdateCaptchaEngine 只注入当前已有客户端，此后 ensure 新建客户端经
 // upstream.New(m.desc, m.baseURL, m.vision) 时 recognizer 恒为 nil：默认兜底仅认 APIKey（SF_API_KEY
 // 留空的 ddddocr 典型部署），新账号登录识别直接报"未配置验证码识别引擎"（识别 3 次全败、
-// 登录失败），系统从第一个新账号起无法登录任何新账号。既有客户端因 SetRecognizer 注入
+// 登录失败），系统从第一个新账号起无法登录任何新账号。既有客户端因 UpdateCaptchaEngine 注入
 // 过引擎不受影响，掩盖了该问题在重启前不被发现。
-// 修复前（SetRecognizer 不写模板）：红——新建客户端识别器为 nil。
-// 修复后（模板同步 + SetVision 保留引擎）：绿——ddddocr 引擎透传到新客户端。
-func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
+// 修复前（UpdateCaptchaEngine 不写模板）：红——新建客户端识别器为 nil。
+// 修复后（模板同步 + 单出口原子写齐）：绿——ddddocr 引擎透传到新客户端。
+func TestNewClientAfterUpdateCaptchaEngineGetsEngine(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		// Vision 识别通道：OpenAI 兼容 /chat/completions 返回可识别内容
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{"content": "abcd"}}},
+			})
+			return
+		}
 		w.Write([]byte(`{"code":0,"isOk":true,"token":"tok-ok"}`))
 	}))
 	t.Cleanup(srv.Close)
 	readyProbe(t, srv.URL)
 	m := New(testSite(t), srv.URL, upstream.VisionConfig{BaseURL: srv.URL, APIKey: "", Model: ""}, &fakeStore{})
 
-	// 模拟 initCaptchaAtStartup：配置 ddddocr 引擎（SF_API_KEY 留空的典型部署）
-	m.SetRecognizer(minimalRecognizer{name: "ddddocr"})
+	// 模拟 initCaptchaAtStartup：注入 Vision 识别引擎（测试环境无 ddddocr 二进制，
+	// 模板透传语义与引擎类型无关——只要注入的引擎实例能透传到新建客户端即可）
+	// 单出口 UpdateCaptchaEngine：锁内单次原子更新模板 + 全部客户端
+	m.UpdateCaptchaEngine(upstream.EngineConfig{
+		VisionBaseURL: srv.URL, VisionAPIKey: "k", VisionModel: "m",
+		CaptchaEngine: "vision", CaptchaFallback: false,
+	})
 
 	// 新账号登录：ensure 走 upstream.New(m.desc, m.baseURL, m.vision)，新客户端识别器必须生效
 	if _, err := m.LoginByPassword("newbie", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
@@ -288,17 +301,17 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	}
 	cc, _ := c.(*upstream.Client)
 	if r := cc.CurrentRecognizer(); r == nil {
-		t.Fatal("SetRecognizer 后新建的客户端必须拿到识别引擎（模板 recognizer 恒 nil 致新账号登录全败）")
-	} else if l, ok := r.(minimalRecognizer); !ok || l.name != "ddddocr" {
-		t.Fatalf("新客户端引擎必须是 SetRecognizer 注入的 ddddocr 实例，实际 %T %#v", r, r)
+		t.Fatal("UpdateCaptchaEngine 后新建的客户端必须拿到识别引擎（模板 recognizer 恒 nil 致新账号登录全败）")
 	}
 
-	// 对偶守卫：热更新 Vision 配置后（SetVision→SetRecognizer 之间），模板引擎仍保留——
-	// 若 SetVision 直接覆盖 m.vision，此后再 ensure 的新客户端会短暂拿到 nil 引擎
-	m.SetVision(upstream.VisionConfig{BaseURL: "http://new", APIKey: "", Model: ""})
-	m.SetRecognizer(minimalRecognizer{name: "ddddocr"})
+	// 对偶守卫：热更新配置后模板引擎仍保留——引擎切换只经 UpdateCaptchaEngine，
+	// 模板与全部客户端在同一把锁内写齐，绝不出现"模板引擎被清空"的中间态
+	m.UpdateCaptchaEngine(upstream.EngineConfig{
+		VisionBaseURL: srv.URL, VisionAPIKey: "k", VisionModel: "m",
+		CaptchaEngine: "vision", CaptchaFallback: false,
+	})
 	if _, err := m.LoginByPassword("newbie2", "pwd", func(s string) (string, error) { return "ENC:" + s, nil }); err != nil {
-		t.Fatalf("SetVision+SetRecognizer 后新账号登录应成功: %v", err)
+		t.Fatalf("重复 UpdateCaptchaEngine 后新账号登录应成功: %v", err)
 	}
 	c2, ok := m.ClientFor("newbie2")
 	if !ok {
@@ -306,7 +319,7 @@ func TestNewClientAfterSetRecognizerGetsEngine(t *testing.T) {
 	}
 	cc2, _ := c2.(*upstream.Client)
 	if r := cc2.CurrentRecognizer(); r == nil {
-		t.Fatal("SetVision 不得清掉模板引擎（新客户端必须继续拿到 ddddocr）")
+		t.Fatal("UpdateCaptchaEngine 不得清掉模板引擎（新客户端必须继续拿到识别引擎）")
 	}
 }
 

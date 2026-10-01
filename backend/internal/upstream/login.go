@@ -25,12 +25,12 @@ type LoginEngine struct {
 	Vision  VisionConfig
 
 	mu         sync.Mutex
-	recognizer CaptchaRecognizer // 引擎注入点：SetRecognizer 驱动（热切换）
+	recognizer CaptchaRecognizer // 引擎注入点：UpdateCaptcha 驱动（热切换）
 	token      string            // 最近一次登录成功 token（供 Client.Login 读取）
 	cookies    map[string]string // 登录会话 Cookie（token Cookie 名由站点档案声明）
 }
 
-// NewLoginEngine 创建登录引擎（绑定站点档案、生效地址与识别配置；识别引擎后续 SetRecognizer 注入）。
+// NewLoginEngine 创建登录引擎（绑定站点档案、生效地址与识别配置；识别引擎后续 UpdateCaptcha 注入）。
 func NewLoginEngine(desc SiteDescriptor, baseURL string, vc VisionConfig) *LoginEngine {
 	return &LoginEngine{desc: desc, baseURL: baseURL, Vision: vc, cookies: map[string]string{}}
 }
@@ -43,21 +43,6 @@ func (e *LoginEngine) UpdateCaptcha(r CaptchaRecognizer, vc VisionConfig) {
 	defer e.mu.Unlock()
 	e.recognizer = r
 	e.Vision = vc.WithRecognizer(r)
-}
-
-func (e *LoginEngine) SetRecognizer(r CaptchaRecognizer) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.recognizer = r
-	e.Vision = e.Vision.WithRecognizer(r)
-}
-
-// SetVision 更新视觉识别配置（保留当前引擎，与 Client.SetVision 同款语义）。
-func (e *LoginEngine) SetVision(vc VisionConfig) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	vc = vc.WithRecognizer(e.Vision.Recognizer())
-	e.Vision = vc
 }
 
 // Token 返回最近一次登录成功 token（空=尚未登录成功）。

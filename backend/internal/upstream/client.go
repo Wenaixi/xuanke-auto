@@ -74,14 +74,14 @@ type Client struct {
 	visionCfg VisionConfig
 
 	// loginEngine 登录引擎（收权）：登录链路收进 LoginEngine 深模块，
-	// Client.Login 改调它；SetRecognizer/SetVision 双驱动保证引擎热切换同步。
+	// Client.Login 改调它；UpdateCaptcha 单出口保证引擎热切换同步。
 	loginEngine *LoginEngine
 }
 
 // New 创建客户端（站点档案 + 生效地址 + 识别配置）。绑定全局高性能连接池 sharedTransport。
 // baseURL 空串表示用档案默认地址；非空即管理员在后台覆盖过的站点地址。
 // 登录链路收进 loginEngine（LoginEngine 深模块），New 同时构造登录引擎。
-// 注：识别引擎注入唯一通道 = SetRecognizer / SetVision（删静默建 Vision 旁路后，
+// 注：识别引擎注入唯一通道 = UpdateCaptcha（删静默建 Vision 旁路后，
 // New 不再根据 APIKey 非空静默自建引擎——引擎由 accounts.Manager 按运行时配置显式注入）。
 func New(desc SiteDescriptor, baseURL string, visionCfg VisionConfig) *Client {
 	base := NormalizeBaseURL(baseURL)
@@ -192,38 +192,6 @@ func (c *Client) UpdateCaptcha(r CaptchaRecognizer, cfg VisionConfig) {
 	c.visionCfg = cfg
 	if c.loginEngine != nil {
 		c.loginEngine.UpdateCaptcha(r, cfg)
-	}
-}
-
-// SetVision 热更新验证码识别配置（管理员运行时修改立即生效，下次登录生效）。
-// 仅当当前引擎是 Vision 时才重建识别器（ddddocr 本地引擎不受 Vision 配置影响）。
-// 传入的 cfg.recognizer 为 nil 时保留当前引擎：SetVision 只管 Vision 配置，绝不挥动引擎切换。
-// 同时驱动 loginEngine.SetVision——登录引擎与客户端的视觉配置保持一致（双驱动）。
-func (c *Client) SetVision(cfg VisionConfig) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.visionCfg.recognizer.(*VisionRecognizer); ok || c.visionCfg.recognizer == nil {
-		cfg.recognizer = NewVisionRecognizer(cfg)
-	} else {
-		// 当前是本地引擎且调用方未显式指定新引擎：保留本地引擎（热更新修复）
-		cfg.recognizer = c.visionCfg.recognizer
-	}
-	c.visionCfg = cfg
-	if c.loginEngine != nil {
-		c.loginEngine.SetVision(cfg)
-	}
-}
-
-// SetRecognizer 热切换验证码识别引擎（ddddocr 本地 / Vision 二选一，管理员热重载）。
-// 传入 nil 表示当前无识别引擎（登录识别立即报错，直到配置恢复）。
-// 同时驱动 loginEngine.SetRecognizer——否则 SetRecognizer 后登录引擎的识别器恒 nil，
-// 新账号登录识别直接报错（双驱动，与 accounts.Manager.SetRecognizer 同款语义）。
-func (c *Client) SetRecognizer(r CaptchaRecognizer) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.visionCfg.recognizer = r
-	if c.loginEngine != nil {
-		c.loginEngine.SetRecognizer(r)
 	}
 }
 

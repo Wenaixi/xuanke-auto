@@ -237,38 +237,6 @@ func (m *Manager) UpdateCaptchaEngine(cfg upstream.EngineConfig) upstream.Engine
 	return res
 }
 
-// SetVision 热更新全部账号客户端的验证码识别配置（管理员运行时修改立即生效）。
-// 赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
-// SetVision 再 applyCaptchaRecognizerFor(SetRecognizer)，若 SetVision 直接覆盖模板，
-// 两条调用之间新 ensure 的客户端会短暂拿到 nil 引擎；保留当前引擎与
-// upstream.Client.SetVision 的"绝不挥动引擎切换"语义对齐（引擎归属 SetRecognizer）。
-func (m *Manager) SetVision(cfg upstream.VisionConfig) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cfg = cfg.WithRecognizer(m.vision.Recognizer()) // 保留模板当前引擎
-	m.vision = cfg
-	for _, c := range m.clients {
-		c.SetVision(cfg)
-	}
-}
-
-// SetRecognizer 热切换全部账号客户端的验证码识别引擎（ddddocr 本地 / Vision 二选一）。
-// recognizer 为 nil 时表示"无引擎"（登录识别立即报错，直到管理员恢复配置）。
-// 同时写入 m.vision.recognizer 模板——否则 SetRecognizer 只注入
-// 当前已有客户端，m.vision 模板的 recognizer 恒为 nil：此后 ensure 新建客户端经
-// upstream.New(m.baseURL, m.vision) 时 recognizer 拿不到引擎，默认兜底仅认 APIKey
-// （SF_API_KEY 留空的 ddddocr 部署下），新账号登录识别直接报"未配置验证码识别引擎"，
-// 系统从第一个新账号起无法登录任何新账号（既有客户端因已注入引擎被掩盖）。同理
-// SetVision 赋值前保留当前引擎，绝不把模板的 recognizer 清成 nil。
-func (m *Manager) SetRecognizer(r upstream.CaptchaRecognizer) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.vision = m.vision.WithRecognizer(r)
-	for _, c := range m.clients {
-		c.SetRecognizer(r)
-	}
-}
-
 // gateTryAcquire 非阻塞申请一次 doLogin 预算（tokenBucket 语义借用 gateWait 同款计数）：
 // 窗口内 quota 充足则消耗并返回 true，已满则返回 false——绝不阻塞等待下个窗口。
 // 学生手动登录（LoginByPassword）用它收口全局 doLogin 频率闸门：窗口已满时立即拒绝

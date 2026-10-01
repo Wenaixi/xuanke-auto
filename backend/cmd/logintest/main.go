@@ -84,7 +84,7 @@ func main() {
 			continue
 		}
 		c := upstream.New(site, cfg.PlatformBaseURL, vision)
-		c.SetRecognizer(recognizer) // 显式注入当前生效识别引擎
+		c.UpdateCaptcha(recognizer, vision) // 显式注入当前生效识别引擎（单出口通道）
 		start := time.Now()
 		token, err := c.Login(cd.Account, pwd)
 		cost := time.Since(start)

@@ -675,7 +675,7 @@ func TestAdminConfigSaveFailStillDispatch(t *testing.T) {
 		t.Fatalf("内存配置已生效: %v", got)
 	}
 	// 下游热下发未跳过：再次热改（仍失败）后登录，验证码识别应打到新地址并失败——
-	// 证明 SetVision/识别引擎切换在落库失败路径也被执行
+	// 证明识别引擎切换（UpdateCaptchaEngine）在落库失败路径也被执行
 	code, j = doJSONAdmin(t, d.api, "PUT", "/api/admin/config",
 		`{"vision_base_url":"https://invalid2.example.com/v1"}`, adminTok)
 	if j["code"].(float64) != 500 {

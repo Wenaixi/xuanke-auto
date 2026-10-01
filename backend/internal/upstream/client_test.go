@@ -116,7 +116,7 @@ func readyProbe(t *testing.T, baseURL string) {
 func TestLoginRetryWithinLimits(t *testing.T) {
 	srv, captchas, submits := loginMockServer(t, 1, 1) // 识别 1 次失败 + 提交 1 次被拒后成功
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // New 不再静默建引擎，显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // New 不再静默建引擎，显式注入
 
 	tok, err := c.Login("acct", "pwd")
 	if err != nil {
@@ -141,7 +141,7 @@ func TestLoginRetryWithinLimits(t *testing.T) {
 func TestLoginStopsAfterCaptchaExhausted(t *testing.T) {
 	srv, captchas, submits := loginMockServer(t, 99, 99) // 永远失败
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 
 	_, err := c.Login("acct", "pwd")
 	if err == nil {
@@ -165,7 +165,7 @@ func TestLoginNetworkErrorAbortsImmediately(t *testing.T) {
 	// 双保险成族闭环（探活只关心 accept 就绪，500 响应不影响就绪判定）。
 	readyProbe(t, srv.URL)
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 	if _, err := c.Login("acct", "pwd"); err == nil {
 		t.Fatal("应报错")
 	}
@@ -242,23 +242,24 @@ func TestSetCookiesMergeSemantics(t *testing.T) {
 	}
 }
 
-// TestSetVisionKeepsLocalRecognizer 验证 SetVision 传入的 cfg.recognizer 为零值（nil）时，
-// 绝不能清空当前生效的本地识别引擎：热更新 Vision 配置不应波及识别引擎选择。
-func TestSetVisionKeepsLocalRecognizer(t *testing.T) {
+// TestUpdateCaptchaSetsRecognizerAtomically UpdateCaptcha 单出口原子写齐：
+// 识别器与视觉配置同一把锁内更新，绝无中间时序空窗。
+func TestUpdateCaptchaSetsRecognizerAtomically(t *testing.T) {
 	c := newTestClient("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "k", Model: "m"})
-	c.SetRecognizer(localRecognizer{name: "ddddocr-local"})
-
-	// 热更新 Vision 配置：调用方只传 VisionConfig，recognizer 字段为零值 nil
-	c.SetVision(VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
+	c.UpdateCaptcha(localRecognizer{name: "ddddocr-local"}, VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
 
 	c.mu.Lock()
 	cur := c.visionCfg.recognizer
+	cfg := c.visionCfg
 	c.mu.Unlock()
 	if cur == nil {
-		t.Fatal("SetVision 不得清空当前识别引擎（即便传入的 cfg.recognizer 为 nil）")
+		t.Fatal("UpdateCaptcha 不得清空识别引擎")
 	}
 	if l, ok := cur.(localRecognizer); !ok || l.name != "ddddocr-local" {
-		t.Fatalf("SetVision 应保留本地引擎实例，实际 %T %#v", cur, cur)
+		t.Fatalf("UpdateCaptcha 应写入注入的引擎实例，实际 %T %#v", cur, cur)
+	}
+	if cfg.APIKey != "new-key" {
+		t.Fatalf("UpdateCaptcha 应同步写入视觉配置，实际 %+v", cfg)
 	}
 }
 
@@ -269,20 +270,18 @@ type localRecognizer struct {
 
 func (l localRecognizer) Recognize(img []byte) (string, error) { return "abcd", nil }
 
-// TestSetVisionRebuildsWhenCurrentIsVisionOrNil 验证 SetVision 在"当前引擎是 Vision 或 nil"时
-// 按新配置重建 Vision 识别器（保持原有语义）。
-func TestSetVisionRebuildsWhenCurrentIsVisionOrNil(t *testing.T) {
-	c := newTestClient("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "", Model: ""})
-	// 初始为 nil（APIKey 为空不自动建识别器）
-	c.SetVision(VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
+// TestUpdateCaptchaEnginePassesThrough UpdateCaptcha 传入 nil 引擎时识别器保持注入值——
+// 单出口语义：识别器由调用方（accounts.Manager 决策）显式给出，本方法只负责原子写齐。
+func TestUpdateCaptchaEnginePassesThrough(t *testing.T) {
+	c := newTestClient("http://dummy", VisionConfig{BaseURL: "http://dummy", APIKey: "k", Model: "m"})
+	c.UpdateCaptcha(localRecognizer{name: "keep"}, VisionConfig{BaseURL: "http://new", APIKey: "new-key", Model: "new-model"})
 	c.mu.Lock()
-	cur := c.visionCfg.recognizer
-	c.mu.Unlock()
-	if cur == nil {
-		t.Fatal("当前引擎为 nil 时 SetVision 应重建 Vision 识别器")
+	defer c.mu.Unlock()
+	if c.visionCfg.APIKey != "new-key" {
+		t.Fatalf("视觉配置应同步更新，实际 %+v", c.visionCfg)
 	}
-	if v, ok := cur.(*VisionRecognizer); !ok || v.cfg.APIKey != "new-key" {
-		t.Fatalf("重建的 Vision 识别器应用新配置，实际 %#v", v)
+	if l, ok := c.visionCfg.recognizer.(localRecognizer); !ok || l.name != "keep" {
+		t.Fatalf("识别器应保持注入实例，实际 %T", c.visionCfg.recognizer)
 	}
 }
 
@@ -323,7 +322,7 @@ func TestReloginIfNeeded(t *testing.T) {
 	// 依赖 SetCredentials 的旧断言（ReloginIfNeeded 手动 SetCredentials 后可用）无法覆盖
 	// 线上真实路径——每次账密登录后自动重登永远报"未登录且无保存账密"。
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 	if _, err := c.Login("acct", "pwd"); err != nil {
 		t.Fatalf("运行时登录失败: %v", err)
 	}
@@ -339,7 +338,7 @@ func TestReloginIfNeeded(t *testing.T) {
 
 	// 重启恢复路径（Restore 经 SetCredentials 注入）：保持原语义回归
 	restoreC := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	restoreC.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	restoreC.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 	restoreC.SetCredentials("acct", "pwd", "old-token")
 	if _, err := restoreC.doRequest(http.MethodPost, "/electives/select", nil, ""); err == nil {
 		t.Fatal("期望失败")
@@ -376,7 +375,7 @@ func TestLoginLogsAttempts(t *testing.T) {
 	srv, _, _ := loginMockServer(t, 1, 1) // 识别 1 次失败 + 提交 1 次被拒后成功
 	t.Cleanup(srv.Close)
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 
 	if _, err := c.Login("acct", "pwd"); err != nil {
 		t.Fatalf("登录应成功: %v", err)
@@ -403,7 +402,7 @@ func TestLoginLogsFailureSummary(t *testing.T) {
 	srv, captchas, _ := loginMockServer(t, 99, 99) // 永远失败
 	t.Cleanup(srv.Close)
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})) // 显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}) // 显式注入
 
 	if _, err := c.Login("acct", "pwd"); err == nil {
 		t.Fatal("登录应失败")
@@ -448,8 +447,8 @@ func TestLoginRetriesTransientInitError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := newTestClient(srv.URL, VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
-	// New 不再静默建 Vision 引擎（唯一注入通道 = SetRecognizer）——显式注入
-	c.SetRecognizer(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}))
+	// New 不再静默建 Vision 引擎（唯一注入通道 = UpdateCaptcha）——显式注入
+	c.UpdateCaptcha(NewVisionRecognizer(VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}), VisionConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	tok, err := c.Login("acct", "pwd")
 	if err != nil {
 		t.Fatalf("瞬时初始化失败后应重试成功: %v", err)

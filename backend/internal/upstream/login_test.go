@@ -69,7 +69,7 @@ func TestLoginEngineRoundTrip(t *testing.T) {
 	defer srv.Close()
 
 	e := NewLoginEngine(testDescriptor(srv.URL), srv.URL, VisionConfig{})
-	e.SetRecognizer(fixedRecognizer("1234"))
+	e.UpdateCaptcha(fixedRecognizer("1234"), VisionConfig{})
 	tok, err := e.Login("u", "p")
 	if err != nil {
 		t.Fatalf("期望登录成功，got %v", err)
@@ -107,7 +107,7 @@ func TestLoginEngineRecognizerRetry(t *testing.T) {
 	e := NewLoginEngine(testDescriptor(srv.URL), srv.URL, VisionConfig{})
 	rec := fixedRecognizer("1234")
 	rec.failN = 2 // 前 2 次识别失败 → 第 3 次成功（识别≤3 预算内）
-	e.SetRecognizer(rec)
+	e.UpdateCaptcha(rec, VisionConfig{})
 	tok, err := e.Login("u", "p")
 	if err != nil {
 		t.Fatalf("识别失败重试后应登录成功，got %v", err)

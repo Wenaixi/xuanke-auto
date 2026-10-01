@@ -46,7 +46,3 @@ type SiteError struct {
 
 func (e *SiteError) Error() string { return e.Msg }
 
-// NewSiteError 构造平台错误（站点适配器包的统一出口）。
-func NewSiteError(kind OpErrorKind, msg string, code int) *SiteError {
-	return &SiteError{Kind: kind, Msg: msg, Code: code}
-}

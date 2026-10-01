@@ -614,3 +614,46 @@ func TestClassOpPropagatesUnauthorized(t *testing.T) {
 		t.Fatalf("退选也应返回 ErrUnauthorized，实际 %v", err)
 	}
 }
+
+// TestIsClassFullReadsDerivedField 实时满员判据收敛为 CountEntry.ClassFull 派生字段
+// （对齐 Class.ClassFull 单一记忆点，契约 15/121 家族）：解码端算一次，引擎与调度器
+// 一律读字段。数字矛盾时以字段为准——旧实现按 MaxCount/SelectedCount 重算第二公式，
+// 与快照侧手写判据同源漂移；testsite 假档案 30/30 → ClassFull=true 即字段生效形态。
+func TestIsClassFullReadsDerivedField(t *testing.T) {
+	socketPreheat()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// zhidao 形状 countList + class_full 字段（maxCount 恒 0 的对照形态）
+		w.Write([]byte(`{"code":0,"countList":[
+			{"id":9001,"selectedCount":0,"maxCount":10,"class_full":true},
+			{"id":9002,"selectedCount":0,"maxCount":10,"class_full":false}
+		]}`))
+	}))
+	defer srv.Close()
+	desc := testDescriptor(srv.URL)
+	desc.Decode.Counts = func(body []byte) ([]CountEntry, error) {
+		var j struct {
+			Code      int          `json:"code"`
+			CountList []CountEntry `json:"countList"`
+		}
+		if err := json.Unmarshal(body, &j); err != nil {
+			return nil, err
+		}
+		return j.CountList, nil
+	}
+	c := New(desc, srv.URL, VisionConfig{})
+	full, err := c.IsClassFull(9001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !full {
+		t.Fatal("ClassFull=true（数字矛盾）应判定满员——必须读派生字段")
+	}
+	full, err = c.IsClassFull(9002)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full {
+		t.Fatal("ClassFull=false 的课程不应判定满员（读派生字段）")
+	}
+}

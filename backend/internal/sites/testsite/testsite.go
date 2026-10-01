@@ -215,7 +215,12 @@ func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 	}
 	out := make([]upstream.CountEntry, 0, len(raw.Data))
 	for _, d := range raw.Data {
-		out = append(out, upstream.CountEntry{ID: d.ID, SelectedCount: d.Enrolled, MaxCount: d.Capacity})
+		// ClassFull 满员派生（与 Class.ClassFull 同族单一记忆点）：解码端算一次，
+		// IsClassFull 读字段不再重算。假档案下发 capacity——与 zhidao（恒 0）成对照。
+		out = append(out, upstream.CountEntry{
+			ID: d.ID, SelectedCount: d.Enrolled, MaxCount: d.Capacity,
+			ClassFull: d.Capacity > 0 && d.Enrolled >= d.Capacity,
+		})
 	}
 	return out, nil
 }

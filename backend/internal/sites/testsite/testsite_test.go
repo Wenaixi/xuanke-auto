@@ -183,6 +183,12 @@ func TestDecodeCounts(t *testing.T) {
 	if counts[1].MaxCount != 30 {
 		t.Fatalf("第 2 条 MaxCount 应为 30，实际 %d", counts[1].MaxCount)
 	}
+	if counts[0].MaxCount != 30 || counts[0].ClassFull {
+		t.Fatalf("第 1 条应 7/30 未满（MaxCount=30, ClassFull=false），实际 %+v", counts[0])
+	}
+	if !counts[1].ClassFull {
+		t.Fatalf("第 2 条 30/30 满员，ClassFull 必须为 true（实时判据读派生字段），实际 %+v", counts[1])
+	}
 }
 
 // TestDecodeLogin 登录响应取 token；状态非 OK 或 token 空一律判被拒。

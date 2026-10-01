@@ -763,6 +763,11 @@ type CountEntry struct {
 	SelectedCount int `json:"selectedCount"`
 	AuditedCount  int `json:"auditedCount"`
 	MaxCount      int `json:"maxCount"` // 平台未实证下发（select.js 0 消费），恒 0，仅防御性保留
+	// ClassFull 满员派生字段（单一记忆点，与 Class.ClassFull 同族）：由解码端计算，
+	// IsClassFull 一律读本字段、绝不自行重算第二公式。zhidao 档案 MaxCount 恒 0
+	// → ClassFull 恒 false（实时复核永不确证满员，仅防御性兜底）；testsite 假档案
+	// 下发 capacity 时派生即生效。
+	ClassFull bool `json:"class_full"`
 }
 
 // StudentCounts 查询课程实时人数。
@@ -796,7 +801,8 @@ func (c *Client) IsClassFull(classID int) (bool, error) {
 	}
 	for _, ce := range counts {
 		if ce.ID == classID {
-			return ce.MaxCount > 0 && ce.SelectedCount >= ce.MaxCount, nil
+			// 满员判据读派生字段（解码端算一次）——绝不在引擎侧重算第二公式。
+			return ce.ClassFull, nil
 		}
 	}
 	return false, fmt.Errorf("课程 %d 无人数数据", classID)

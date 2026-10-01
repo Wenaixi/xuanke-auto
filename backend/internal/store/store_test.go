@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -104,15 +105,20 @@ func openStoreMultiConn(t *testing.T) *Store {
 
 func TestCredentialsRoundTrip(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.SaveCredential("acct1", "ENC-ABC", "tok1"); err != nil {
+	if err := s.SaveCredential("acct1", "ENC-ABC", "tok1", "zhidao-2026"); err != nil {
 		t.Fatal(err)
 	}
 	creds, err := s.LoadCredentials()
 	if err != nil || len(creds) != 1 || creds[0].Account != "acct1" || creds[0].PasswordEnc != "ENC-ABC" {
 		t.Fatalf("凭据往返失败: %+v %v", creds, err)
 	}
+	// 平台标记必须随凭据往返：它是"跨平台 token 一律丢弃"的判据来源，
+	// 丢了就等于把旧平台会话当自己的用。
+	if creds[0].PlatformID != "zhidao-2026" {
+		t.Fatalf("platform_id 未往返: %+v", creds[0])
+	}
 	// upsert 覆盖
-	if err := s.SaveCredential("acct1", "ENC-XYZ", "tok2"); err != nil {
+	if err := s.SaveCredential("acct1", "ENC-XYZ", "tok2", "zhidao-2026"); err != nil {
 		t.Fatal(err)
 	}
 	creds, _ = s.LoadCredentials()
@@ -484,5 +490,77 @@ func TestAdminStore(t *testing.T) {
 	all, _ = s.LoadAllLogs(10)
 	if len(all) != 2 {
 		t.Fatalf("删除账号不应清日志（审计保留）: %+v", all)
+	}
+}
+
+// queryAcctClass 深查询管线（任务A）：按账号聚合双列查询。
+func TestQueryAcctClass(t *testing.T) {
+	s := openTestStore(t)
+	// 空表
+	m, err := queryAcctClass(s.db, "success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 0 {
+		t.Fatalf("空表应返回空 map，got %v", m)
+	}
+	// 多账号多行
+	if err := s.SaveSuccess("a1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSuccess("a1", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSuccess("a2", 3); err != nil {
+		t.Fatal(err)
+	}
+	m, err = queryAcctClass(s.db, "success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m["a1"]) != 2 || m["a1"][0] != 1 || m["a1"][1] != 2 || len(m["a2"]) != 1 || m["a2"][0] != 3 {
+		t.Fatalf("分组聚合错误: %v", m)
+	}
+}
+
+// querySlice 深查询管线（任务A）：任意单类型多行查询。
+func TestQuerySlice(t *testing.T) {
+	s := openTestStore(t)
+	type cred struct {
+		acct string
+	}
+	// 空
+	out, err := querySlice(s.db, "SELECT account FROM accounts ORDER BY account", []any{}, func(rows *sql.Rows) (string, error) {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return "", err
+		}
+		return a, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("空表应返回空切片，got %v", out)
+	}
+	// 多行（经由 ListAccounts 依赖的 accounts 表：先 SaveAccountName）
+	if err := s.SaveAccountName("x1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveAccountName("x2"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = querySlice(s.db, "SELECT account FROM accounts ORDER BY account", []any{}, func(rows *sql.Rows) (string, error) {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return "", err
+		}
+		return a, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[0] != "x1" || out[1] != "x2" {
+		t.Fatalf("查询结果错误: %v", out)
 	}
 }

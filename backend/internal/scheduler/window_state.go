@@ -115,6 +115,16 @@ func (w *windowState) purge(acct string) {
 	delete(w.openTimeDetected, acct)
 }
 
+// purgeAll 清空全部开放时间识别槽（切平台用）。
+// 账号槽与全校槽一并清：切平台后旧平台的开放时间对新平台无意义，而
+// openTimeFor 的优先级是「账号槽 → 全校槽 "*"」，只清 "*" 会漏掉全部账号槽。
+// 用重新 make 而非逐键 delete：前者不依赖 map 当前内容，与 newWindowState 一致。
+func (w *windowState) purgeAll() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.openTimeDetected = make(map[string]int64)
+}
+
 // isOpened 返回当前"窗口已开"状态（对外 DTO state.WindowOpened 填充）。
 func (w *windowState) isOpened() bool {
 	w.mu.Lock()

@@ -142,10 +142,12 @@ func runServer(cfg config.Config) *Started {
 
 	// 平台档案热切换（管理员后台「系统配置 → 选课平台」）：闭包收进具名构造函数，
 	// 让"解析档案 → 校验地址 → 读凭据 → 重建客户端"这条编排在测试里可直接断言。
-	// onProfile 同步调度器的开窗信号能力——平台切换必须同步，否则会用旧站点的
-	// 信号语义判新站点（切到无信号平台后开窗永远判不出来，调度器全线停摆）。
+	// onProfile 同步调度器的开窗信号能力与窗口状态——平台切换必须同步，否则会用
+	// 旧站点的信号语义判新站点（切到无信号平台后开窗永远判不出来，调度器全线停摆），
+	// 且会按旧站点的开放时间判新站点的窗口（识别槽无 TTL 兜底，永久残留）。
 	rebindPlatform := newPlatformRebinder(st, accts, decrypt, func(desc upstream.SiteDescriptor) {
 		sched.SetHasWindowSignal(desc.HasWindowSignal)
+		sched.ResetWindowState()
 	})
 
 	if success, err := st.LoadSuccess(); err != nil {

@@ -525,6 +525,35 @@ func (s *Scheduler) PurgeAccount(acct string) {
 	s.state.Courses = keep
 }
 
+// ResetWindowState 清空全部窗口状态位（切平台时由装配面调用）。
+//
+// **为什么切平台必须清**：窗口状态是**平台事实**——开放时间识别值、开窗/关闭
+// 判定、空快照轮数、时钟失败连续数都按旧站点的语义入账，且 openTimeDetected
+// 按既定契约「关闭≠时间消失」永久保留、无 TTL 兜底。不清会让切到开窗时间不同的
+// 平台后，仍按旧平台时刻判开窗/关闭与提交守卫。
+//
+// **只清窗口状态，不动快照与账本**：切平台是同一套选课语义的接口换代
+// （与 accounts.SetProfile 的既定契约一致，目标/成功/退选记录刻意保留）；
+// 课程快照有 snapshotTTL 自然过期，不清也不会跨年级串线（账号专属帧按账号取）。
+//
+// 锁序：只持 s.mu，ws 的每个方法自持 ws.mu（leaf 锁），与 SetHasWindowSignal
+// 完全同构，不扩张锁层级。
+func (s *Scheduler) ResetWindowState() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ws.purgeAll()
+	s.ws.setOpened(false)
+	s.ws.setClosed(false)
+	s.ws.noteProbeReset()
+	s.ws.noteSyncSuccess()
+	// state 是 /state 与 /api/admin/stats 的下发载体，必须与 ws 同步清，
+	// 否则 WindowOpened() 与 state.WindowOpened 会自相矛盾。
+	s.state.WindowOpened = false
+	s.state.WindowClosed = false
+	s.state.OpenTime = time.Time{}
+	s.state.OpenTimeKnown = false
+}
+
 // RestoreTargets 重启恢复目标：与 SetTargetsForAccount 唯一区别是不清
 // refused（内存 + 库行）——重启恢复的目标不是"用户主动重选"，若清库行会把已持久化的
 // 手动退选记录删掉（被恢复顺序抵消）。恢复顺序：RestoreDone → 循环 RestoreTargets

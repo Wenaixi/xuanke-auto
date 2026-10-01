@@ -729,16 +729,16 @@ func (c *Client) classOp(path string, classID int, action string) (string, error
 	if err != nil {
 		return "", err
 	}
-	msg, ok, err := c.desc.Decode.OpResult(body)
+	msg, code, ok, err := c.desc.Decode.OpResult(body)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
 		kind := OpErrorUnknown
 		if c.desc.OpErrorClassifier != nil {
-			kind = c.desc.OpErrorClassifier(msg, 0)
+			kind = c.desc.OpErrorClassifier(msg, code)
 		}
-		return "", &SiteError{Kind: kind, Msg: action + "失败: " + msg, Code: 0}
+		return "", &SiteError{Kind: kind, Msg: action + "失败: " + msg, Code: code}
 	}
 	return msg, nil
 }

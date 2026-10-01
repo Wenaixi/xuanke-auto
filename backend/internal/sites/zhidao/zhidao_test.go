@@ -138,23 +138,28 @@ func TestDecodeElectivesEmptyPublishes(t *testing.T) {
 
 // TestDecodeOpResult 报名/退选成败判据（双布尔）：code==0 && isOk 才算成功——
 // 「code=0 但 isOk=false」必须判失败（真实站点前端看 isOk/isFail 布尔）。
+// 同时断言 code 原样透传（引擎的错误分类与 SiteError.Code 消费它）。
 func TestDecodeOpResult(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want bool
+		name     string
+		body     string
+		want     bool
+		wantCode int
 	}{
-		{"双真成功", `{"code":0,"isOk":true,"msg":"选课成功！"}`, true},
-		{"code=0 但 isOk=false", `{"code":0,"isOk":false,"msg":"选课处理中，请勿重复操作！"}`, false},
-		{"code=1 业务失败", `{"code":1,"isOk":false,"msg":"不在选修报名时间范围内，无法选课！"}`, false},
+		{"双真成功", `{"code":0,"isOk":true,"msg":"选课成功！"}`, true, 0},
+		{"code=0 但 isOk=false", `{"code":0,"isOk":false,"msg":"选课处理中，请勿重复操作！"}`, false, 0},
+		{"code=1 业务失败", `{"code":1,"isOk":false,"msg":"不在选修报名时间范围内，无法选课！"}`, false, 1},
 	}
 	for _, c := range cases {
-		msg, ok, err := decodeOpResult([]byte(c.body))
+		msg, code, ok, err := decodeOpResult([]byte(c.body))
 		if err != nil {
 			t.Fatalf("%s: 解析失败 %v", c.name, err)
 		}
 		if ok != c.want {
 			t.Errorf("%s: ok=%v, want %v", c.name, ok, c.want)
+		}
+		if code != c.wantCode {
+			t.Errorf("%s: code=%v, want %v（业务码必须原样透传给引擎）", c.name, code, c.wantCode)
 		}
 		if msg == "" {
 			t.Errorf("%s: 消息不应为空（管理员据此排障）", c.name)

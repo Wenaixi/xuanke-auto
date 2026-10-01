@@ -86,17 +86,22 @@ func TestDecodeTermsVirtualSingleTerm(t *testing.T) {
 
 // TestDecodeOpResultStatusOK 成败判据 = status=="OK" 单一字符串
 // （知到是 code==0 && isOk 双布尔，且站点状态是整数而非字符串）。
+// code 恒为 0：字符串状态码无法映射进 int 空间，错误分类走文案通道。
 func TestDecodeOpResultStatusOK(t *testing.T) {
-	if _, ok, err := decodeOpResult([]byte(`{"status":"OK"}`)); err != nil || !ok {
+	if msg, code, ok, err := decodeOpResult([]byte(`{"status":"OK"}`)); err != nil || !ok {
 		t.Fatalf("status=OK 应判成功，ok=%v err=%v", ok, err)
+	} else if code != 0 || msg != "OK" {
+		t.Fatalf("code 应恒为 0（字符串码不映射进 int），msg 应为状态串：code=%v msg=%q", code, msg)
 	}
 	for _, bad := range []string{
 		`{"status":"FULL"}`,
 		`{"status":"WINDOW_CLOSED"}`,
 		`{"status":""}`, // 无状态键 = 未确认成功，绝不放过
 	} {
-		if _, ok, err := decodeOpResult([]byte(bad)); err != nil || ok {
+		if _, code, ok, err := decodeOpResult([]byte(bad)); err != nil || ok {
 			t.Fatalf("%s 应判失败，ok=%v err=%v", bad, ok, err)
+		} else if code != 0 {
+			t.Fatalf("%s: code 应恒为 0，got %v", bad, code)
 		}
 	}
 }

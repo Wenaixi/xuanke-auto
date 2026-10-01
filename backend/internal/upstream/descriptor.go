@@ -131,10 +131,13 @@ type Decoders struct {
 	Terms     func(body []byte) ([]YearTerm, error)
 	Electives func(body []byte) (*ElectivesData, error)
 	Counts    func(body []byte) ([]CountEntry, error)
-	// OpResult 报名/退选响应 → (平台消息, 平台是否判定成功, 解析错误)。
+	// OpResult 报名/退选响应 → (平台消息, 平台业务码, 平台是否判定成功, 解析错误)。
 	// 成败判据（code==0 && isOk 这类双布尔约定）刻意留在站点侧：不同站点约定不同，
-	// 引擎只消费"成功/失败"这一位事实。
-	OpResult func(body []byte) (msg string, ok bool, err error)
+	// 引擎只消费"成功/失败"与业务码这两位事实，不解析任何键名。
+	// code 是平台业务码，透传给 OpErrorClassifier 与 SiteError.Code——曾恒传 0，
+	// 让"按数字码分类"的平台接不了（分类器签名承诺了引擎给不出的事实）。业务码是
+	// 字符串、无法映射进 int 空间的平台一律传 0，改由文案分类。
+	OpResult func(body []byte) (msg string, code int, ok bool, err error)
 	Login    func(body []byte) (token string, err error)
 	// Msg 从错误响应体里提取可读文案（token 失效时附在错误里供排障）。
 	Msg func(body []byte) string

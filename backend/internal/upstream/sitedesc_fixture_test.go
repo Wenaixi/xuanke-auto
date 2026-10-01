@@ -73,17 +73,18 @@ func newTestClient(baseURL string, vision VisionConfig) *Client {
 }
 
 // decodeResultEnvelope 通用信封解码：code/isOk/msg（真实站点判据是 code==0 && isOk，
-// 由站点包钉住；夹具沿用同一形状以保证引擎测试覆盖"业务失败"分支）。
-func decodeResultEnvelope(body []byte) (string, bool, error) {
+// 由站点包钉住；夹具沿用同一形状以保证引擎测试覆盖"业务失败"分支）。code 原样
+// 返回，供引擎测试验证业务码确实贯通到错误分类链。
+func decodeResultEnvelope(body []byte) (string, int, bool, error) {
 	var j struct {
 		Code int    `json:"code"`
 		IsOk bool   `json:"isOk"`
 		Msg  string `json:"msg"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
-		return "", false, err
+		return "", 0, false, err
 	}
-	return j.Msg, j.Code == 0 && j.IsOk, nil
+	return j.Msg, j.Code, j.Code == 0 && j.IsOk, nil
 }
 
 func decodeTokenEnvelope(body []byte) (string, error) {

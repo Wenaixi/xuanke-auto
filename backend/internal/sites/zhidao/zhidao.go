@@ -200,19 +200,20 @@ func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 	return j.CountList, nil
 }
 
-// decodeOpResult 报名/退选响应 → (消息, 是否成功)。
+// decodeOpResult 报名/退选响应 → (消息, 业务码, 是否成功)。
 // 本站点成败判据 = code==0 && isOk（双布尔；code=1 的业务失败不在 throw 名单，
-// 真实前端看 isOk/isFail 布尔）。判据刻意留在站点侧：引擎只消费"成功/失败"这一位事实。
-func decodeOpResult(body []byte) (string, bool, error) {
+// 真实前端看 isOk/isFail 布尔）。判据刻意留在站点侧：引擎只消费"成功/失败"与
+// 业务码这两位事实。code 原样透传（站点业务码本就是整数）。
+func decodeOpResult(body []byte) (string, int, bool, error) {
 	var j struct {
 		Code int    `json:"code"`
 		IsOk bool   `json:"isOk"`
 		Msg  string `json:"msg"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
-		return "", false, err
+		return "", 0, false, err
 	}
-	return j.Msg, j.Code == 0 && j.IsOk, nil
+	return j.Msg, j.Code, j.Code == 0 && j.IsOk, nil
 }
 
 // decodeLogin 登录响应 → token（isOk 为假或 token 为空一律判登录被拒）。

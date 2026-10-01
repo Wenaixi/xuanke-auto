@@ -222,15 +222,17 @@ func decodeCounts(body []byte) ([]upstream.CountEntry, error) {
 
 // decodeOpResult 成败判据 = status=="OK"（**单字符串约定**，与知到的
 // code==0 && isOk 双布尔刻意不同）。未登录由 Envelope 钩子先行拦截，
-// 这里只判「成功与否」这一位事实。
-func decodeOpResult(body []byte) (string, bool, error) {
+// 这里只判「成功与否」这一位事实。code 恒传 0：本档案的业务码是字符串，
+// 无法映射进 int 空间（引擎的错误分类与 SiteError.Code 都是 int），故错误
+// 分类走文案通道而非数字码通道。
+func decodeOpResult(body []byte) (string, int, bool, error) {
 	var j struct {
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(body, &j); err != nil {
-		return "", false, err
+		return "", 0, false, err
 	}
-	return j.Status, j.Status == statusOK, nil
+	return j.Status, 0, j.Status == statusOK, nil
 }
 
 // decodeLogin 登录响应取 token；状态非 OK 或 token 空一律判被拒。

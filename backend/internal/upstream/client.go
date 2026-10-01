@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -103,6 +104,18 @@ func New(desc SiteDescriptor, baseURL string, visionCfg VisionConfig) *Client {
 
 // Prewarm 静默轻量请求预热底层 TCP 与 TLS 连接池。
 // 发送一条轻量 GET /login，只为完成握手并在连接池保留热连接。
+// drainAndCloseBody 排空并关闭 HTTP 响应体，以便复用底层 TCP/TLS Keep-Alive 连接池。
+// 增加 64KB 上限防止超大异常响应阻塞，零静默忽略契约留痕。
+func drainAndCloseBody(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	defer resp.Body.Close()
+	if n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); err != nil && err != io.EOF {
+		log.Printf("[upstream] 排空响应体异常 (read %d bytes): %v", n, err)
+	}
+}
+
 func (c *Client) Prewarm() error {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+c.desc.LoginPath, nil)
 	if err != nil {
@@ -113,8 +126,7 @@ func (c *Client) Prewarm() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	drainAndCloseBody(resp)
 	return nil
 }
 
@@ -130,8 +142,7 @@ func (c *Client) SyncServerTime() (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	drainAndCloseBody(resp)
 
 	dateStr := resp.Header.Get("Date")
 	if dateStr == "" {

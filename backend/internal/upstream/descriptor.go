@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -30,6 +31,12 @@ type LoginHooks struct {
 	EncryptIdentification func(account, password string) (string, error)
 	// DeviceID 设备指纹（复刻站点前端 JS 的 getUniqueDeviceId 生成规则）。
 	DeviceID func(ua string, now time.Time) string
+	// Custom 自定义登录接管钩子（可选，nil = 走引擎默认 4 步流）。
+	// 适用场景：统一身份认证 CAS/OAuth2 多步 302 重定向、滑动验证码、或者非标准两步认证等。
+	// 当提供此钩子时，LoginEngine.Login 优先全权委托给此钩子，在会话完成后返回 token，
+	// 会话过程中产生的 Cookie 会被引擎自动捕获并持久化。
+	// 这使得接入任何非标登录平台时，引擎代码零改动！
+	Custom func(sess *http.Client, baseURL, account, password string) (string, error)
 }
 
 // AuthMode 会话 token 的下发通道。四态而非布尔：不同平台要的通道不同。
@@ -295,21 +302,23 @@ func (d SiteDescriptor) Validate() error {
 	if d.Login.UserAgent == "" {
 		return fmt.Errorf("站点档案 %s 缺少 UserAgent", d.ID)
 	}
-	if d.Login.EncryptIdentification == nil || d.Login.DeviceID == nil {
-		return fmt.Errorf("站点档案 %s 缺少登录钩子", d.ID)
+	if d.Login.Custom == nil {
+		if d.Login.EncryptIdentification == nil || d.Login.DeviceID == nil {
+			return fmt.Errorf("站点档案 %s 缺少登录钩子", d.ID)
+		}
 	}
 	if d.Decode.Terms == nil || d.Decode.Electives == nil || d.Decode.Counts == nil ||
 		d.Decode.OpResult == nil || d.Decode.Login == nil || d.Decode.Msg == nil {
 		return fmt.Errorf("站点档案 %s 缺少响应解码钩子", d.ID)
 	}
-	// 五个表单键无条件必填：引擎每次请求都要写它们，键名为空即写出 `=value`
-	// （空键名），平台多半直接拒而现场报"参数缺失"。Identification 归入本表而非
-	// 下面的条件式判据，因为 EncryptIdentification 是无条件必填钩子——"登录表单
-	// 没有账号密码密文字段"这种档案根本无法表达（LoginEngine 无条件调用它）。
-	for name, f := range map[string]string{
+	// 四个基础表单键无条件必填；若未走自定义登录，Identification 也必须非空
+	requiredForms := map[string]string{
 		"Year": d.Form.Year, "Term": d.Form.Term, "IDs": d.Form.IDs, "ClassID": d.Form.ClassID,
-		"Identification": d.Form.Identification,
-	} {
+	}
+	if d.Login.Custom == nil {
+		requiredForms["Identification"] = d.Form.Identification
+	}
+	for name, f := range requiredForms {
 		if f == "" {
 			return fmt.Errorf("站点档案 %s 缺少表单字段名 %s", d.ID, name)
 		}

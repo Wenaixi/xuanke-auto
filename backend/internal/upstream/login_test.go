@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -173,3 +175,81 @@ func TestSubmitLoginOmitsEmptyKeyNames(t *testing.T) {
 		t.Fatalf("档案未声明 Identification 键名就不该提交该键，实际收到 %q", gotIdent)
 	}
 }
+
+// TestLoginEngine_CustomLogin_Success 验证自定义登录接管钩子成功路径：
+// 自定义逻辑全权接管会话，成功返回 token，并在 sess.Jar 中植入的 Cookie 能被引擎捕获。
+func TestLoginEngine_CustomLogin_Success(t *testing.T) {
+	d := testDescriptor("http://mock.example.com")
+	called := false
+	d.Login.Custom = func(sess *http.Client, baseURL, account, password string) (string, error) {
+		called = true
+		if account != "student1" || password != "pass123" {
+			t.Errorf("参数传递错误: account=%s, password=%s", account, password)
+		}
+		// 模拟自定义多步登录中设置了 Cookie
+		u, _ := url.Parse(baseURL)
+		sess.Jar.SetCookies(u, []*http.Cookie{
+			{Name: "custom_session_id", Value: "sess_xyz"},
+		})
+		return "token_custom_888", nil
+	}
+
+	e := NewLoginEngine(d, "http://mock.example.com", VisionConfig{})
+	token, err := e.Login("student1", "pass123")
+	if err != nil {
+		t.Fatalf("自定义登录失败: %v", err)
+	}
+	if !called {
+		t.Fatal("Custom 登录钩子未被调用")
+	}
+	if token != "token_custom_888" {
+		t.Fatalf("期望 token_custom_888，实际 %q", token)
+	}
+	if e.Token() != "token_custom_888" {
+		t.Fatalf("Token() 访问器未同步: %q", e.Token())
+	}
+	if e.cookies["custom_session_id"] != "sess_xyz" {
+		t.Fatalf("未能从 jar 捕获自定义会话 Cookie: %v", e.cookies)
+	}
+}
+
+// TestLoginEngine_CustomLogin_Errors 验证自定义登录接管钩子的错误与空令牌分支。
+func TestLoginEngine_CustomLogin_Errors(t *testing.T) {
+	d := testDescriptor("http://mock.example.com")
+	d.Login.Custom = func(sess *http.Client, baseURL, account, password string) (string, error) {
+		return "", errors.New("CAS 认证失败: 账号或密码错误")
+	}
+
+	e := NewLoginEngine(d, "http://mock.example.com", VisionConfig{})
+	_, err := e.Login("student1", "wrong")
+	if err == nil || !strings.Contains(err.Error(), "CAS 认证失败") {
+		t.Fatalf("期望捕获自定义错误，实际得到 %v", err)
+	}
+
+	// 测试返回空令牌被拦截
+	d.Login.Custom = func(sess *http.Client, baseURL, account, password string) (string, error) {
+		return "", nil // 无错误但返回空 token
+	}
+	e2 := NewLoginEngine(d, "http://mock.example.com", VisionConfig{})
+	_, err2 := e2.Login("student1", "pass")
+	if err2 == nil || !strings.Contains(err2.Error(), "自定义登录未返回有效令牌") {
+		t.Fatalf("期望空令牌报错，实际得到 %v", err2)
+	}
+}
+
+// TestSiteDescriptor_Validate_CustomLogin 验证声明了 Custom 时豁免旧登录算法钩子与 Identification。
+func TestSiteDescriptor_Validate_CustomLogin(t *testing.T) {
+	d := testDescriptor("http://mock.example.com")
+	d.Login.Custom = func(sess *http.Client, baseURL, account, password string) (string, error) {
+		return "tok", nil
+	}
+	// 清空旧 4 步流的钩子和表单键
+	d.Login.EncryptIdentification = nil
+	d.Login.DeviceID = nil
+	d.Form.Identification = ""
+
+	if err := d.Validate(); err != nil {
+		t.Fatalf("声明了 Custom 的档案应当通过 Validate，实际失败: %v", err)
+	}
+}
+

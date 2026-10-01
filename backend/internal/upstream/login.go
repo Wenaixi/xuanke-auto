@@ -35,9 +35,8 @@ func NewLoginEngine(desc SiteDescriptor, baseURL string, vc VisionConfig) *Login
 	return &LoginEngine{desc: desc, baseURL: baseURL, Vision: vc, cookies: map[string]string{}}
 }
 
-// SetRecognizer 热切换识别引擎（同步模板 VisionConfig.recognizer——与 accounts.Manager
-// SetRecognizer 同款"绝不挥动引擎切换"语义，模板带引擎供后续新建客户端）。
-// UpdateCaptcha 原子更新识别器与视觉配置（单次加锁写齐，消灭中间时序空窗）。
+// UpdateCaptcha 原子更新识别器与视觉配置（单次加锁写齐，消灭中间时序空窗，
+// 同步模板 VisionConfig.recognizer，模板带引擎供后续新建客户端）。
 func (e *LoginEngine) UpdateCaptcha(r CaptchaRecognizer, vc VisionConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -56,6 +55,34 @@ func (e *LoginEngine) Token() string {
 // 刷新验证码重试，最多 maxCaptchaAttempts 次；网络/配置错误立即返回（无谓重试只累积
 // 平台限流）。成功返回 token（并写进引擎内部供 Token() 读取）。
 func (e *LoginEngine) Login(account, password string) (string, error) {
+	// 0. 若档案声明了自定义登录接管钩子，全权委托给档案钩子（支持 CAS/OAuth2/复杂非标认证）
+	if e.desc.Login.Custom != nil {
+		jar, _ := cookiejar.New(nil)
+		sess := &http.Client{Timeout: 15 * time.Second, Jar: jar}
+		token, err := e.desc.Login.Custom(sess, e.baseURL, account, password)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(token) == "" {
+			return "", fmt.Errorf("自定义登录未返回有效令牌")
+		}
+		u, uErr := url.Parse(e.baseURL)
+		if uErr == nil && sess.Jar != nil {
+			e.mu.Lock()
+			if e.cookies == nil {
+				e.cookies = make(map[string]string)
+			}
+			for _, c := range sess.Jar.Cookies(u) {
+				e.cookies[c.Name] = c.Value
+			}
+			e.mu.Unlock()
+		}
+		e.mu.Lock()
+		e.token = token
+		e.mu.Unlock()
+		return token, nil
+	}
+
 	const maxCaptchaAttempts = 3 // 验证码识别最大次数（识别失败/提交被拒各刷新一次）
 	var lastErr error
 	for attempt := 1; attempt <= maxCaptchaAttempts; attempt++ {

@@ -564,3 +564,31 @@ func TestQuerySlice(t *testing.T) {
 		t.Fatalf("查询结果错误: %v", out)
 	}
 }
+
+// TestLoadCredentialsEmptyTable 凭据存在性负向钉（契约 131 对偶）：空表/幽灵账号场景
+// LoadCredentials 必须返回空切片且无错误——查无账号是正常态而非异常（登录入口另有
+// 明确拒绝），若未来实现把"空结果"改报错，登录装配与 account 解析会误伤全量正常用户。
+// 与 TestCredentialsRoundTrip 的正向（1 条往返）成对。
+func TestLoadCredentialsEmptyTable(t *testing.T) {
+	s := openTestStore(t)
+	creds, err := s.LoadCredentials()
+	if err != nil {
+		t.Fatalf("空表查询不得报错: %v", err)
+	}
+	if len(creds) != 0 {
+		t.Fatalf("空表必须返回空切片（len=0），实际 %d 条: %+v", len(creds), creds)
+	}
+	// querySlice 对空结果返回 nil 切片属既定实现（调用方 range/len 均安全），
+	// 本测试只锁"len==0 且无错误"的契约，不锁内部切片具体形态。
+	// 写入后删除（DeleteAccount 全链路）再查：仍是空态
+	if err := s.SaveCredential("acct1", "ENC", "tok", "zhidao-2026"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAccount("acct1"); err != nil {
+		t.Fatal(err)
+	}
+	creds, err = s.LoadCredentials()
+	if err != nil || len(creds) != 0 {
+		t.Fatalf("删除后应回到空表语义: %d 条 %v", len(creds), err)
+	}
+}

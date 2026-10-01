@@ -7,7 +7,9 @@ import {
   buildTargets,
   targetsUseCurrentPublishes,
   commitTargetsGuards,
+  mergeEchoIntoSelected,
 } from "./targetGuard"
+import type { EchoCourse } from "./targetGuard"
 import type { SchedulerState, ClassItem } from "../types"
 
 // targetGuard 三纯函数正式单测（把 guard 脚本断言固化，成为 vitest 测试面的第一批）。
@@ -163,5 +165,70 @@ describe("commitTargetsGuards", () => {
     expect(commitTargetsGuards([{ publish_id: 1, class_id: 10, course_name: "x", priority: 0 }], 1, [{ publish_id: 1 }])).toEqual({
       ok: true,
     })
+  })
+})
+describe("mergeEchoIntoSelected", () => {
+  // 回显合并契约（CLAUDE.md 契约 11）：触碰发布保留现状（空数组清空绝不复活）、
+  // 未触碰按 priority 补进、rev>0 && 全空绝不合并、首帧未到不置位 echoedRef。
+  // 幽灵 publish_id 不进 selected；排序按 priority 升序；无合并返回原引用。
+  const ec = (id: number, pub: number, priority: number): EchoCourse =>
+    ({ class_id: id, publish_id: pub, course_name: "x", priority } as EchoCourse)
+  const pubs = [1, 2]
+
+  it("rev>0 且 selected 全空（用户明确全清空）→ 绝不合并，返回原引用", () => {
+    const prev = {}
+    expect(mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 5, pubs)).toEqual({ merged: false, next: prev })
+  })
+  it("首帧未到（rev=0 且有内容）→ 正常合并（回显发生在保存后）", () => {
+    const prev = {}
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 0, pubs)
+    expect(out.merged).toBe(true)
+    expect(out.next[1]).toEqual([{ id: 10, publish_id: 1, course_name: "x" } as ClassItem])
+  })
+  it("已触碰发布（非空）→ 补进未勾选课程，保留用户勾选且排在前面", () => {
+    const prev = { 1: [cls(20, 1)] }
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 2, pubs)
+    expect(out.next[1].map((c) => c.id)).toEqual([20, 10])
+    expect(out.merged).toBe(true)
+  })
+  it("已触碰发布且课程已存在 → 不重复追加，返回原引用", () => {
+    const prev = { 1: [cls(10, 1)] }
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 2, pubs)
+    expect(out.next).toBe(prev)
+    expect(out.merged).toBe(false)
+  })
+  it("空数组发布（用户显式清空该发布）→ 绝不复活", () => {
+    const prev = { 1: [] }
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 2, pubs)
+    expect(out.next[1]).toEqual([])
+    expect(out.merged).toBe(false)
+  })
+  it("未触碰发布 → 按 priority 升序补进（后端旧目标回显）", () => {
+    // 发布 1 已被用户触碰（非空，anyHas=true 不触发清空守卫），发布 2 未触碰 → 整体补进
+    const prev = { 1: [cls(20, 1)] }
+    const out = mergeEchoIntoSelected(prev, [ec(11, 2, 1), ec(10, 2, 0)], 2, pubs)
+    expect(out.next[1].map((c) => c.id)).toEqual([20])
+    expect(out.next[2].map((c) => c.id)).toEqual([10, 11])
+    expect(out.merged).toBe(true)
+  })
+  it("幽灵 publish_id（不在当前发布集合）→ 过滤不进 selected", () => {
+    const prev = {}
+    const out = mergeEchoIntoSelected(prev, [ec(99, 999, 0)], 2, pubs)
+    expect(out.next).toEqual({})
+    expect(out.merged).toBe(false)
+  })
+  it("无任何新课程可补（全部已触碰且无缺口）→ 返回原引用", () => {
+    const prev = { 1: [cls(10, 1)] }
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 2, pubs)
+    expect(out.next).toBe(prev)
+  })
+  it("publishIds 支持 Set 输入（与 cleanStaleSelected 同接口族）", () => {
+    const prev = {}
+    const out = mergeEchoIntoSelected(prev, [ec(10, 1, 0)], 0, new Set([1]))
+    expect(out.next[1]).toHaveLength(1)
+  })
+  it("selected 为空对象且无 courses → merged=false 返回原引用", () => {
+    const prev = {}
+    expect(mergeEchoIntoSelected(prev, [], 0, pubs)).toEqual({ merged: false, next: prev })
   })
 })

@@ -11,7 +11,7 @@ import { Progress } from "../components/ui/Progress"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
-import { cleanStaleSelected, selectedHasStalePublish } from "../lib/targetGuard"
+import { cleanStaleSelected, selectedHasStalePublish, mergeEchoIntoSelected } from "../lib/targetGuard"
 import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
 import { useTargetSave } from "../lib/useTargetSave"
 import {
@@ -259,39 +259,10 @@ export default function Select({ account, sessionToken, onDone }: Props) {
     const pubs = data?.publishes ?? []
     if (pubs.length === 0) return
     const currentIds = new Set(pubs.map((p) => p.publish_id))
-    const ordered = [...courses]
-      .sort((a, b) => a.priority - b.priority)
-      .filter((c) => currentIds.has(c.publish_id)) // 幽灵 publish_id 不进 selected
-    setSelected((prev) => {
-      const anyHas = Object.values(prev).some((arr) => arr.length > 0)
-      const hasTouched = Object.keys(prev).length > 0
-      // 用户已明确全清空（rev>0 且无任何条目）→ 绝不合并回显（清空语义不可侵犯）
-      if (rev > 0 && !anyHas) return prev
-      const next = { ...prev }
-      let merged = false
-      for (const c of ordered) {
-        const list = next[c.publish_id]
-        if (list) {
-          // 已触碰发布：空数组 = 用户显式清空该发布（清空语义绝不复活）；
-          // 非空数组 = 用户添加了课程——把后端旧目标中用户未勾选的补进（同发布
-          // "添加一门"语义：慢首帧下旧目标尚未回显，不补就会被防抖 PUT 整包覆盖删掉）。
-          // 补进按 priority 序排在用户勾选之后，用户可随后自行调整首选顺序。
-          if (list.length > 0 && !list.some((item) => item.id === c.class_id)) {
-            next[c.publish_id] = [
-              ...list,
-              { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem,
-            ]
-            merged = true
-          }
-          continue
-        }
-        ;(next[c.publish_id] ??= []).push({ id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem)
-        merged = true
-      }
-      // 无任何新发布可补（用户已触碰全部有目标的发布）→ 保持现状
-      if (!hasTouched && !merged) return prev
-      return next
-    })
+    // 回显合并收纯函数（targetGuard.mergeEchoIntoSelected，契约 11 判定语义单点）：
+    // 触碰发布保留现状（空数组清空绝不复活）/未触碰按 priority 补进/幽灵 publish_id 过滤/
+    // rev>0 且全空绝不合并/无新课程可补返回原引用。setSelected 里 prev 是最新闭包值。
+    setSelected((prev) => mergeEchoIntoSelected(prev, courses, rev, currentIds).next)
     // 发布集合整体重建（开窗瞬间平台清空又恢复、publish_id 全变）后，
     // selected 仍残留旧 publish_id 的非空 key——对应 Tab 已消失、用户无法通过界面
     // 清除，守卫命中的"置脏跳过"会把保存链永久静默拦截（黄金期改目标永不落库）。

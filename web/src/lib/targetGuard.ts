@@ -1,4 +1,4 @@
-import type { SchedulerState, Target } from "../types"
+import type { ClassItem, CourseStatus, SchedulerState, Target } from "../types"
 
 // 目标自动保存前置守卫（TDD 纯函数，供 Select.tsx 防抖回调与 flushTargets 两处消费时刻
 // 复用，与回显 effect 的 currentIds 过滤同判据）：
@@ -168,4 +168,49 @@ export function commitTargetsGuards(
     return { ok: false, reason: "stalePublishId" }
   }
   return { ok: true }
+}
+// EchoCourse 回显合并输入的最小形状（CourseStatus 子集）：只消费合并所需的
+// publish_id/class_id/course_name/priority 四字段，其余状态字段与本函数无关。
+export type EchoCourse = Pick<CourseStatus, "publish_id" | "class_id" | "course_name" | "priority">
+
+// 回显合并纯函数（契约 11 的判定语义收成单一判据，供 Select.tsx 回显 effect 消费）：
+// 触碰发布（key 存在）保留现状——空数组 = 用户显式清空该发布（清空语义绝不复活）、
+// 非空数组 = 用户添加了课程 → 把后端旧目标中未勾选的按 priority 序补进末尾；
+// 未触碰发布把后端旧目标整体补进（??= 真值陷阱：空数组是"已触碰"而非"未触碰"）。
+// 幽灵 publish_id（不在当前发布集合）一律过滤；courses 先按 priority 升序。
+// rev>0 && selected 全空 = 用户明确全清空 → 绝不合并（否则清空被静默撤销）。
+// 无任何新课程可补（全部已触碰且无缺口）→ 返回原引用，不触发不必要重渲染。
+export function mergeEchoIntoSelected(
+  prev: Record<number, ClassItem[]>,
+  courses: readonly EchoCourse[],
+  rev: number,
+  publishIds: readonly number[] | Set<number>
+): { next: Record<number, ClassItem[]>; merged: boolean } {
+  const ids = publishIds instanceof Set ? publishIds : new Set(publishIds)
+  const anyHas = Object.values(prev).some((arr) => arr.length > 0)
+  // 用户已明确全清空（rev>0 且无任何条目）→ 绝不合并回显（清空语义不可侵犯）
+  if (rev > 0 && !anyHas) return { next: prev, merged: false }
+  const ordered = [...courses]
+    .sort((a, b) => a.priority - b.priority)
+    .filter((c) => ids.has(c.publish_id)) // 幽灵 publish_id 不进 selected
+  const next = { ...prev }
+  let merged = false
+  for (const c of ordered) {
+    const list = next[c.publish_id]
+    if (list) {
+      // 已触碰发布：空数组 = 用户显式清空（绝不复活）；非空 = 补进未勾选课程
+      if (list.length > 0 && !list.some((item) => item.id === c.class_id)) {
+        next[c.publish_id] = [
+          ...list,
+          { id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem,
+        ]
+        merged = true
+      }
+      continue
+    }
+    // 未触碰发布：??= 补进（空数组"已触碰"不会进这个分支——真值陷阱）
+    ;(next[c.publish_id] ??= []).push({ id: c.class_id, publish_id: c.publish_id, course_name: c.course_name } as ClassItem)
+    merged = true
+  }
+  return merged ? { next, merged } : { next: prev, merged: false }
 }

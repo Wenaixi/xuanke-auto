@@ -302,8 +302,13 @@ func (d SiteDescriptor) Validate() error {
 		d.Decode.OpResult == nil || d.Decode.Login == nil || d.Decode.Msg == nil {
 		return fmt.Errorf("站点档案 %s 缺少响应解码钩子", d.ID)
 	}
+	// 五个表单键无条件必填：引擎每次请求都要写它们，键名为空即写出 `=value`
+	// （空键名），平台多半直接拒而现场报"参数缺失"。Identification 归入本表而非
+	// 下面的条件式判据，因为 EncryptIdentification 是无条件必填钩子——"登录表单
+	// 没有账号密码密文字段"这种档案根本无法表达（LoginEngine 无条件调用它）。
 	for name, f := range map[string]string{
 		"Year": d.Form.Year, "Term": d.Form.Term, "IDs": d.Form.IDs, "ClassID": d.Form.ClassID,
+		"Identification": d.Form.Identification,
 	} {
 		if f == "" {
 			return fmt.Errorf("站点档案 %s 缺少表单字段名 %s", d.ID, name)

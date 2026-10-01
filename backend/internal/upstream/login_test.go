@@ -3,9 +3,11 @@ package upstream
 import (
 	"errors"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeRecognizer 固定返回指定文本的识别引擎（Vision ocr 引擎之外的假实现，登录链路测试用）。
@@ -118,5 +120,56 @@ func TestLoginEngineRecognizerRetry(t *testing.T) {
 	}
 	if doLoginHits != 1 {
 		t.Fatalf("doLogin 应只在识别成功后调 1 次，got %d", doLoginHits)
+	}
+}
+
+// TestSubmitLoginOmitsEmptyKeyNames 登录表单绝不出现空键名。
+//
+// 回归动机：url.Values.Set("", v) 会写出 `=v`（空键名），平台多半直接拒，
+// 现场报的是"参数缺失"这类难定位的错误。Captcha/UniqueID/PriorityID 三处
+// 早已守卫，Identification 曾是裸调——四个登录表单键里唯一的漏网。
+//
+// 判据用键名迭代而非 Form.Get("")：空键名恰恰取不到值，只能靠遍历发现。
+// 变异验证：摘掉 submitLogin 里 Form.Identification 的判空，本测试必须红。
+func TestSubmitLoginOmitsEmptyKeyNames(t *testing.T) {
+	var gotKeys []string
+	var gotIdent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login/doLogin":
+			_ = r.ParseForm()
+			for k := range r.Form {
+				gotKeys = append(gotKeys, k)
+			}
+			gotIdent = r.Form.Get("identification")
+			w.Write([]byte(`{"code":0,"isOk":true,"token":"tok-1","msg":"登录成功"}`))
+		default:
+			w.Write([]byte("{}"))
+		}
+	}))
+	defer srv.Close()
+
+	d := testDescriptor(srv.URL)
+	d.Captcha.Enabled = false // 无验证码：Captcha 键名留空，走守卫分支
+	d.Form.Identification = "" // 该站登录表单无密文字段（契约上由 Validate 拦下，
+	//                            此处直构以验证提交侧的守卫本身有效）
+	d.Form.UniqueID = ""
+	d.Login.DeviceID = func(string, time.Time) string { return "" }
+	e := NewLoginEngine(d, srv.URL, VisionConfig{})
+
+	// 会话客户端必须带 Cookie Jar：submitLogin 收尾要从 jar 回收平台下发的
+	// 会话 Cookie（httptest.Server.Client() 的 Jar 为 nil，会当场空指针）。
+	jar, _ := cookiejar.New(nil)
+	sess := &http.Client{Timeout: 15 * time.Second, Jar: jar}
+	if _, err := e.submitLogin(sess, "UA", "1234", "enc-uid"); err != nil {
+		t.Fatalf("提交登录失败: %v", err)
+	}
+	for _, k := range gotKeys {
+		if k == "" {
+			t.Fatalf("表单含空键名（会写出 `=value`），实际键集合=%v", gotKeys)
+		}
+	}
+	if gotIdent != "" {
+		t.Fatalf("档案未声明 Identification 键名就不该提交该键，实际收到 %q", gotIdent)
 	}
 }

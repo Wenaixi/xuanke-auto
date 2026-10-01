@@ -138,7 +138,9 @@ func (e *LoginEngine) submitLogin(sess *http.Client, ua, captchaText, identifica
 	if e.desc.Form.Captcha != "" {
 		form.Set(e.desc.Form.Captcha, captchaText)
 	}
-	form.Set(e.desc.Form.Identification, identification)
+	if e.desc.Form.Identification != "" {
+		form.Set(e.desc.Form.Identification, identification)
+	}
 	if e.desc.Form.UniqueID != "" {
 		form.Set(e.desc.Form.UniqueID, e.desc.Login.DeviceID(ua, time.Now()))
 	}

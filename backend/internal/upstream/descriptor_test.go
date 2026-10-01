@@ -41,6 +41,11 @@ func TestValidateRejectsIncompleteDescriptor(t *testing.T) {
 			wantMsg: "UnauthorizedStatuses",
 		},
 		{
+			name:    "缺登录密文字段键名（会写出空键名 identification）",
+			breakFn: func(d *SiteDescriptor) { d.Form.Identification = "" },
+			wantMsg: "Identification",
+		},
+		{
 			name:    "未登录状态码声明了 3xx（重定向会被当会话失效）",
 			breakFn: func(d *SiteDescriptor) { d.UnauthorizedStatuses = []int{302} },
 			wantMsg: "UnauthorizedStatuses",

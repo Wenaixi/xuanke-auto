@@ -1750,7 +1750,8 @@ func (s *Scheduler) findClassInSnapshot(acct string, classID int) *upstream.Clas
 }
 
 // classFullRealtime 实时人数复核（锁外调用，禁止持锁时发起网络请求）。
-// 注意：实时接口未实证 maxCount（CountEntry 注释），IsClassFull 实际恒 false——
+// 注意：zhidao 档案未实证 maxCount（CountEntry 注释），IsClassFull 恒 false——
+// 此为档案事实而非结构必然：档案未来下发 maxCount/class_full 时本判据自动生效。
 // 本复核保留为"平台未来下发 maxCount 时自动生效"的防御性路径，当前真满员判定
 // 以 classFullInSnapshot（快照 max_count，实证）为主路径，spawnChain 已先于实时复核
 // 用快照判满员跳过（见 spawnChain 内 classFullInSnapshot 调用），实时复核仅兜底不破坏防轰炸契约。

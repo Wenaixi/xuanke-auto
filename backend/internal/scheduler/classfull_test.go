@@ -125,3 +125,39 @@ func TestMarkFullAndReleaseSyncClassFull(t *testing.T) {
 	}
 
 }
+
+// TestClassFullRealtimeConstFalseWhenMaxCountZero 实时复核"永不确证满员"的负向钉：
+// zhidao 档案 countList 不下发 maxCount（T1 已锁档案事实），MaxCount 恒 0 形态下
+// classFullRealtime 必须恒返回 false——不挂 full、不置 failed，保留失败重试分支。
+// 契约 131：正向恒真（MaxCount=0 恒 false）必须配负向断言，防未来误给实时接口
+// 加判据或把 maxCount 当满员判据造成防轰炸语义破坏。
+func TestClassFullRealtimeConstFalseWhenMaxCountZero(t *testing.T) {
+	fc := newFakeClient(true)
+	// 模拟 zhidao 档案形态：实时人数数据只有 selectedCount（MaxCount 恒 0）
+	fc.mu.Lock()
+	fc.data.Publishes[0].Classes[0] = upstream.Class{
+		ID: 61115, CourseName: "健美操", SelectedCount: 30, MaxCount: 0, ClassFull: false,
+	}
+	fc.mu.Unlock()
+	s := New(&fakeAccts{c: fc}, &fakeStore{}, time.Now().Add(-time.Hour), time.Hour)
+	s.mu.Lock()
+	s.acctData["acct1"] = fc.data
+	s.acctDataAt["acct1"] = time.Now()
+	s.rebuildCoursesForAccountLocked("acct1", []Target{{PublishID: 1, ClassID: 61115, CourseName: "健美操"}})
+	s.mu.Unlock()
+
+	full, err := s.classFullRealtime("acct1", 61115)
+	if err != nil {
+		t.Fatalf("实时复核不应报错: %v", err)
+	}
+	if full {
+		t.Fatal("MaxCount 恒 0 形态下实时复核必须永不确证满员（zhidao 档案事实）——否则满员退避/防轰炸语义被破坏")
+	}
+	// 判据 false 时不挂 full、不置 failed（保留失败重试分支）
+	if s.fullHas("acct1", 61115) {
+		t.Fatal("实时复核判据 false 时不得记 full")
+	}
+	if got := s.StateForAccount("acct1").Courses[0].Status; got != "pending" {
+		t.Fatalf("实时复核判据 false 时状态行不得置 failed，实际 %q", got)
+	}
+}

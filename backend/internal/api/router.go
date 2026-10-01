@@ -31,21 +31,24 @@ func initCaptchaAtStartup(rt *runtime.Store, accts *accounts.Manager) {
 }
 
 // applyCaptchaRecognizerFor 按运行时配置切换识别引擎与并发（handleAdminConfig 热更新时同样调用）。
-// 引擎解析交给纯函数 resolveCaptchaRecognizer，本函数只负责探测函数注入与副作用落地。
+// 统一调用 accts.UpdateCaptchaEngine 原子写齐模板与既有客户端，彻底消灭分步调用的时序空窗与重复遍历。
 func applyCaptchaRecognizerFor(rt *runtime.Store, accts *accounts.Manager) {
 	cfg := rt.Get()
-	r := resolveCaptchaRecognizer(cfg, upstream.NativeDdddOcrAvailable, func() bool {
-		return upstream.LocalDdddOcrAvailable("")
+	res := accts.UpdateCaptchaEngine(upstream.EngineConfig{
+		VisionBaseURL:   cfg.VisionBaseURL,
+		VisionAPIKey:    cfg.VisionAPIKey,
+		VisionModel:     cfg.VisionModel,
+		CaptchaEngine:   cfg.CaptchaEngine,
+		CaptchaFallback: cfg.CaptchaFallback,
 	})
-	if r.recognizer == nil {
+	if res.Recognizer == nil {
 		// 无引擎：登录识别立即报错（配置的引擎不可用且未开启兜底），
 		// 日志必须给出可执行的修复动作，不能只报"不可用"。
-		log.Printf("[api] %s", r.note)
+		log.Printf("[api] %s", res.Note)
 	} else {
-		log.Printf("[api] 验证码识别引擎：%s", r.note)
+		log.Printf("[api] 验证码识别引擎：%s", res.Note)
 	}
-	setCaptchaActiveEngine(r.engine)
-	accts.SetRecognizer(r.recognizer)
+	setCaptchaActiveEngine(res.Engine)
 	upstream.SetCaptchaConcurrency(cfg.CaptchaConcurrency)
 }
 

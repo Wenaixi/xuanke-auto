@@ -216,6 +216,27 @@ func (m *Manager) Registered() []string {
 	return out
 }
 
+// UpdateCaptchaEngine 单一出口原子更新识别管线（替代原 SetVision + SetRecognizer 分步调用）。
+// 关键纪律：探测不可持锁——锁外执行无锁决策解析（耗时本地探测绝不卡锁），锁内单次持锁原子同步模板与全部客户端。
+func (m *Manager) UpdateCaptchaEngine(cfg upstream.EngineConfig) upstream.EngineResolution {
+	res := upstream.ResolveCaptchaEngine(cfg, upstream.NativeDdddOcrAvailable, func() bool {
+		return upstream.LocalDdddOcrAvailable("")
+	})
+	vc := upstream.VisionConfig{
+		BaseURL: cfg.VisionBaseURL,
+		APIKey:  cfg.VisionAPIKey,
+		Model:   cfg.VisionModel,
+	}.WithRecognizer(res.Recognizer)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vision = vc
+	for _, c := range m.clients {
+		c.UpdateCaptcha(res.Recognizer, vc)
+	}
+	return res
+}
+
 // SetVision 热更新全部账号客户端的验证码识别配置（管理员运行时修改立即生效）。
 // 赋值 m.vision 前先保留模板当前引擎——dispatchRuntimeConfig 先
 // SetVision 再 applyCaptchaRecognizerFor(SetRecognizer)，若 SetVision 直接覆盖模板，

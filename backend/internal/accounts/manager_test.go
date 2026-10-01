@@ -340,3 +340,45 @@ func TestLoginByPasswordEncryptFailLogs(t *testing.T) {
 		t.Fatal("登录应返回有效 token")
 	}
 }
+
+// TestManagerUpdateCaptchaEngine 锁定单一出口原子更新识别管线：
+// 单次持锁写齐 m.vision 模板与既有客户端，彻底消灭分步调用的时序缝隙。
+func TestManagerUpdateCaptchaEngine(t *testing.T) {
+	st := &fakeStore{}
+	m := New(upstream.SiteDescriptor{ID: "test"}, "", upstream.VisionConfig{}, st)
+	c1 := m.ensure("acct1")
+	c2 := m.ensure("acct2")
+
+	// 初始状态识别器为 nil
+	if c1.CurrentRecognizer() != nil || c2.CurrentRecognizer() != nil {
+		t.Fatal("初始状态客户端识别器应为 nil")
+	}
+
+	// 切换为 Vision 引擎
+	res := m.UpdateCaptchaEngine(upstream.EngineConfig{
+		VisionBaseURL: "http://127.0.0.1:9999",
+		VisionAPIKey:  "test-key",
+		VisionModel:   "test-model",
+		CaptchaEngine: "vision",
+	})
+	if res.Engine != "vision" {
+		t.Fatalf("生效引擎应为 vision，实际 %q", res.Engine)
+	}
+	if res.Recognizer == nil {
+		t.Fatal("识别器实例不应为 nil")
+	}
+
+	// 断言模板与既有客户端全量原子更新
+	if c1.CurrentRecognizer() != res.Recognizer {
+		t.Fatal("c1 识别器应已原子同步为新实例")
+	}
+	if c2.CurrentRecognizer() != res.Recognizer {
+		t.Fatal("c2 识别器应已原子同步为新实例")
+	}
+
+	// 新 ensure 的客户端也必须自模板直接继承该实例
+	c3 := m.ensure("acct3")
+	if c3.CurrentRecognizer() != res.Recognizer {
+		t.Fatal("新建客户端 c3 应直接自模板继承识别器实例")
+	}
+}

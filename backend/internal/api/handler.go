@@ -23,7 +23,6 @@ import (
 	"xuanke-auto/backend/internal/session"
 	"xuanke-auto/backend/internal/sites"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/upstream"
 )
 
 // 业务码（响应体 code 字段）：前端唯一据以分流的稳定契约。
@@ -949,9 +948,6 @@ func (d *Deps) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 func (d *Deps) dispatchRuntimeConfig(cfg runtime.Config) {
 	// d.Store 为 nil 时跳过（测试直接直构 Deps 的场景；生产恒非 nil）
 	if d.Accounts != nil {
-		d.Accounts.SetVision(upstream.VisionConfig{
-			BaseURL: cfg.VisionBaseURL, APIKey: cfg.VisionAPIKey, Model: cfg.VisionModel,
-		})
 		applyCaptchaRecognizerFor(d.Runtime, d.Accounts)
 	}
 }

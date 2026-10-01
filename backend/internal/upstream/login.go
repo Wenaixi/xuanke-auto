@@ -37,6 +37,14 @@ func NewLoginEngine(desc SiteDescriptor, baseURL string, vc VisionConfig) *Login
 
 // SetRecognizer 热切换识别引擎（同步模板 VisionConfig.recognizer——与 accounts.Manager
 // SetRecognizer 同款"绝不挥动引擎切换"语义，模板带引擎供后续新建客户端）。
+// UpdateCaptcha 原子更新识别器与视觉配置（单次加锁写齐，消灭中间时序空窗）。
+func (e *LoginEngine) UpdateCaptcha(r CaptchaRecognizer, vc VisionConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.recognizer = r
+	e.Vision = vc.WithRecognizer(r)
+}
+
 func (e *LoginEngine) SetRecognizer(r CaptchaRecognizer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

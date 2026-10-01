@@ -108,3 +108,48 @@ func TestPureTextErrorPageDoesNotCrash(t *testing.T) {
 		t.Fatalf("纯文本错误页不该被判未登录（Envelope 已弃权），实际: %v", err)
 	}
 }
+
+// TestHTTPStatusUnauthorizedEndToEnd 会话失效只由 HTTP 状态码表达时（现代 REST
+// 的通用形态）必须上抛 ErrUnauthorized，且**判据在读 body 之前**。
+// 回归动机（实测证据）：平台回 `HTTP 401` 但 body 带 `status:OK` 时，
+// 引擎只读响应体不看 StatusCode，Envelope 判据也匹配不上 → **err=nil
+// 静默放行**，会话已死引擎却以为还活着，报名全败而日志一片正常。
+// 这条断言用「body 看起来完全正常」逼出静默放行，是本维度最强的反例。
+func TestHTTPStatusUnauthorizedEndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		// body 刻意是成功状态：只看响应体的实现会把它当正常响应。
+		_, _ = w.Write([]byte(`{"status":"OK","data":{"classes":[]}}`))
+	}))
+	defer srv.Close()
+
+	d := Descriptor()
+	d.DefaultBaseURL = srv.URL
+	c := upstream.New(d, srv.URL, upstream.VisionConfig{})
+	c.SetCredentials("acct", "pw", "TOK-9")
+
+	_, err := c.FindElectives()
+	if !errors.Is(err, upstream.ErrUnauthorized) {
+		t.Fatalf("HTTP 401 必须判未登录（body 是成功状态也不放过），实际: %v", err)
+	}
+}
+
+// TestHTTPUnauthorizedEmptyBody 不带 body 的纯状态码响应也必须判未登录：
+// 判据若在读 body 之后，会先崩在「响应解析失败」被误判成网络抖动，
+// 导致无限重试且自动重登永不触发。
+func TestHTTPUnauthorizedEmptyBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	d := Descriptor()
+	d.DefaultBaseURL = srv.URL
+	c := upstream.New(d, srv.URL, upstream.VisionConfig{})
+	c.SetCredentials("acct", "pw", "TOK-9")
+
+	_, err := c.FindElectives()
+	if !errors.Is(err, upstream.ErrUnauthorized) {
+		t.Fatalf("HTTP 401 空体必须判未登录（而非报 JSON 解析失败），实际: %v", err)
+	}
+}

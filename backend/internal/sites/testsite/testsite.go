@@ -21,6 +21,7 @@ package testsite
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -70,6 +71,11 @@ func Descriptor() upstream.SiteDescriptor {
 		HeaderTokenName: "Authorization",
 
 		CodeUnauthorized: -9,
+		// 会话失效只由 HTTP 状态码表达（现代 REST 的通用形态，body 为空或
+		// 带业务码两种都不靠 Envelope 判别）。不声明时实测四形态：401/403
+		// 带业务码会被**静默放行**（err=nil），401 空体则崩在「响应解析失败」
+		// 被误判成网络抖动 → 无限重试且自动重登永不触发。
+		UnauthorizedStatuses: []int{http.StatusUnauthorized, http.StatusForbidden},
 
 		// 不下发任何开窗信号 → 引擎走退化模式（探测到数据即视为开窗）。
 		HasWindowSignal: false,

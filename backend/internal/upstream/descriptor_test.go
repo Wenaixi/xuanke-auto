@@ -35,6 +35,16 @@ func TestValidateRejectsIncompleteDescriptor(t *testing.T) {
 			breakFn: func(d *SiteDescriptor) { d.Form.UniqueID = "" },
 			wantMsg: "Form.UniqueID",
 		},
+		{
+			name:    "未登录状态码声明了 2xx（正常响应会被当会话失效）",
+			breakFn: func(d *SiteDescriptor) { d.UnauthorizedStatuses = []int{200} },
+			wantMsg: "UnauthorizedStatuses",
+		},
+		{
+			name:    "未登录状态码声明了 3xx（重定向会被当会话失效）",
+			breakFn: func(d *SiteDescriptor) { d.UnauthorizedStatuses = []int{302} },
+			wantMsg: "UnauthorizedStatuses",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

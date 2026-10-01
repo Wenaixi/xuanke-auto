@@ -369,6 +369,14 @@ func (c *Client) doRequest(method, path string, body []byte, contentType string)
 		// 统一在此剥 URL（保留底层判型语义），调用方无需各自处理。
 		return nil, sanitizeError(err)
 	}
+	// HTTP 状态码层的未登录判据（档案声明才生效，零值档案行为逐字不变）。
+	// **必须在读响应体之前**：平台只回状态码不带 body 时（如 401 空体），
+	// 先读 body 会先崩在 JSON 解析上，报「响应解析失败」被误判成网络抖动，
+	// 无限重试且永不触发自动重登。5xx 由档案自行决定是否声明（通常不该声明）。
+	if isUnauthorizedStatus(c.desc.UnauthorizedStatuses, resp.StatusCode) {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%w（HTTP %d）", ErrUnauthorized, resp.StatusCode)
+	}
 	data, err := readBody(resp)
 	resp.Body.Close()
 	if err != nil {
@@ -441,6 +449,18 @@ func readBody(resp *http.Response) ([]byte, error) {
 		return buf, nil
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// isUnauthorizedStatus 该 HTTP 状态码是否被档案声明为「未登录」。
+// 空声明（零值档案）恒 false —— 这是档案字段的零值兼容语义：只靠响应体表达
+// 未登录的站点（知到）行为逐字不变，纯 REST 平台才声明 401/403。
+func isUnauthorizedStatus(declared []int, status int) bool {
+	for _, s := range declared {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // httpDo 统一发送请求并自愈吸收 Windows 回环 keep-alive 池连接活性衰减。

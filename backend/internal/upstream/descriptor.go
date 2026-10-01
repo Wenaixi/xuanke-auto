@@ -192,6 +192,20 @@ type SiteDescriptor struct {
 	// err != nil 表示「该响应体不是本形态」（如平台返回纯文本页），
 	// 引擎据此跳过信封检查，把判定交给各接口的解码钩子。
 	Envelope func(body []byte) (code int, unauthorized bool, err error)
+	// UnauthorizedStatuses 声明「哪些 HTTP 状态码代表未登录」。**零值 = 不声明 =
+	// 行为与本字段引入前逐字不变**（沿用只靠响应体表达未登录的站点，如知到）；
+	// 纯 REST 平台按标准声明 401/403 即可接入。
+	//
+	// 为什么必须下沉：实测平台只回 HTTP 状态码时，引擎走 doRequest 只读响应体、
+	// 全程不看 resp.StatusCode，四种形态里两种**静默放行**（401/403 带业务码时
+	// err=nil），会话已死引擎却以为还活着，报名全败而日志一片正常；另两种崩在
+	// 「响应解析失败」被误判成网络抖动 → 无限重试且**永不触发自动重登**。
+	// Envelope 钩子覆盖不了这种形态：它只看 body，body 为空时钩子无从判别。
+	//
+	// 判据时机在**读响应体之前**——否则 401+空体会先崩在 JSON 解析上，
+	// 正是上述静默失效的根因。5xx 不应声明：那是服务端故障，重试即可，
+	// 判成会话失效会引发无意义的重登风暴。
+	UnauthorizedStatuses []int
 
 	// HasWindowSignal 站点是否下发开窗信号（时间戳或布尔）。
 	// false = **退化模式**：探测到非空课程数据即视为开窗。绝不因平台缺此信号而拒绝加载，
@@ -266,6 +280,14 @@ func (d SiteDescriptor) Validate() error {
 	// 等于把这类平台挡在门外。
 	if (d.AuthMode == AuthDual || d.AuthMode == AuthCookie) && strings.TrimSpace(d.TokenCookie) == "" {
 		return fmt.Errorf("站点档案 %s 缺少鉴权载体名 TokenCookie", d.ID)
+	}
+	// 声明的未登录状态码必须是合法 HTTP 错误码。挡 2xx/3xx：把它们当未登录会让
+	// 正常响应被当成会话失效 → 无限重登且掩盖真实错误。判据放装配面是因为错值
+	// 在运行时只表现为「莫名其妙一直重登」，现场极难定位。
+	for _, s := range d.UnauthorizedStatuses {
+		if s < 400 || s > 599 {
+			return fmt.Errorf("站点档案 %s 的 UnauthorizedStatuses 含非错误状态码 %d（必须落在 400~599）", d.ID, s)
+		}
 	}
 	if d.Login.UserAgent == "" {
 		return fmt.Errorf("站点档案 %s 缺少 UserAgent", d.ID)

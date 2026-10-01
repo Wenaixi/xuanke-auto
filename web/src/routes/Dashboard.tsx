@@ -8,6 +8,7 @@ import { EmptyState } from "../components/ui/EmptyState"
 import { Badge } from "../components/ui/Badge"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
 import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
+import { pickInterval } from "../lib/pollInterval"
 import {
   Activity,
   BookOpen,
@@ -159,11 +160,10 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     // 若 false 则回调恒取 3000ms），双查询按 3s 固定轰炸不可达后端刷屏日志；error 态
     // 降 30s 后失败不再轰炸，恢复成功即回到正常间隔。
     refetchInterval: (query) =>
-      query.state.error || query.state.status === "error"
-        ? 30000
-        : query.state.data?.window_closed
-          ? 30000
-          : 3000,
+      pickInterval(
+        { error: query.state.error || query.state.status === "error", windowClosed: query.state.data?.window_closed === true, open: query.state.data?.window_opened === true },
+        { far: 30000, near: 3000 }
+      ),
   })
 
   const { data: logs, isError: logsErr, refetch: refetchLogs } = useQuery({
@@ -175,11 +175,10 @@ export default function Dashboard({ account, sessionToken, onLogout, onGoSelect 
     // 窗口关闭瞬间 /state 先返回 window_closed=true，下一次日志轮询即按 30s 走。
     // 与 /state 同款失败态降频 30s。
     refetchInterval: (query) =>
-      query.state.error || query.state.status === "error"
-        ? 30000
-        : state?.window_closed
-          ? 30000
-          : 3000,
+      pickInterval(
+        { error: query.state.error || query.state.status === "error", windowClosed: state?.window_closed === true, open: state?.window_opened === true },
+        { far: 30000, near: 3000 }
+      ),
   })
 
   // /electives 查询：Dashboard 新增数据源——多开放时间列表（begin_times 数组）

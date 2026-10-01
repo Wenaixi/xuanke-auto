@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/Tabs"
 import { useToast } from "../components/ui/Toast"
 import { useTickingCountdown } from "../lib/useTickingCountdown"
 import { cleanStaleSelected, selectedHasStalePublish, mergeEchoIntoSelected } from "../lib/targetGuard"
+import { pickInterval } from "../lib/pollInterval"
 import { formatOpenMoment, priorityName, resolveCountdownTarget } from "../lib/courseView"
 import { useTargetSave } from "../lib/useTargetSave"
 import {
@@ -92,24 +93,22 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 10s 慢轮询带到黄金期——必须并入调度器侧 window_opened 信号，一开窗立即升频 2s。
       // 窗口已关闭（window_closed）并入降频——关闭后课程列表已被平台
       // 清空，继续 10s 高频打课程数据接口纯浪费；与 /state 同信号降 30s，全站统一。
-      // 自身失败态优先降频——react-query 失败后 data 为最后一次成功值或
+      // 失败态优先降频——react-query 失败后 data 为最后一次成功值或
       // undefined（失败不清缓存 data），原回调在 /state 失败（缓存无 data，st===undefined）
       // 期间只看 inRange：开窗瞬间 publishes 短暂为空时 inRange=false → 每 10s 慢轮询进
       // 黄金期，窗口状态模糊；且失败态恒不降频（同失败降频未覆盖 /electives 的另一半）。
       // 失败即 30s 降频（不再 2s/10s 轰炸代理层），成功态才走升/降频逻辑。
-      // 澄清：window_closed 读组件闭包 stateData（/state 查询数据）——
-      // electives 自身响应（ElectivesData）无 window_closed 字段，且 /state 每 2s 刷新
-      // 触发组件重渲染，react-query 用最新闭包重调度轮询间隔，闭包永不陈旧。
-      // 注意：此处绝不直接读组件顶部的 stateData（声明在下方）——refetchInterval 回调
-      // 在 useQuery 创建实例时即被同步调用，此刻 stateData 的 const 声明尚未执行，
-      // 直读会命中 JS 暂存死区（TDZ）抛 ReferenceError，整个组件渲染中断黑屏。
+      // 档位收 pickInterval（错误/关闭 → 30s、开窗 → 2s、其余 10s 中档）；信号解析留此处：
+      // TDZ 防护与跨查询缓存读都在此回调内（绝不直读组件顶部 stateData——refetchInterval
+      // 在 useQuery 创建实例时即同步调用，此刻 stateData 声明未执行，直读命中 JS 暂存死区）。
       // 改从 react-query 缓存按查询 key 读取 /state 最新值，与 stateData 同源且零时序依赖。
-      if (query.state.error || query.state.status === "error") return 30000
       const st = queryClient.getQueryData<SchedulerState>(["state", account, sessionToken])
       const pubs = query.state.data?.publishes ?? []
       const selectable = pubs.some((p) => p.selectable === true)
-      if (st?.window_closed) return 30000
-      return selectable || st?.window_opened ? 2000 : 10000
+      return pickInterval(
+        { error: query.state.error || query.state.status === "error", windowClosed: st?.window_closed === true, open: selectable || st?.window_opened === true },
+        { far: 30000, near: 2000, idle: 10000 }
+      )
     },
   })
 
@@ -181,8 +180,11 @@ export default function Select({ account, sessionToken, onDone }: Props) {
       // 成功值或 undefined，原回调查询失败时恒取 2000ms，网络挂断/后端重启期间
       // /state + /electives 双查询叠加固定 2s 轰炸日志与代理层（与"失败分级退避"防
       // 轰炸理念相悖）。error 或 status==="error" 即降频，成功态按 window_closed 升/降频。
-      if (query.state.error || query.state.status === "error") return 30000
-      return query.state.data?.window_closed ? 30000 : 2000
+      // 档位收 pickInterval（两档：error/closed → 30s，否则 2s）。
+      return pickInterval(
+        { error: query.state.error || query.state.status === "error", windowClosed: query.state.data?.window_closed === true, open: query.state.data?.window_opened === true },
+        { far: 30000, near: 2000 }
+      )
     },
   })
 

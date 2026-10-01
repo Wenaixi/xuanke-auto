@@ -142,3 +142,43 @@ func TestListSortedStable(t *testing.T) {
 		}
 	}
 }
+
+
+// ResolveValidated 装配单点：Resolve + Validate 合并（启动/工具统一走它）。
+func TestResolveValidated(t *testing.T) {
+	// 未知 ID 必须报错
+	if _, err := ResolveValidated("no-such"); err == nil {
+		t.Fatal("未知档案必须报错")
+	}
+	// 全部内置档案通过
+	for _, id := range IDs() {
+		d, err := ResolveValidated(id)
+		if err != nil {
+			t.Fatalf("ResolveValidated(%q) 失败: %v", id, err)
+		}
+		if d.ID != id {
+			t.Fatalf("ID 不一致: %q vs %q", d.ID, id)
+		}
+	}
+}
+
+// EffectiveBaseURL 生效地址单源：覆盖优先，非法覆盖回退默认。
+func TestEffectiveBaseURL(t *testing.T) {
+	desc, err := ResolveValidated(DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	// 空覆盖 → 默认
+	if got := EffectiveBaseURL(desc, ""); got != def {
+		t.Fatalf("空覆盖应回退默认地址，got %q want %q", got, def)
+	}
+	// 合法覆盖 → 覆盖
+	if got := EffectiveBaseURL(desc, "https://mirror.example.com/"); got != "https://mirror.example.com" {
+		t.Fatalf("合法覆盖应生效，got %q", got)
+	}
+	// 非法覆盖（手改 DB 的垃圾值）→ 回退默认，绝不裸拼接
+	if got := EffectiveBaseURL(desc, "not a url"); got != def {
+		t.Fatalf("非法覆盖应回退默认地址，got %q want %q", got, def)
+	}
+}

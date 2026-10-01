@@ -10,6 +10,7 @@ package sites
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -58,6 +59,35 @@ func Resolve(id string) (upstream.SiteDescriptor, error) {
 		return upstream.SiteDescriptor{}, fmt.Errorf("未知选课平台 %q，可选：%s", id, strings.Join(IDs(), "、"))
 	}
 	return d, nil
+}
+
+
+// ResolveValidated 装配单点：解析档案并执行自检（Validate 13 条判据）。
+// 启动与命令行工具（probe/logintest）统一走它——此前各调用方手写
+// Resolve + Validate 或只 Resolve 不 Validate，工具与生产行为分叉。
+func ResolveValidated(id string) (upstream.SiteDescriptor, error) {
+	d, err := Resolve(id)
+	if err != nil {
+		return upstream.SiteDescriptor{}, err
+	}
+	if err := d.Validate(); err != nil {
+		return upstream.SiteDescriptor{}, fmt.Errorf("平台档案自检未通过: %w", err)
+	}
+	return d, nil
+}
+
+// EffectiveBaseURL 计算生效的站点地址：覆盖值优先（非空且合法），否则回退档案默认地址。
+// 与 effectiveBaseURL（server.go）同语义：非法覆盖（手改 DB）回退默认并留痕，绝不裸拼接。
+func EffectiveBaseURL(desc upstream.SiteDescriptor, override string) string {
+	override = strings.TrimSpace(override)
+	if override == "" {
+		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
+	if err := upstream.ValidateBaseURL(override); err != nil {
+		log.Printf("[sites] 站点地址覆盖 %q 非法（%v），回退档案默认地址 %s", override, err, desc.DefaultBaseURL)
+		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
+	}
+	return upstream.NormalizeBaseURL(override)
 }
 
 // IDs 返回全部档案 ID（稳定顺序，供错误提示与测试断言）。

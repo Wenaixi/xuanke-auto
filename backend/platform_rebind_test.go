@@ -108,25 +108,6 @@ func TestResolveStartupPlatform(t *testing.T) {
 	}
 }
 
-// TestEffectiveBaseURL 站点地址覆盖的三条分支：空 = 档案默认地址；非法 = 回退默认并留痕；
-// 合法 = 覆盖生效且去掉尾部斜杠（引擎以 baseURL+path 拼接，"//electives" 会被部分网关 404）。
-func TestEffectiveBaseURL(t *testing.T) {
-	d, err := sites.Resolve(sites.DefaultID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	def := upstream.NormalizeBaseURL(d.DefaultBaseURL)
-	if got := effectiveBaseURL(d, ""); got != def {
-		t.Fatalf("空覆盖应回档案默认地址 %q，实际 %q", def, got)
-	}
-	if got := effectiveBaseURL(d, "ftp://example.com"); got != def {
-		t.Fatalf("非法覆盖应回退默认地址 %q，实际 %q", def, got)
-	}
-	if got := effectiveBaseURL(d, "https://mirror.example.com/"); got != "https://mirror.example.com" {
-		t.Fatalf("合法覆盖应生效且去尾斜杠，实际 %q", got)
-	}
-}
-
 // TestPlatformRebinderNotifiesProfile 切换成功后必须回调 onProfile 并交出**新档案**。
 // 调度器经此同步 hasWindowSignal——漏调或调早调晚都会让它用旧站点的开窗信号语义
 // 判新站点（切到"不下发开窗信号"的档案后开窗永远判不出来，调度器全线停摆）。

@@ -20,7 +20,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	desc, err := sites.Resolve(cfg.PlatformID)
+	desc, err := sites.ResolveValidated(cfg.PlatformID)
 	if err != nil {
 		fmt.Println("ERR 解析平台档案:", err)
 		os.Exit(1)
@@ -33,10 +33,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	base := upstream.NormalizeBaseURL(cfg.PlatformBaseURL)
-	if base == "" {
-		base = upstream.NormalizeBaseURL(desc.DefaultBaseURL)
-	}
+	base := sites.EffectiveBaseURL(desc, cfg.PlatformBaseURL)
 
 	// 会话 Cookie 由档案声明（知到需 access_limit_cookie=1；其他平台可能为空）。
 	cookies := make([]string, 0, len(desc.SessionCookies)+1)

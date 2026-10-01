@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,7 +118,7 @@ func runServer(cfg config.Config) *Started {
 	if err != nil {
 		log.Fatalf("选课平台档案无效：%v（改 data/.env 的 XUANKE_PLATFORM 后重启）", err)
 	}
-	baseURL := effectiveBaseURL(site, rtCfg.PlatformBaseURL)
+	baseURL := sites.EffectiveBaseURL(site, rtCfg.PlatformBaseURL)
 	log.Printf("[main] 选课平台：%s（%s，站点 %s）", site.Name, site.ID, baseURL)
 
 	// 多账号客户端注册表（每账号独立会话）+ 重启恢复。
@@ -305,17 +304,10 @@ func resolveStartupPlatform(cfg runtime.Config) (upstream.SiteDescriptor, error)
 	if id == "" {
 		id = sites.DefaultID
 	}
-	// 档案自检钉在装配面：一份缺路径或缺解码钩子的档案会让运行时在第一次请求
-	// 时才炸（缺钩子是 nil 函数调用硬崩，缺路径拼出无前导斜杠 URL 让平台 404），
-	// 现场只是"未知的解析错误"。故此处拦下并由调用方 log.Fatalf 拒绝启动。
-	desc, err := sites.Resolve(id)
-	if err != nil {
-		return desc, err
-	}
-	if err := desc.Validate(); err != nil {
-		return desc, fmt.Errorf("平台档案自检未通过: %w", err)
-	}
-	return desc, nil
+	// 档案自检钉在装配面（sites.ResolveValidated 单点）：一份缺路径或缺解码钩子的档案会让
+	// 运行时在第一次请求时才炸（缺钩子是 nil 函数调用硬崩，缺路径拼出无前导斜杠 URL
+	// 让平台 404），现场只是"未知的解析错误"。故此处拦下并由调用方 log.Fatalf 拒绝启动。
+	return sites.ResolveValidated(id)
 }
 
 // newPlatformRebinder 组装平台热切换闭包（api PUT 的 RebindPlatform 依赖）。
@@ -333,23 +325,18 @@ func newPlatformRebinder(
 	onProfile func(desc upstream.SiteDescriptor),
 ) func(platformID, baseURL string) error {
 	return func(platformID, baseURL string) error {
-		desc, err := sites.Resolve(platformID)
+		desc, err := sites.ResolveValidated(platformID)
 		if err != nil {
 			return err
 		}
 		if err := upstream.ValidateBaseURL(baseURL); err != nil {
 			return err
 		}
-		// 档案自检与启动期同源：切到一份形状不完整的档案同样会让第一次请求才炸，
-		// 故在动客户端之前拦下（与上面的地址校验并列，属「先验证后生效」的一环）。
-		if err := desc.Validate(); err != nil {
-			return fmt.Errorf("平台档案自检未通过: %w", err)
-		}
 		creds, err := st.LoadCredentials()
 		if err != nil {
 			return fmt.Errorf("读取账号凭据失败: %w", err)
 		}
-		accts.SetProfile(desc, effectiveBaseURL(desc, baseURL), creds, decrypt)
+		accts.SetProfile(desc, sites.EffectiveBaseURL(desc, baseURL), creds, decrypt)
 		if onProfile != nil {
 			onProfile(desc)
 		}
@@ -357,19 +344,6 @@ func newPlatformRebinder(
 	}
 }
 
-// effectiveBaseURL 计算生效的站点地址：覆盖值优先（非空且合法），否则回退档案默认地址。
-// 启动期从库里读到非法覆盖（手改 DB）时记日志并回退，绝不裸拼接出非法协议的 URL。
-func effectiveBaseURL(desc upstream.SiteDescriptor, override string) string {
-	override = strings.TrimSpace(override)
-	if override == "" {
-		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
-	}
-	if err := upstream.ValidateBaseURL(override); err != nil {
-		log.Printf("[main] 站点地址覆盖 %q 非法（%v），回退档案默认地址 %s", override, err, desc.DefaultBaseURL)
-		return upstream.NormalizeBaseURL(desc.DefaultBaseURL)
-	}
-	return upstream.NormalizeBaseURL(override)
-}
 
 // displayHost 提示/日志用的主机名：0.0.0.0 / :: / 空（监听所有网卡）显示成
 // localhost，其余照实显示（127.0.0.1 / 内网 IP / 域名）。

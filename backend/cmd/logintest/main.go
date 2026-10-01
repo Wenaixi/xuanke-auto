@@ -17,8 +17,9 @@ import (
 	"xuanke-auto/backend/internal/config"
 	"xuanke-auto/backend/internal/db"
 	"xuanke-auto/backend/internal/secure"
+	"xuanke-auto/backend/internal/sites"
 	"xuanke-auto/backend/internal/store"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 func main() {
@@ -40,6 +41,11 @@ func main() {
 	}
 	decrypt := func(s string) (string, error) { return secure.Decrypt(s, masterKey) }
 
+	// 站点档案与主程序同源（与 .env 的 XUANKE_PLATFORM 一致），否则本工具测的是另一套接口。
+	site, err := sites.ResolveValidated(cfg.PlatformID)
+	if err != nil {
+		log.Fatalf("选课平台档案无效：%v", err)
+	}
 	st := store.New(d)
 	creds, err := st.LoadCredentials()
 	if err != nil {
@@ -54,13 +60,13 @@ func main() {
 	// 但主程序的开关来自管理员后台配置并落库 runtime.Config.CaptchaFallback，
 	// 本独立命令行工具无后台概念，用 env 控制同款行为）：
 	// 兜底默认关闭（互不回退）；开启后 ddddocr 不可用 → Vision、Vision 无密钥 → ddddocr。
-	vision := zhidao.VisionConfig{BaseURL: cfg.SFBaseURL, APIKey: cfg.SFAPIKey, Model: cfg.SFModel}
+	vision := upstream.VisionConfig{BaseURL: cfg.SFBaseURL, APIKey: cfg.SFAPIKey, Model: cfg.SFModel}
 	fallback := os.Getenv("XUANKE_CAPTCHA_FALLBACK") == "true"
 	recognizer := resolveLoginTestEngine(vision, fallback)
 	if recognizer == nil {
 		log.Fatalf("识别不可用：无可用识别引擎（配置 %s，兜底 %v）。请安装 ddddocr 或配置 SF_API_KEY。", config.CaptchaEngineDefault(), fallback)
 	}
-	zhidao.SetCaptchaConcurrency(1) // 识别并发限流 1（与主程序默认一致）
+	upstream.SetCaptchaConcurrency(1) // 识别并发限流 1（与主程序默认一致）
 
 	var passed, failed int
 	// 参数边界防御——-limit ≤0 或超账号数时收敛到真实账号数（杜绝 slice 越界 panic）
@@ -77,7 +83,7 @@ func main() {
 			failed++
 			continue
 		}
-		c := zhidao.New(cfg.BaseURL, vision)
+		c := upstream.New(site, cfg.PlatformBaseURL, vision)
 		c.SetRecognizer(recognizer) // 显式注入当前生效识别引擎
 		start := time.Now()
 		token, err := c.Login(cd.Account, pwd)
@@ -108,17 +114,17 @@ func init() {
 }
 
 // resolveLoginTestEngine 登录测试工具本地的引擎解析——下沉后改调
-// zhidao.ResolveCaptchaEngine 单源（与主程序 resolveCaptchaRecognizer 共享决策逻辑，
+// upstream.ResolveCaptchaEngine 单源（与主程序 resolveCaptchaRecognizer 共享决策逻辑，
 // 不再独立复制；配置通道仍走本工具自己的 env/默认值，决策逻辑单源）。
 // 返回 nil 表示无可用引擎。
-func resolveLoginTestEngine(vision zhidao.VisionConfig, fallback bool) zhidao.CaptchaRecognizer {
-	r := zhidao.ResolveCaptchaEngine(zhidao.EngineConfig{
+func resolveLoginTestEngine(vision upstream.VisionConfig, fallback bool) upstream.CaptchaRecognizer {
+	r := upstream.ResolveCaptchaEngine(upstream.EngineConfig{
 		VisionBaseURL:   vision.BaseURL,
 		VisionAPIKey:    vision.APIKey,
 		VisionModel:     vision.Model,
 		CaptchaEngine:   config.CaptchaEngineDefault(),
 		CaptchaFallback: fallback,
-	}, zhidao.NativeDdddOcrAvailable, func() bool { return zhidao.LocalDdddOcrAvailable("") })
+	}, upstream.NativeDdddOcrAvailable, func() bool { return upstream.LocalDdddOcrAvailable("") })
 	if r.Recognizer == nil {
 		fmt.Println(r.Note)
 		return nil

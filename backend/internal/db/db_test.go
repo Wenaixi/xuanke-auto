@@ -63,6 +63,46 @@ func TestMigrateAddsPublishMetaColumns(t *testing.T) {
 	}
 }
 
+// TestMigrateAddsCredentialPlatformColumn 旧库（credentials 无 platform_id）必须被自动
+// 增量迁移而非拒绝启动。该列是"跨平台 token 一律丢弃"的判据来源：旧行迁移后为空串
+// （= 平台未知），与任何档案 ID 都不相等 → 旧 token 被丢弃、多一次自动重登，
+// 但账号/目标/成功记录一行不丢（"数据都要保存好啊"契约）。
+func TestMigrateAddsCredentialPlatformColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old-cred.db")
+	d, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 上一版形状的 credentials（无 platform_id）+ 一条真实凭据行
+	if _, err := d.Exec("CREATE TABLE credentials (account TEXT PRIMARY KEY, password_enc TEXT NOT NULL, id_token TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')))"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec("INSERT INTO credentials (account, password_enc, id_token) VALUES ('acct1','ENC-ABC','tok-1')"); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+
+	got, err := Open(path)
+	if err != nil {
+		t.Fatalf("缺 platform_id 列的旧库应被自动迁移而非拒绝启动: %v", err)
+	}
+	defer got.Close()
+	var n int
+	if err := got.QueryRow("SELECT count(*) FROM pragma_table_info('credentials') WHERE name='platform_id'").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("迁移后应补齐 platform_id 列，实际 %d (%v)", n, err)
+	}
+	var acct, enc, tok, platform string
+	if err := got.QueryRow("SELECT account, password_enc, id_token, platform_id FROM credentials WHERE account='acct1'").Scan(&acct, &enc, &tok, &platform); err != nil {
+		t.Fatalf("迁移后旧凭据行必须可读: %v", err)
+	}
+	if acct != "acct1" || enc != "ENC-ABC" || tok != "tok-1" {
+		t.Fatalf("迁移改变了旧行数据: %q %q %q", acct, enc, tok)
+	}
+	if platform != "" {
+		t.Fatalf("旧行的 platform_id 应为空串（平台未知），实际 %q", platform)
+	}
+}
+
 // TestRefuseOldSchemaMissingColumns v2 库缺 priority/account 列必须被拒绝启动。
 func TestRefuseOldSchemaMissingColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")

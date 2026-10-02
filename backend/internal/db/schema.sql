@@ -1,10 +1,13 @@
--- 至道选课自动化 SQLite 表结构（v2：多账号物理隔离 + 凭据加密）
+-- 自动选课 SQLite 表结构（v2：多账号物理隔离 + 凭据加密）
 
 -- 账号凭据（密码 AES-GCM 加密后入库，明文只在内存中出现）
+-- platform_id：id_token 所属的选课平台档案 ID。与当前档案不一致的 token 一律丢弃——
+-- 跨平台会话必废，且绝不把 A 平台的会话 token 发往 B 平台。
 CREATE TABLE IF NOT EXISTS credentials (
   account TEXT PRIMARY KEY,
   password_enc TEXT NOT NULL,
   id_token TEXT NOT NULL,
+  platform_id TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

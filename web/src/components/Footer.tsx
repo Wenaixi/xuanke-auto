@@ -37,7 +37,7 @@ export function Footer() {
         <div className="flex items-center gap-3">
           <span>开发者：炼天</span>
           <span className="text-neutral-600">·</span>
-          <span>© 2026 至道选课</span>
+          <span>© 2026 自动选课</span>
         </div>
       </div>
     </footer>

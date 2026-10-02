@@ -67,13 +67,13 @@ func TestRunServerBindsListenHost(t *testing.T) {
 		t.Run(tc.host, func(t *testing.T) {
 			port := freePort(t)
 			cfg := config.Config{
-				Port:      port,
-				DBPath:    t.TempDir() + "/t.db",
-				BaseURL:   "https://example.invalid",
-				SFBaseURL: "https://example.invalid",
-				SFModel:   "m",
-				AdminToken: "tok",
-				ListenHost: tc.host,
+				Port:            port,
+				DBPath:          t.TempDir() + "/t.db",
+				PlatformBaseURL: "https://example.invalid",
+				SFBaseURL:       "https://example.invalid",
+				SFModel:         "m",
+				AdminToken:      "tok",
+				ListenHost:      tc.host,
 			}
 			srv := runServer(cfg)
 			defer srv.Shutdown()
@@ -100,13 +100,13 @@ func TestStartedRebindHotSwitch(t *testing.T) {
 		port2 = freePort(t)
 	}
 	cfg := config.Config{
-		Port:       port1,
-		DBPath:     t.TempDir() + "/t.db",
-		BaseURL:    "https://example.invalid",
-		SFBaseURL:  "https://example.invalid",
-		SFModel:    "m",
-		AdminToken: "tok",
-		ListenHost: "127.0.0.1",
+		Port:            port1,
+		DBPath:          t.TempDir() + "/t.db",
+		PlatformBaseURL: "https://example.invalid",
+		SFBaseURL:       "https://example.invalid",
+		SFModel:         "m",
+		AdminToken:      "tok",
+		ListenHost:      "127.0.0.1",
 	}
 	srv := runServer(cfg)
 	defer srv.Cleanup()

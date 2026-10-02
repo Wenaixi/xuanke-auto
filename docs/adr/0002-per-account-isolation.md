@@ -20,4 +20,4 @@
 - 删除账号后同名重建（换绑、误删加回）引入了「客户端指针身份」防线：任何网络往返之后持锁写状态或落库的分支，都要先复核注册表里的客户端仍是发起时的同一个实例，否则整体丢弃写回；只判「账号名存在」挡不住同名重建。同类防线已覆盖自动提交链各分支、账号级探测、手动报名与退选。
 - 「无目标账号回退全局帧」是刻意保留的快路径。任何新增读路径若绕过统一入口自行回退全局帧，都会重新打开跨年级串线；同理，新增写路径必须写账号级快照，不能写全校帧。
 - 代价是多账号下的状态面更宽：账号生命周期（删除、重建、重登）必须与这些按账号的 map 一一对齐，收口在专门的清理函数与身份复核函数里，不能在每个调用点各自处理。
-- **核对的源文件**：`backend/internal/accounts/manager.go`（`:101-120` 的 `ensure`/`ClientFor` 按账号建与取客户端）；`backend/internal/zhidao/client.go`（`:64-77` 客户端自带 `token` 与 `cookies`）；`backend/internal/scheduler/scheduler.go`（`:166-167` 按账号快照与时间戳；`:766-812` 快照回退链；`:819-874` 账号级探测只写专属帧；`:195-220` 的 `sameClientFor` 指针身份复核；`:856-861` 探测回写前的身份复核）；`backend/internal/api/handler.go`（`:1062-1068` 会话取账号；`:1097-1136` 账号透传解析与凭据表校验）。
+- **核对的源文件**：`backend/internal/accounts/manager.go`（`:101-120` 的 `ensure`/`ClientFor` 按账号建与取客户端）；`backend/internal/upstream/client.go`（`:64-77` 客户端自带 `token` 与 `cookies`）；`backend/internal/scheduler/scheduler.go`（`:166-167` 按账号快照与时间戳；`:766-812` 快照回退链；`:819-874` 账号级探测只写专属帧；`:195-220` 的 `sameClientFor` 指针身份复核；`:856-861` 探测回写前的身份复核）；`backend/internal/api/handler.go`（`:1062-1068` 会话取账号；`:1097-1136` 账号透传解析与凭据表校验）。

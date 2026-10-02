@@ -16,8 +16,8 @@ func jsonWriteMap(buf *bytes.Buffer, code int, data any, msg string) error {
 
 // jsonResponse 显式 struct 版（改造后）：无 map 装箱、无 interface 无序遍历。
 type jsonResponse struct {
-	Code int `json:"code"`
-	Data any `json:"data"`
+	Code int    `json:"code"`
+	Data any    `json:"data"`
 	Msg  string `json:"msg"`
 }
 

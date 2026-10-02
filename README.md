@@ -1,6 +1,8 @@
-# 至道选课自动化
+# 自动选课（xuanke-auto）
 
-知道教育平台（<https://www.zhidao.fj.cn>）的自动化选课助手。Go 后端把 React 前端经 `//go:embed` 编译进同一个可执行文件，启动后在本机 `3091` 端口提供完整界面：不需要单独部署前端、不需要外部数据库，Windows / Linux 版还内置离线验证码识别，运行期不依赖除教务平台以外的外部服务。
+上游选课平台的自动化选课助手。**站点差异全部收敛在平台档案里**：内置档案目前只有知道教育平台（<https://www.zhidao.fj.cn>），管理员可在后台切换档案并覆盖站点地址——换平台、换域名、换一年的接口形态都不需要改流程代码。
+
+Go 后端把 React 前端经 `//go:embed` 编译进同一个可执行文件，启动后在本机 `3091` 端口提供完整界面：不需要单独部署前端、不需要外部数据库，Windows / Linux 版还内置离线验证码识别，运行期不依赖除教务平台以外的外部服务。
 
 它能做这些事：
 
@@ -8,7 +10,8 @@
 - 多账号并行：每个账号独立教务会话，目标与运行状态按账号隔离
 - 在选课大厅预选备选课程，调度器在平台开放时刻自动提交
 - 手动报名与退选（二次确认 + 在飞幂等，不会重复发包）
-- 管理员后台：激活码分发、运行配置热改、账号管理、调度日志
+- 平台档案化：接口地址、路径、字段名与解码都在 `internal/sites/<平台>/` 里，管理员后台可选档案、可覆盖站点地址
+- 管理员后台：激活码分发、运行配置热改、选课平台切换、账号管理、调度日志
 
 相关文档：[CONTRIBUTING.md](./CONTRIBUTING.md)（提交与代码要求）、[SECURITY.md](./SECURITY.md)（安全红线）、[CHANGELOG.md](./CHANGELOG.md)（版本变更）、[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)（第三方依赖、模型与字体许可）、[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)、[LICENSE](./LICENSE)（MIT）。
 
@@ -116,6 +119,8 @@ cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o xuanke .
 | `SF_MODEL` | `Qwen/Qwen3-VL-30B-A3B-Instruct` | 视觉识别模型名 |
 | `XUANKE_PORT` | `3091` | HTTP 端口 |
 | `XUANKE_LISTEN_HOST` | `127.0.0.1` | 监听地址：仅本机 / 内网 IP 开局域网 / 域名走穿透 / `0.0.0.0` 所有网卡 |
+| `XUANKE_PLATFORM` | `zhidao-2026` | 选课平台档案 ID（内置档案见后台「系统配置 → 选课平台」）；填不存在的 ID 会拒绝启动 |
+| `XUANKE_PLATFORM_BASE_URL` | 空（用档案默认地址） | 站点地址覆盖；换域名 / 镜像时填 |
 | `XUANKE_DB` | `data/xuanke.db` | SQLite 路径（相对可执行文件目录） |
 | `XUANKE_MASTER_KEY` | 自动生成到 `data/.master_key` | 64 位十六进制（32 字节）数据加密主密钥 |
 | `XUANKE_TRUSTED_PROXY` | 关（仅 `on` 开启） | 可信反代后采信 `X-Forwarded-For` 做 IP 限流；仅在 RemoteAddr 为回环时才生效 |
@@ -123,7 +128,8 @@ cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o xuanke .
 两点约定：
 
 - **开放时间不在配置里**。唯一事实源是平台 `beginTimes` 的自动识别，没有对应环境变量，也没有可以手工填的开关。
-- **管理后台改过的配置会落库并覆盖 env 初值**。`activation_enabled`、`vision_base_url`、`vision_key`、`vision_model`、`captcha_engine`、`captcha_fallback`、`captcha_concurrency`、`listen_host`、`listen_port` 这九个键由 `runtime` 包的一张配置表统一维护，启动顺序是「env 初值 → 落库值覆盖 → 按最终值监听」。同名项在后台改过之后，光改 `.env` 不会立刻生效。
+- **管理后台改过的配置会落库并覆盖 env 初值**。`activation_enabled`、`vision_base_url`、`vision_key`、`vision_model`、`captcha_engine`、`captcha_fallback`、`captcha_concurrency`、`listen_host`、`listen_port`、`platform_id`、`platform_base_url` 这些键由 `runtime` 包的一张配置表统一维护，启动顺序是「env 初值 → 落库值覆盖 → 按最终值装配」。同名项在后台改过之后，光改 `.env` 不会立刻生效。
+- **切换选课平台会重建各账号会话**：新档案可能对应另一个站点，旧会话 token 既不适用于新站点、也绝不外发，因此切换后各账号用已保存的账密自动重登（目标课程、成功记录、退选记录都保留）。
 
 ## 四、使用流程
 
@@ -143,10 +149,12 @@ cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o xuanke .
 | 标签 | 内容 |
 | --- | --- |
 | 激活码 | 生成（可指定每码可用次数）、查看、删除；机制关闭时给出明确提示而不是伪装成加载失败 |
-| 系统配置 | 激活码开关、识别引擎与识别并发、视觉 API 地址/密钥/模型、监听地址与端口、引擎兜底开关；保存立即生效并落库 |
+| 系统配置 | 选课平台档案与站点地址、激活码开关、识别引擎与识别并发、视觉 API 地址/密钥/模型、监听地址与端口、引擎兜底开关；保存立即生效并落库 |
 | 运行状态 | 窗口状态、激活码机制、账号与课程计数、实际生效的识别引擎等诊断字段 |
 | 账号管理 | 已登录账号列表、跳转到某个账号的选课大厅、删除账号（连同其会话与调度状态） |
 | 日志总览 | 全量调度/审计日志（默认取最近 500 条，可用 `?limit=` 调整） |
+
+「系统配置 → 选课平台」列出全部内置档案（含各自的接口版本说明），选中一个保存即完成切换；下面的站点地址留空表示用档案默认地址，只换域名 / 镜像时填这里即可，不必等新版本。切换失败（档案不存在、地址非法）会整体拒绝并保持原状，不会出现"档案换了、客户端没换"的中间态。
 
 Android 内置形态有两处差异：端口锁定 `3091`（Java 壳按该端口加载页面，后台不允许改）且后台不展示账密。
 
@@ -185,7 +193,7 @@ CI 里实际执行的是 `go test -p 1 -count=1 -v ./...`，失败会自动重�
 ```bash
 cd web
 npm run build   # tsc -b + vite build（唯一的真实类型检查入口）
-npm run guard   # 六套源码形状守卫：倒计时 / 目标保存 / 管理态 / 401 / 懒加载 / 字体
+npm run guard   # 七套源码形状守卫：倒计时 / 目标保存 / 管理态 / 401 / 懒加载 / 字体 / 平台档案边界
 npm test        # vitest 纯函数测试（node 环境）
 npm run lint    # oxlint
 ```
@@ -258,8 +266,10 @@ backend/                    Go 后端（module xuanke-auto/backend）
   tray_windows.go           Windows 托盘；tray_linux*.go / tray_other.go 为其它形态
   browser_windows.go        用默认浏览器打开页面
   internal/api/             HTTP 路由与处理器（/api/*、/api/admin/*）
-  internal/scheduler/       开窗识别、探测与提交调度
-  internal/upstream/          平台客户端：登录、课程、报名退选、识别引擎
+  internal/scheduler/       开窗识别、探测与提交调度（与站点档案无关的流程）
+  internal/upstream/        平台无关引擎：会话、传输自愈、中立数据模型、识别引擎、登录链路骨架
+  internal/sites/           平台档案注册表（List / Resolve / DefaultID）
+  internal/sites/zhidao/    知道教育平台适配器：路径、表单键名、响应解码、登录算法
   internal/accounts/        多账号注册表与凭据生命周期
   internal/{config,runtime,secure,session,store,db}/
   web/                      embed 目标（//go:embed all:dist）
@@ -270,7 +280,7 @@ web/                        React 前端（Vite 构建，产物落 backend/web/d
   src/components/           含 ui/ 基础组件与 Footer
   src/lib/                  纯函数与守卫逻辑（含 vitest 测试）
   src/styles/global.css     设计令牌（颜色、排版、字体）
-  scripts/*-guard.ts        npm run guard 的六套源码形状守卫
+  scripts/*-guard.ts        npm run guard 的七套源码形状守卫（含 platform-guard：站点事实不得进前端）
   public/                   图标、粉圓子集与其 OFL 许可证
 build/android/              Android 薄壳（Gradle + Java + 资源）
 .github/workflows/          ci.yml / release.yml
@@ -296,3 +306,5 @@ docs/agents/                Agent 工作流配置（domain / issue-tracker / tri
 **抢课结束后，日志里的状态怎么读**：`已满员` 表示快照人数已满，或窗口关闭后平台拒绝报名（这种也算满员，避免每轮都白刷接口）；含「报名时间 / 未开启 / 已结束」字样的失败是平台还没开放；风控类错误会退避 30 秒再试；教务会话失效会自动重登，不需要手工干预。
 
 **换机器怎么迁移**：把整个 `data/` 目录（SQLite 库 + `.env` + `.master_key`）一起拷过去。三者缺一，轻则凭据读不出来，重则服务直接拒绝启动。
+
+**换平台 / 对方换了域名或接口怎么处理**：进「系统配置 → 选课平台」。只是域名或镜像变了，改站点地址即可；接口形态整体换了（例如对方改了一版新接口），在 `backend/internal/sites/` 下加一个适配器包并在注册表加一行，管理员就能在后台选中它——这是刻意的扩展点，档案只增不删（存量的 `platform_id` 必须一直能解析）。

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"xuanke-auto/backend/internal/runtime"
-	"xuanke-auto/backend/internal/zhidao"
+	"xuanke-auto/backend/internal/upstream"
 )
 
 // captchaProbeSpy 探测函数探针：记录是否被调用（探测成本契约断言用）。
@@ -90,7 +90,7 @@ func TestResolveCaptchaRecognizer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// 内置原生 ddddocr 是 build-tag 条件能力（仅 Windows+CGO 构建具备）。
 			// CGO=0 构建下该分支不可达，跳过而非失败——断言恒真比跳过更糟（假绿）。
-			if tc.native && !zhidao.NativeDdddOcrAvailable() {
+			if tc.native && !upstream.NativeDdddOcrAvailable() {
 				t.Skip("本机构建无内置原生 ddddocr（非 Windows+CGO），跳过原生分支")
 			}
 			spy := &captchaProbeSpy{native: tc.native, local: tc.local}
@@ -123,15 +123,15 @@ func TestResolveCaptchaRecognizer(t *testing.T) {
 				gotType := strings.TrimPrefix(reflect.TypeOf(got.recognizer).String(), "*")
 				switch tc.wantEngine {
 				case "ddddocr":
-					wantType := "zhidao.LocalDdddOcrRecognizer"
+					wantType := "upstream.LocalDdddOcrRecognizer"
 					if tc.wantNative {
-						wantType = "zhidao.NativeDdddOcrRecognizer"
+						wantType = "upstream.NativeDdddOcrRecognizer"
 					}
 					if gotType != wantType {
 						t.Fatalf("应为 %s，实际 %s", wantType, gotType)
 					}
 				case "vision":
-					if _, ok := got.recognizer.(*zhidao.VisionRecognizer); !ok {
+					if _, ok := got.recognizer.(*upstream.VisionRecognizer); !ok {
 						t.Fatalf("应为 Vision 识别器，实际 %T", got.recognizer)
 					}
 				}

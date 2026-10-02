@@ -16,7 +16,6 @@ package main
 // locate symbol）。Go 1.19+ gofmt 会把 `//export` 规范成 `// export` 破坏导出
 // （golang/go#63123），故本文件 export 行须保持原样，且 CI 有检查兜底。
 
-
 /*
 // jni_android.c 提供的 logcat 写入桥（Android 上 Go 的 stderr 不可见）。
 void XuankeLogToAndroid(const char *msg);
@@ -48,19 +47,21 @@ func (androidLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-//export XuankeSetDataDir
 // 注入 App 沙箱数据目录（Java filesDir）：config.dataDir 即 <filesDir>/data。
 // Java 壳 onCreate 最先调用（config.Load 之前）。
+//
+//export XuankeSetDataDir
 func XuankeSetDataDir(dir *C.char) {
 	dirStr := C.GoString(dir)
 	log.Printf("[android] 数据目录注入: %s", dirStr)
 	config.SetDataDirForPlatform(dirStr)
 }
 
-//export XuankeStart
 // 启动整套选课引擎（runServer：API + 调度器 + 数据库），监听 127.0.0.1:3091。
 // 返回后 Android 壳的 WebView 加载 http://127.0.0.1:PORT/ 即可使用完整前端。
 // 服务生命周期随进程常驻（前台服务保活）；Java onDestroy 调 XuankeStop 收尾。
+//
+//export XuankeStart
 func XuankeStart() {
 	// APK 内置管理员账密（随包固定；桌面/服务器不注入，仍走随机口令）：
 	// 必须在 config.Load 之前注入——Load 会据此把账密写进 data/.env 并覆盖生效值。
@@ -71,8 +72,9 @@ func XuankeStart() {
 	globalStarted.Store(runServer(cfg))
 }
 
-//export XuankeStop
 // 优雅收尾（DB/会话关闭）；Java onDestroy 时调用。
+//
+//export XuankeStop
 func XuankeStop() {
 	// Started 由 runServer 返回后经 globalStarted 持有；Android 常驻路径 main
 	// 不返回、库内 defer 不触发，DB/会话必须由本函数显式关闭。

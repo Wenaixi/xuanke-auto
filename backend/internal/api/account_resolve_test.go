@@ -16,7 +16,7 @@ import (
 // 本测试钉死三族语义 + 每点文案。
 
 // TestResolveAccountForSessionNormalUserIgnoresOverride 普通会话带 ?account= 必须忽略穿透
-//（allowAccountOverride 仅管理员会话为 true）——普通学生会话永远只操作自己绑定账号。
+// （allowAccountOverride 仅管理员会话为 true）——普通学生会话永远只操作自己绑定账号。
 func TestResolveAccountForSessionNormalUserIgnoresOverride(t *testing.T) {
 	d := newTestDeps(t)
 	tok := authenticateDirect(t, d, "acct1")
@@ -72,9 +72,10 @@ func TestResolveAccountForSessionAdminGhostRejects(t *testing.T) {
 }
 
 // TestResolveAccountForSessionAdminFallback 管理员透传语义三族（回落 / 拒绝 / 静默）：
-//   a. electives 无透传且有目标账号 → 回落核心账号（取 targets[0]）
-//   b. targets 无透传且无任何有目标账号 → 整体拒绝（fallbackKind="reject"，绝不写管理员孤儿行）
-//   c. select 无透传且无核心账号 → 静默回落，由后文 IsAdminAccountName 守卫兜底（"请指定有效学生账号"）
+//
+//	a. electives 无透传且有目标账号 → 回落核心账号（取 targets[0]）
+//	b. targets 无透传且无任何有目标账号 → 整体拒绝（fallbackKind="reject"，绝不写管理员孤儿行）
+//	c. select 无透传且无核心账号 → 静默回落，由后文 IsAdminAccountName 守卫兜底（"请指定有效学生账号"）
 func TestResolveAccountForSessionAdminFallback(t *testing.T) {
 	d := newTestDeps(t)
 	adminTok := d.sessions.CreateAdmin("admin")

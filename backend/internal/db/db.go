@@ -29,6 +29,10 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
+	if err := migrateAddCredentialPlatform(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	if err := refuseLegacy(d); err != nil {
 		d.Close()
 		return nil, err
@@ -52,6 +56,24 @@ func migrateAddPublishMeta(d *sql.DB) error {
 		if _, err := d.Exec("ALTER TABLE targets ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("迁移 targets.%s 列失败: %w", col, err)
 		}
+	}
+	return nil
+}
+
+// migrateAddCredentialPlatform 为旧库增量补齐 credentials 表的平台标记列。
+// 与 publish 元数据同款：ALTER TABLE ADD COLUMN 纯加列、旧行默认空串（= "平台未知"），
+// 旧库必须能用——空串与任何档案 ID 都不相等，故旧 token 一律按"跨平台"丢弃，
+// 只会多一次自动重登，绝不会把旧会话发到新档案声明的站点。
+func migrateAddCredentialPlatform(d *sql.DB) error {
+	ok, err := columnExists(d, "credentials", "platform_id")
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if _, err := d.Exec("ALTER TABLE credentials ADD COLUMN platform_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("迁移 credentials.platform_id 列失败: %w", err)
 	}
 	return nil
 }

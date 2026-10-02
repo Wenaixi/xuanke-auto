@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"xuanke-auto/backend/internal/sites"
 )
 
 // Config 系统运行配置（管理员热重载，任何改动立即生效无需重启）。
@@ -32,6 +34,11 @@ type Config struct {
 	ListenHost string
 	// ListenPort 监听端口（默认 3091）。改动同样触发热重绑。
 	ListenPort string
+	// PlatformID 选课平台档案标识（internal/sites 注册表键）。改动触发热切换：
+	// 清空跨平台会话 + 用已存账密重建各账号客户端（随后自动重登）。
+	PlatformID string
+	// PlatformBaseURL 站点地址覆盖（空 = 用档案默认地址；换域名/镜像免发版）。
+	PlatformBaseURL string
 }
 
 // Store 进程内配置中心：读写锁保护，Get 返回拷贝保证调用方拿到一致快照。
@@ -84,9 +91,14 @@ const encPrefix = "enc:"
 
 var configFields = []configField{
 	{
-		Key:       "activation_enabled",
-		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return strconv.FormatBool(c.ActivationEnabled), nil },
-		Apply:     func(c *Config, v string, _ func(string) (string, error)) bool { c.ActivationEnabled = v == "true"; return true },
+		Key: "activation_enabled",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) {
+			return strconv.FormatBool(c.ActivationEnabled), nil
+		},
+		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
+			c.ActivationEnabled = v == "true"
+			return true
+		},
 	},
 	{
 		Key:       "vision_base_url",
@@ -135,14 +147,21 @@ var configFields = []configField{
 		Apply:     func(c *Config, v string, _ func(string) (string, error)) bool { c.CaptchaEngine = v; return true },
 	},
 	{
-		Key:       "captcha_fallback",
-		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return strconv.FormatBool(c.CaptchaFallback), nil },
-		Apply:     func(c *Config, v string, _ func(string) (string, error)) bool { c.CaptchaFallback = v == "true"; return true },
+		Key: "captcha_fallback",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) {
+			return strconv.FormatBool(c.CaptchaFallback), nil
+		},
+		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
+			c.CaptchaFallback = v == "true"
+			return true
+		},
 	},
 	{
 		// 并发上限必须为正数：非法值（0/负数/非数字）保留既有值而非写入垃圾
-		Key:       "captcha_concurrency",
-		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return strconv.Itoa(c.CaptchaConcurrency), nil },
+		Key: "captcha_concurrency",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) {
+			return strconv.Itoa(c.CaptchaConcurrency), nil
+		},
 		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
 			n, err := strconv.Atoi(v)
 			if err != nil || n <= 0 {
@@ -163,6 +182,28 @@ var configFields = []configField{
 			c.ListenHost = v
 			return true
 		},
+	},
+	{
+		// 平台档案：只接受注册表能解析的 ID。无法解析的落库值一律保留既有值并留痕——
+		// 用户改不了 DB 行，静默采纳一个不存在的档案 ID 会让"选课平台"在启动时炸成
+		// 拒绝启动；而静默回退到别的档案又等于把请求打到另一个站点。两者都不可接受。
+		Key:       "platform_id",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return c.PlatformID, nil },
+		Apply: func(c *Config, v string, _ func(string) (string, error)) bool {
+			if _, err := sites.Resolve(v); err != nil {
+				log.Printf("[runtime] 忽略无法解析的 platform_id %q: %v", v, err)
+				return false
+			}
+			c.PlatformID = v
+			return true
+		},
+	},
+	{
+		// 站点地址覆盖：空串是有效语义（= 清除覆盖、回到档案默认地址），故原样接受；
+		// 合法性（http/https + 主机名）由保存入口与启动期解析各自把关。
+		Key:       "platform_base_url",
+		Serialize: func(c *Config, _ func(string) (string, error)) (string, error) { return c.PlatformBaseURL, nil },
+		Apply:     func(c *Config, v string, _ func(string) (string, error)) bool { c.PlatformBaseURL = v; return true },
 	},
 	{
 		// 监听端口：1-65535 之外的落库值一律不应用（保留既有值）

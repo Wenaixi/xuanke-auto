@@ -38,7 +38,7 @@ func TestAdminConfigListenHotReloadEndToEnd(t *testing.T) {
 	dbPath := t.TempDir() + "/t.db"
 	cfg := config.Config{
 		Port: port1, DBPath: dbPath,
-		BaseURL: "https://example.invalid", SFBaseURL: "https://example.invalid", SFModel: "m",
+		PlatformBaseURL: "https://example.invalid", SFBaseURL: "https://example.invalid", SFModel: "m",
 		AdminToken: "admintok", ListenHost: "127.0.0.1",
 	}
 	srv := runServer(cfg)

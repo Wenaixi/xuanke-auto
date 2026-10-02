@@ -48,7 +48,7 @@
 | 本机同权限攻击者读数据库 | 凭据以密文落库，但主密钥就在同目录（`data/.master_key`）或环境变量里；**只能防「数据库被单独拷走」，防不了能读该 OS 用户文件的攻击者** | `backend/internal/secure/crypto.go`、`backend/internal/store/store.go`、`backend/internal/runtime/config.go` |
 | 伪造 `X-Forwarded-For` 刷爆他人限流桶 | 默认关闭；仅当 `XUANKE_TRUSTED_PROXY=on` **且** 请求确实来自回环地址时才取 XFF 最右一个非空值 | `backend/internal/api/handler.go`（`clientIP`） |
 | 抓取本机明文流量拿到会话令牌 | 无内置 TLS：`net.Listen` + `srv.Serve`，全仓没有 TLS 配置；会话 token 由平台机制以 URL 参数承载。面向公网使用依赖使用者自行前置 HTTPS 反代 | `backend/server.go` |
-| 日志泄露 token / 请求 URL | token 只打印前 8 位（长度不足 8 位的一律输出 `***`）；密码从不进日志；网络层错误上抛前剥掉 `*url.Error` 里的完整 URL（那里带着 `?idToken=`） | `backend/internal/scheduler/scheduler.go`（`maskedToken`）、`backend/internal/accounts/manager.go`（`tokenShort`）、`backend/internal/zhidao/client.go`（`sanitizeError`） |
+| 日志泄露 token / 请求 URL | token 只打印前 8 位（长度不足 8 位的一律输出 `***`）；密码从不进日志；网络层错误上抛前剥掉 `*url.Error` 里的完整 URL（那里带着 `?idToken=`） | `backend/internal/scheduler/scheduler.go`（`maskedToken`）、`backend/internal/accounts/manager.go`（`tokenShort`）、`backend/internal/upstream/client.go`（`sanitizeError`） |
 | 管理口令被在线爆破或侧信道枚举 | 管理员入口必须是「管理员名 + 管理口令」双条件，口令比对用 `subtle.ConstantTimeCompare`；口令错误分支固定延迟后再响应，抹平「账号是管理员名」的时延特征 | `backend/internal/api/handler.go`（`handleLogin`） |
 | 激活票据被重放/穷举 | 登录成功但未激活的账号拿到一次性票据，TTL 5 分钟，**先消费再校验激活码**——输错一次即销毁票据，同一票据无法在窗口内穷举不同码 | `backend/internal/session/store.go`（`CreateTicket`、`ConsumeTicket`） |
 | 登录/激活接口被刷 | 按 IP 分桶限流（5 次/分、突发 5），登录与激活各自独立桶，超限返回真实 HTTP 429 | `backend/internal/api/handler.go`（`loginLimiter`）、`backend/internal/api/router.go` |

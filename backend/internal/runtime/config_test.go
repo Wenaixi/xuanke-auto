@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"xuanke-auto/backend/internal/sites"
 )
 
 func TestStoreGetUpdate(t *testing.T) {
@@ -65,6 +67,9 @@ func TestConfigRoundTripThroughSettings(t *testing.T) {
 		CaptchaEngine:      "vision",
 		CaptchaFallback:    true,
 		CaptchaConcurrency: 4,
+		// 平台档案与站点地址覆盖同样必须往返：前者决定打哪个站点、后者决定打哪个域名。
+		PlatformID:      sites.DefaultID,
+		PlatformBaseURL: "https://mirror.example.com",
 	}
 	// 落库侧 vision_key 必经注入的加密器、且带 enc: 前缀；还原侧注入 decrypt 还原。
 	// runtime 不依赖也不验证具体加密算法——它只保证"值经加密器处理后才落库"，
@@ -137,10 +142,42 @@ func TestApplySettingsRejectsUnencryptedVisionKey(t *testing.T) {
 	ApplySettings(&got, map[string]string{"vision_key": "plaintext-leak"},
 		func(s string) (string, error) { decryptCalled = true; return s, nil })
 	if decryptCalled {
-	t.Error("明文 vision_key 不得进入 decrypt")
+		t.Error("明文 vision_key 不得进入 decrypt")
 	}
 	if got.VisionAPIKey != "keep" {
 		t.Fatalf("明文 vision_key 应被拒绝并保留原值，实际 %q", got.VisionAPIKey)
+	}
+}
+
+// TestApplySettingsRejectsUnknownPlatformID 无法解析的平台 ID 一律不采纳（保留既有值）：
+// 用户改不了 DB 行，静默采纳一个不存在的档案会让启动直接拒绝启动（brick），而这个
+// 字段的语义又是"打哪个站点"，任何静默回退都是在替用户选另一个站点——两者都不可接受。
+func TestApplySettingsRejectsUnknownPlatformID(t *testing.T) {
+	for _, bad := range []string{"", "no-such-platform", "  "} {
+		got := Config{PlatformID: sites.DefaultID}
+		ApplySettings(&got, map[string]string{"platform_id": bad},
+			func(s string) (string, error) { return s, nil })
+		if got.PlatformID != sites.DefaultID {
+			t.Errorf("无法解析的 platform_id %q 应保留既有值，实际 %q", bad, got.PlatformID)
+		}
+	}
+	got := Config{PlatformID: sites.DefaultID}
+	ApplySettings(&got, map[string]string{"platform_id": sites.DefaultID},
+		func(s string) (string, error) { return s, nil })
+	if got.PlatformID != sites.DefaultID {
+		t.Fatalf("合法 platform_id 应生效，实际 %q", got.PlatformID)
+	}
+}
+
+// TestApplySettingsAllowsClearingBaseURLOverride 站点地址覆盖的"空串"是有效语义
+// （= 清除覆盖、回到档案默认地址），必须能落库也能读回——误判成"非法值保留旧值"
+// 会让管理员永远无法撤掉一次临时的镜像地址。
+func TestApplySettingsAllowsClearingBaseURLOverride(t *testing.T) {
+	got := Config{PlatformBaseURL: "https://mirror.example.com"}
+	ApplySettings(&got, map[string]string{"platform_base_url": ""},
+		func(s string) (string, error) { return s, nil })
+	if got.PlatformBaseURL != "" {
+		t.Fatalf("空串应清除覆盖，实际 %q", got.PlatformBaseURL)
 	}
 }
 
@@ -149,7 +186,7 @@ func TestApplySettingsRejectsUnencryptedVisionKey(t *testing.T) {
 func TestApplySettingsIgnoresInvalidConcurrency(t *testing.T) {
 	for _, bad := range []string{"0", "-3", "abc", ""} {
 		got := Config{CaptchaConcurrency: 5}
-	ApplySettings(&got, map[string]string{"captcha_concurrency": bad},
+		ApplySettings(&got, map[string]string{"captcha_concurrency": bad},
 			func(s string) (string, error) { return s, nil })
 		if got.CaptchaConcurrency != 5 {
 			t.Errorf("非法并发值 %q 应保留既有值，实际 %d", bad, got.CaptchaConcurrency)

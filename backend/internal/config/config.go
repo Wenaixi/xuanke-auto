@@ -19,6 +19,12 @@ func randomAdminToken() string {
 	return hex.EncodeToString(b)
 }
 
+// DefaultPlatformID 默认选课平台档案 ID（必须与 internal/sites 注册表的 DefaultID 一致）。
+// 这里刻意写字面量而不是 import 注册表：注册表经站点适配器依赖 upstream，而 upstream 的
+// native_ocr（CGO 构建）反依赖本包的 WritableDir——引入该 import 会在 CGO=1 构建里成环。
+// 一致性由 internal/sites 的 TestDefaultIDMatchesConfig 锁定，改一处漏一处必红。
+const DefaultPlatformID = "zhidao-2026"
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -30,9 +36,13 @@ func envOr(key, def string) string {
 // 安全策略：SF_API_KEY / XUANKE_ADMIN_TOKEN / XUANKE_MASTER_KEY 等敏感项来自
 // 真实环境变量或 data/.env 文件，代码内不含任何硬编码密钥。
 type Config struct {
-	Port    string // HTTP 监听端口
-	DBPath  string // SQLite 数据库路径
-	BaseURL string // 至道平台根地址
+	Port   string // HTTP 监听端口
+	DBPath string // SQLite 数据库路径
+	// PlatformID 选课平台档案标识（internal/sites 注册表的键，如 zhidao-2026）。
+	// 站点差异（地址/路径/键名/解码）全在档案里，本项只负责"选哪一份档案"。
+	PlatformID string
+	// PlatformBaseURL 站点地址覆盖（空 = 用档案默认地址；换域名/镜像免发版）。
+	PlatformBaseURL string
 	// OpenAI 兼容视觉 API 验证码识别配置（登录必需；默认指向一个 OpenAI 兼容服务地址，可改任意兼容服务）
 	SFBaseURL string
 	SFAPIKey  string
@@ -66,14 +76,15 @@ func Load() Config {
 	// 避免"识别槽为空时把过期日期当开窗点"的误导。
 	dbPath := envOr("XUANKE_DB", filepath.Join(dataDir(), "xuanke.db"))
 	cfg := Config{
-		Port:                   envOr("XUANKE_PORT", "3091"),
-		DBPath:                 dbPath,
-		BaseURL:                "https://www.zhidao.fj.cn",
-		SFBaseURL:              envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
-		SFAPIKey:               os.Getenv("SF_API_KEY"),
-		SFModel:                envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
-		AdminToken:             os.Getenv("XUANKE_ADMIN_TOKEN"),
-		AdminName:              os.Getenv("XUANKE_ADMIN_NAME"),
+		Port:            envOr("XUANKE_PORT", "3091"),
+		DBPath:          dbPath,
+		PlatformID:      envOr("XUANKE_PLATFORM", DefaultPlatformID),
+		PlatformBaseURL: os.Getenv("XUANKE_PLATFORM_BASE_URL"),
+		SFBaseURL:       envOr("SF_BASE_URL", "https://api.siliconflow.cn/v1"),
+		SFAPIKey:        os.Getenv("SF_API_KEY"),
+		SFModel:         envOr("SF_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct"),
+		AdminToken:      os.Getenv("XUANKE_ADMIN_TOKEN"),
+		AdminName:       os.Getenv("XUANKE_ADMIN_NAME"),
 		// 默认只绑回环：要开局域网就显式填本机内网 IP，要公网/穿透就填域名
 		// 或 0.0.0.0（所有网卡）。
 		ListenHost:             envOr("XUANKE_LISTEN_HOST", "127.0.0.1"),
@@ -220,7 +231,7 @@ func ensureEnvFile(path string, prof *platformProfile) {
 		nameLine = "XUANKE_ADMIN_NAME=" + prof.AdminName
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	tpl := `# 至道选课自动化 - 环境配置文件（首次运行自动生成）
+	tpl := `# 自动选课 - 环境配置文件（首次运行自动生成）
 # 管理员登录账号（可选，默认 admin；改成任意名字即为管理员登录账号）
 ` + nameLine + `
 # 管理员口令（首次运行自动生成；删除本行后重启可重新生成随机口令）
@@ -234,6 +245,12 @@ XUANKE_CAPTCHA_ENGINE=ddddocr
 
 # 激活码机制开关：on=启用激活码（分发用）；默认关闭（off），本地双击 exe 账号登录直接进入系统
 XUANKE_ACTIVATION=off
+
+# 选课平台档案（可选；内置档案见管理后台「系统配置 → 选课平台」）
+# 新增年份/站点 = 新增一个档案，改这里或直接在后台切换即可，无需改代码
+# XUANKE_PLATFORM=zhidao-2026
+# 站点地址覆盖（可选；留空 = 用档案默认地址，换域名/镜像时填）
+# XUANKE_PLATFORM_BASE_URL=
 
 # 服务端口与数据库路径（可选）
 # XUANKE_PORT=3091

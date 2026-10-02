@@ -56,7 +56,7 @@ func runTray(td trayData) {
 // onReady 托盘图标就绪后的菜单装配回调。
 func onReady() {
 	systray.SetIcon(trayIcon())
-	systray.SetTooltip("至道选课自动化")
+	systray.SetTooltip("自动选课")
 
 	mOpen := systray.AddMenuItem("打开浏览器", "用默认浏览器打开选课大厅")
 	mAbout := systray.AddMenuItem("关于", "查看版本与数据库路径")
@@ -92,8 +92,8 @@ func showAbout(td trayData) {
 	if abs, err := filepath.Abs(td.dbPath); err == nil {
 		dbAbs = abs
 	}
-	body := "至道选课自动化\n\n数据库路径：\n" + dbAbs + "\n\n监听地址：http://localhost:" + td.port + "\n\n选课大厅：\n" + td.url
-	showMessageBox("关于 至道选课自动化", body)
+	body := "自动选课\n\n数据库路径：\n" + dbAbs + "\n\n监听地址：http://localhost:" + td.port + "\n\n选课大厅：\n" + td.url
+	showMessageBox("关于 自动选课", body)
 }
 
 // showMessageBox 调用 Win32 MessageBoxW（MB_OK | MB_ICONINFORMATION）。

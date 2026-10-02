@@ -46,7 +46,7 @@ func runTray(td trayData) {
 // onReady 托盘图标就绪后的菜单装配回调。
 func onReady() {
 	systray.SetIcon(trayPNG())
-	systray.SetTooltip("至道选课自动化")
+	systray.SetTooltip("自动选课")
 
 	mOpen := systray.AddMenuItem("打开浏览器", "用默认浏览器打开选课大厅")
 	mAbout := systray.AddMenuItem("关于", "查看版本与数据库路径")
@@ -95,7 +95,7 @@ func showAboutLinux(td trayData) {
 		dbAbs = abs
 	}
 	body := "数据库路径：" + dbAbs + "\n监听地址：http://localhost:" + td.port + "\n选课大厅：" + td.url
-	showZenityOrPrint("关于 至道选课自动化", "至道选课自动化\n\n"+body)
+	showZenityOrPrint("关于 自动选课", "自动选课\n\n"+body)
 }
 
 // showZenityOrPrint 用 zenity 弹关于对话框（多数 Linux 桌面发行版自带）；

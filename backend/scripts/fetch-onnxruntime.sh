@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建期下载 onnxruntime 共享库到 backend/internal/zhidao/assets/（不入 git）。
+# 构建期下载 onnxruntime 共享库到 backend/internal/upstream/assets/（不入 git）。
 # 用法: fetch-onnxruntime.sh <goos> <goarch>
 # 幂等: 目标已存在且大小合理则跳过；失败 exit 1。
 # 版本锁定: 微软官方 onnxruntime v1.25.0（与 go.sum 的 onnxruntime_go v1.25.0 对齐）。
@@ -7,7 +7,7 @@ set -euo pipefail
 
 GOOS="${1:?usage: fetch-onnxruntime.sh <goos> <goarch>}"
 GOARCH="${2:?usage: fetch-onnxruntime.sh <goos> <goarch>}"
-ASSETS_DIR="$(cd "$(dirname "$0")/../internal/zhidao/assets" && pwd)"
+ASSETS_DIR="$(cd "$(dirname "$0")/../internal/upstream/assets" && pwd)"
 
 # 微软官方 onnxruntime v1.25.0 各平台包名与目标文件名。
 # Android 特例：微软不在 GitHub Releases 发 aar（桌面库才进 releases），

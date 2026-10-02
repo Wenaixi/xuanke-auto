@@ -64,7 +64,7 @@ jobs:
       - name: Run Backend Unit Tests
         run: |
           cd backend
-          # Windows 宿主下 api/zhidao 登录链路测试偶发 httptest 连接 flake（127.0.0.1
+          # Windows 宿主下 api 登录链路测试偶发 httptest 连接 flake（127.0.0.1
           # 回环 TIME_WAIT 队列争抢，多轮持续出现）。失败自动重跑一次
           # 吸收瞬时 flake——两条命令都强制 -count=1（缓存键一致，重跑侧真实执行，
           # 不被 (cached) 羽化；首条必须带 count=1，否则重跑会被缓存伪绿）。
@@ -116,17 +116,17 @@ jobs:
       - name: Cache onnxruntime dll (windows-amd64)
         uses: actions/cache@v4
         with:
-          path: backend/internal/zhidao/assets/onnxruntime_win_amd64.dll
+          path: backend/internal/upstream/assets/onnxruntime_win_amd64.dll
           key: onnx-win-amd64-v1.25.0-${{ runner.os }}
 
       - name: Download onnxruntime dll (windows-amd64)
         shell: pwsh
         run: |
           cd backend
-          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_amd64.dll)) {
+          if (-not (Test-Path internal/upstream/assets/onnxruntime_win_amd64.dll)) {
             curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-x64-1.25.0.zip
             tar -xf ort.zip
-            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_amd64.dll
+            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/upstream/assets/onnxruntime_win_amd64.dll
             Remove-Item ort.zip, onnxruntime-win-x64-1.25.0 -Recurse -Force
           }
 
@@ -182,17 +182,17 @@ jobs:
       - name: Cache onnxruntime dll (windows-arm64)
         uses: actions/cache@v4
         with:
-          path: backend/internal/zhidao/assets/onnxruntime_win_arm64.dll
+          path: backend/internal/upstream/assets/onnxruntime_win_arm64.dll
           key: onnx-win-arm64-v1.25.0-${{ runner.os }}
 
       - name: Download onnxruntime dll (windows-arm64)
         shell: pwsh
         run: |
           cd backend
-          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_arm64.dll)) {
+          if (-not (Test-Path internal/upstream/assets/onnxruntime_win_arm64.dll)) {
             curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-arm64-1.25.0.zip
             tar -xf ort.zip
-            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_arm64.dll
+            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/upstream/assets/onnxruntime_win_arm64.dll
             Remove-Item ort.zip, onnxruntime-win-arm64-1.25.0 -Recurse -Force
           }
 

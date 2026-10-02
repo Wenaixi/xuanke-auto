@@ -1,4 +1,4 @@
-# 至道选课自动化 · 前端（web/）
+# 自动选课 · 前端（web/）
 
 React 19 + Vite + TypeScript + Radix Primitives + Tailwind CSS 构建的选课大厅前端，纯黑白极简风格。
 

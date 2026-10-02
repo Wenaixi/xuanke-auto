@@ -16,6 +16,12 @@ backend/xuanke-e2e.exe~
 dist-release/
 backend/dist-release/
 
+# 本地手工构建产出的安装包（根目录单个 apk/exe 等，一律不入库）
+*.apk
+
+# Windows 下 $null 偶被误当字面文件名创建（0 字节），防御性忽略
+\$null
+
 # Go 构建缓存与测试产物
 *.test
 *.out
@@ -111,6 +117,10 @@ artifacts/
 # 隔离工作区（using-git-worktrees 技能创建的本地特性分支检出，
 # 整树本地专有不入库；未忽略会把整个工作树提交进仓库）
 .worktrees/
+
+# ============= 本地工作产物（不入库） =============
+# superpowers 技能工作目录（plan/progress 等本地过程产物，整树忽略）
+.superpowers/
 
 # ============= 项目核心记忆库（本地专有，不入库） =============
 # CLAUDE.md 是项目核心记忆库（全局指令要求持续维护），主人决定它本地专有、

@@ -43,17 +43,17 @@ jobs:
       - name: Cache onnxruntime dll (windows-amd64)
         uses: actions/cache@v4
         with:
-          path: backend/internal/zhidao/assets/onnxruntime_win_amd64.dll
+          path: backend/internal/upstream/assets/onnxruntime_win_amd64.dll
           key: onnx-win-amd64-v1.25.0-${{ runner.os }}
 
       - name: Download onnxruntime dll (windows-amd64)
         shell: pwsh
         run: |
           cd backend
-          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_amd64.dll)) {
+          if (-not (Test-Path internal/upstream/assets/onnxruntime_win_amd64.dll)) {
             curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-x64-1.25.0.zip
             tar -xf ort.zip
-            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_amd64.dll
+            Copy-Item onnxruntime-win-x64-1.25.0/lib/onnxruntime.dll internal/upstream/assets/onnxruntime_win_amd64.dll
             Remove-Item ort.zip, onnxruntime-win-x64-1.25.0 -Recurse -Force
           }
 
@@ -78,7 +78,7 @@ jobs:
           $TAG = "$env:GITHUB_REF_NAME"
           # 配置说明模板：多行 here-string 里的 XUANKE_*= 行会被 YAML 解析器误当 mapping，
           # 必须用单行字符串写入（每行末尾分号）。
-          $tpl = ("# 至道选课自动化 - 环境配置文件模板`n" +
+          $tpl = ("# 自动选课 - 环境配置文件模板`n" +
                   "# 1. 必填项：管理员访问口令`n" +
                   "XUANKE_ADMIN_TOKEN=your_secure_admin_token_here`n" +
                   "# 2. 可选：OpenAI 兼容视觉 API Key（教务登录验证码识别）`n" +
@@ -87,7 +87,10 @@ jobs:
                   "XUANKE_ACTIVATION=on`n" +
                   "# 4. 可选：验证码识别引擎（ddddocr=内置离线；vision=云识别需填密钥）`n" +
                   "XUANKE_CAPTCHA_ENGINE=ddddocr`n" +
-                  "# 5. 可选：服务端口与数据库路径`n" +
+                  "# 5. 可选：选课平台档案与站点地址覆盖（内置档案见管理后台「系统配置 → 选课平台」）`n" +
+                  "# XUANKE_PLATFORM=zhidao-2026`n" +
+                  "# XUANKE_PLATFORM_BASE_URL=`n" +
+                  "# 6. 可选：服务端口与数据库路径`n" +
                   "# XUANKE_PORT=3091`n" +
                   "# XUANKE_DB=data/xuanke.db`n")
           Set-Content -Encoding utf8 .env.example -Value $tpl
@@ -159,17 +162,17 @@ jobs:
       - name: Cache onnxruntime dll (windows-arm64)
         uses: actions/cache@v4
         with:
-          path: backend/internal/zhidao/assets/onnxruntime_win_arm64.dll
+          path: backend/internal/upstream/assets/onnxruntime_win_arm64.dll
           key: onnx-win-arm64-v1.25.0-${{ runner.os }}
 
       - name: Download onnxruntime dll (windows-arm64)
         shell: pwsh
         run: |
           cd backend
-          if (-not (Test-Path internal/zhidao/assets/onnxruntime_win_arm64.dll)) {
+          if (-not (Test-Path internal/upstream/assets/onnxruntime_win_arm64.dll)) {
             curl.exe -fsSL -o ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.25.0/onnxruntime-win-arm64-1.25.0.zip
             tar -xf ort.zip
-            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/zhidao/assets/onnxruntime_win_arm64.dll
+            Copy-Item onnxruntime-win-arm64-1.25.0/lib/onnxruntime.dll internal/upstream/assets/onnxruntime_win_arm64.dll
             Remove-Item ort.zip, onnxruntime-win-arm64-1.25.0 -Recurse -Force
           }
 
@@ -194,7 +197,7 @@ jobs:
           $TAG = "$env:GITHUB_REF_NAME"
           # 配置说明模板：多行 here-string 里的 XUANKE_*= 行会被 YAML 解析器误当 mapping，
           # 必须用单行字符串写入（每行末尾分号）；与 amd64 同款内容。
-          $tpl = ("# 至道选课自动化 - 环境配置文件模板`n" +
+          $tpl = ("# 自动选课 - 环境配置文件模板`n" +
                   "# 1. 必填项：管理员访问口令`n" +
                   "XUANKE_ADMIN_TOKEN=your_secure_admin_token_here`n" +
                   "# 2. 可选：OpenAI 兼容视觉 API Key（教务登录验证码识别）`n" +
@@ -203,7 +206,10 @@ jobs:
                   "XUANKE_ACTIVATION=on`n" +
                   "# 4. 可选：验证码识别引擎（ddddocr=内置离线；vision=云识别需填密钥）`n" +
                   "XUANKE_CAPTCHA_ENGINE=ddddocr`n" +
-                  "# 5. 可选：服务端口与数据库路径`n" +
+                  "# 5. 可选：选课平台档案与站点地址覆盖（内置档案见管理后台「系统配置 → 选课平台」）`n" +
+                  "# XUANKE_PLATFORM=zhidao-2026`n" +
+                  "# XUANKE_PLATFORM_BASE_URL=`n" +
+                  "# 6. 可选：服务端口与数据库路径`n" +
                   "# XUANKE_PORT=3091`n" +
                   "# XUANKE_DB=data/xuanke.db`n")
           Set-Content -Encoding utf8 .env.example -Value $tpl
@@ -306,7 +312,7 @@ jobs:
           TAG_NAME="${{ github.ref_name }}"
 
           cat << 'EOF' > .env.example
-          # 抢课系统数据配置文件模板（生产部署时请放入 data/.env）
+          # 自动选课数据配置文件模板（生产部署时请放入 data/.env）
           # 1. 必填项：管理员访问口令（用于进入管理后台、生成与分发激活码）
           XUANKE_ADMIN_TOKEN=your_secure_admin_token_here
 
@@ -320,7 +326,11 @@ jobs:
           #    识别引擎兜底开关默认关闭（两引擎严格互不回退）；需双向兜底请在管理员后台开启
           XUANKE_CAPTCHA_ENGINE=vision
 
-          # 5. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
+          # 5. 可选项：选课平台档案与站点地址覆盖（内置档案见管理后台「系统配置 → 选课平台」）
+          # XUANKE_PLATFORM=zhidao-2026
+          # XUANKE_PLATFORM_BASE_URL=
+
+          # 6. 可选项：服务端口与数据库路径（默认端口 3091，数据库 data/xuanke.db）
           # XUANKE_PORT=3091
           # XUANKE_DB=data/xuanke.db
           EOF
